@@ -6,11 +6,14 @@ const nextConfig = {
       allowedOrigins: ["localhost:3000"],
     },
   },
+  // Proxy /api/v1/* to the backend container so the browser never needs to
+  // know the server address — works in any environment.
   async rewrites() {
+    const backendUrl = process.env.BACKEND_INTERNAL_URL || "http://backend:8000";
     return [
       {
-        source: "/api/backend/:path*",
-        destination: `${process.env.NEXT_PUBLIC_API_URL || "http://backend:8000/api/v1"}/:path*`,
+        source: "/api/v1/:path*",
+        destination: `${backendUrl}/api/v1/:path*`,
       },
     ];
   },

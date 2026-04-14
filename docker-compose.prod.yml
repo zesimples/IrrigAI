@@ -21,7 +21,7 @@ services:
   frontend:
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: https://YOUR_DOMAIN/api/v1
+      BACKEND_INTERNAL_URL: http://backend:8000
     ports: []
 
   nginx:

@@ -24,7 +24,10 @@ import type {
   SoilPreset,
 } from "@/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+// In production (Docker) this is a relative path — Next.js rewrites proxy it
+// to the backend container. In local dev outside Docker, set NEXT_PUBLIC_API_URL
+// in .env to http://localhost:8000/api/v1 to bypass the proxy.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/v1";
 
 class ApiError extends Error {
   constructor(
