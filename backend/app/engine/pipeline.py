@@ -524,7 +524,8 @@ class RecommendationPipeline:
             sectors = sectors_result.scalars().all()
             for sector in sectors:
                 try:
-                    rec = await self.run(sector.id, target_date, db, farm_id=farm_id)
+                    async with db.begin_nested():
+                        rec = await self.run(sector.id, target_date, db, farm_id=farm_id)
                     results.append(rec)
                 except Exception as exc:
                     logger.exception("Engine failed for sector %s: %s", sector.id, exc)
