@@ -21,6 +21,7 @@ from app.engine import (
     trigger,
     water_balance,
 )
+from app.engine.rainfall_effectiveness import compute_effective_rainfall
 from app.engine.types import (
     ConfidenceResult,
     DailyWeather,
@@ -130,7 +131,7 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
         else:
             root_depth_m = scp.root_depth_mature_m
 
-        # RDI eligibility from current stage
+        # RDI eligibility + stage-specific root depth
         rdi_eligible = False
         rdi_factor = None
         if sector.current_phenological_stage:
@@ -141,6 +142,11 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
             if stage_dict:
                 rdi_eligible = stage_dict.get("rdi_eligible", False)
                 rdi_factor = stage_dict.get("rdi_factor")
+                # Override root depth with stage-specific value if present
+                stage_root = stage_dict.get("root_depth_m")
+                if stage_root is not None:
+                    root_depth_m = float(stage_root)
+                    defaults_used = [d for d in defaults_used if "root_depth" not in d]
 
     # --- IrrigationSystem ---
     irrig_result = await db.execute(
@@ -153,6 +159,7 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
         irrig_system_type = None
         app_rate = None
         efficiency = _FALLBACK_EFFICIENCY
+        distribution_uniformity = 0.90
         emitter_flow = None
         emitter_spacing = None
         row_spacing = None
@@ -163,6 +170,7 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
         irrig_system_type = irrig.system_type
         app_rate = irrig.application_rate_mm_h
         efficiency = irrig.efficiency or _FALLBACK_EFFICIENCY
+        distribution_uniformity = getattr(irrig, "distribution_uniformity", None) or 0.90
         emitter_flow = irrig.emitter_flow_lph
         emitter_spacing = irrig.emitter_spacing_m
         row_spacing = sector.row_spacing_m
@@ -194,6 +202,7 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
         irrigation_system_type=irrig_system_type,
         application_rate_mm_h=app_rate,
         irrigation_efficiency=efficiency,
+        distribution_uniformity=distribution_uniformity,
         emitter_flow_lph=emitter_flow,
         emitter_spacing_m=emitter_spacing,
         row_spacing_m=row_spacing,
@@ -401,7 +410,12 @@ class RecommendationPipeline:
 
         # Step 7: Water balance
         wb = water_balance.build_water_balance(ctx, probes.rootzone.swc_current)
-        rain_effective = (weather.today.rainfall_mm or 0.0) * ctx.rainfall_effectiveness
+        rain_effective, rain_eff_note = compute_effective_rainfall(
+            rainfall_mm=weather.today.rainfall_mm or 0.0,
+            soil_texture=ctx.soil_texture,
+            user_correction=ctx.rainfall_effectiveness,
+        )
+        log.append(rain_eff_note)
         log.append(
             f"WB: SWC={wb.swc_current}, Dr={wb.depletion_mm}mm, "
             f"TAW={wb.taw_mm}mm, RAW={wb.raw_mm}mm"
@@ -537,11 +551,12 @@ def _build_reasons(
         return i
 
     depletion_pct = round(wb.depletion_mm / wb.taw_mm * 100) if wb.taw_mm > 0 else 0
+    remaining_pct = 100 - depletion_pct
     reasons.append(ReasonEntry(
         order=next_order(),
         category="water_balance",
-        message_pt=f"Solo {depletion_pct}% depletado — {wb.depletion_mm:.1f} mm de {wb.taw_mm:.0f} mm totais",
-        message_en=f"Soil {depletion_pct}% depleted — {wb.depletion_mm:.1f} mm of {wb.taw_mm:.0f} mm total",
+        message_pt=f"O solo tem {remaining_pct}% da água disponível — faltam {wb.depletion_mm:.1f} mm para reabastecer (capacidade total {wb.taw_mm:.0f} mm)",
+        message_en=f"Soil has {remaining_pct}% of available water — {wb.depletion_mm:.1f} mm deficit to refill (total capacity {wb.taw_mm:.0f} mm)",
         data_key="depletion_mm",
         data_value=str(wb.depletion_mm),
     ))
@@ -550,8 +565,8 @@ def _build_reasons(
         reasons.append(ReasonEntry(
             order=next_order(),
             category="evapotranspiration",
-            message_pt=f"Evapotranspiração {etc_val:.1f} mm/dia (ET₀ {et0_val:.1f} mm · Kc {ctx.kc:.2f})",
-            message_en=f"Crop water demand {etc_val:.1f} mm/day (ET₀ {et0_val:.1f} mm · Kc {ctx.kc:.2f})",
+            message_pt=f"A cultura está a consumir cerca de {etc_val:.1f} mm de água por dia (condições atmosféricas hoje: {et0_val:.1f} mm)",
+            message_en=f"Crop is using about {etc_val:.1f} mm of water per day (atmospheric demand today: {et0_val:.1f} mm)",
             data_key="etc_mm",
             data_value=str(etc_val),
         ))
@@ -560,8 +575,8 @@ def _build_reasons(
         reasons.append(ReasonEntry(
             order=next_order(),
             category="forecast",
-            message_pt=f"Chuva prevista — {fc_impact['rain_next_48h_mm']:.0f} mm nas próximas 48 h",
-            message_en=f"Rain forecast — {fc_impact['rain_next_48h_mm']:.0f} mm in next 48 h",
+            message_pt=f"Previsão de {fc_impact['rain_next_48h_mm']:.0f} mm de chuva nas próximas 48 horas",
+            message_en=f"{fc_impact['rain_next_48h_mm']:.0f} mm of rain forecast in the next 48 hours",
             data_key="forecast_rain_48h_mm",
             data_value=str(fc_impact["rain_next_48h_mm"]),
         ))
@@ -574,35 +589,44 @@ def _build_reasons(
     ))
 
     if dose and dose.capped:
+        cap_pt = dose.cap_reason or ""
+        cap_pt = cap_pt.replace("Below minimum", "abaixo do mínimo configurado").replace(
+            "Capped at maximum", "limitada ao máximo configurado").replace(
+            "Capped at max runtime", "limitada ao tempo máximo de rega")
         reasons.append(ReasonEntry(
             order=next_order(),
             category="dosage",
-            message_pt=f"Dose limitada — {dose.cap_reason}",
-            message_en=f"Dose capped — {dose.cap_reason}",
+            message_pt=f"Dose ajustada — {cap_pt}",
+            message_en=f"Dose adjusted — {dose.cap_reason}",
         ))
 
     if ctx.defaults_used:
         reasons.append(ReasonEntry(
             order=next_order(),
             category="config",
-            message_pt=f"Parâmetros estimados: {'; '.join(ctx.defaults_used)}",
-            message_en=f"Estimated parameters: {'; '.join(ctx.defaults_used)}",
+            message_pt=f"Alguns valores foram estimados por defeito (configure-os para maior precisão): {'; '.join(ctx.defaults_used)}",
+            message_en=f"Some values were estimated as defaults (configure them for better accuracy): {'; '.join(ctx.defaults_used)}",
         ))
 
     if ctx.missing_config:
         reasons.append(ReasonEntry(
             order=next_order(),
             category="config",
-            message_pt=f"Configuração incompleta: {'; '.join(ctx.missing_config)}",
-            message_en=f"Incomplete configuration: {'; '.join(ctx.missing_config)}",
+            message_pt=f"Configuração incompleta — a recomendação pode ser menos precisa: {'; '.join(ctx.missing_config)}",
+            message_en=f"Incomplete configuration — recommendation may be less accurate: {'; '.join(ctx.missing_config)}",
         ))
 
     conf_label = {"high": "alta", "medium": "média", "low": "baixa"}.get(conf.level, conf.level)
+    conf_hint = {
+        "high": "todos os dados estão configurados e actualizados",
+        "medium": "alguns parâmetros foram estimados",
+        "low": "faltam dados importantes — configure o sector para melhorar",
+    }.get(conf.level, "")
     reasons.append(ReasonEntry(
         order=next_order(),
         category="confidence",
-        message_pt=f"Confiança {conf_label} ({conf.score:.0%})",
-        message_en=f"Confidence {conf.level} ({conf.score:.0%})",
+        message_pt=f"Fiabilidade da análise: {conf_label} ({conf.score:.0%}) — {conf_hint}",
+        message_en=f"Analysis reliability: {conf.level} ({conf.score:.0%})",
         data_key="confidence_score",
         data_value=str(conf.score),
     ))

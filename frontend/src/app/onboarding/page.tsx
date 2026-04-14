@@ -54,6 +54,7 @@ export default function OnboardingPage() {
   const [emitterFlow, setEmitterFlow] = useState("");
   const [appRateMmH, setAppRateMmH] = useState("");
   const [efficiency, setEfficiency] = useState("0.90");
+  const [distributionUniformity, setDistributionUniformity] = useState("0.90");
 
   // Created entities (used across steps)
   const [createdFarm, setCreatedFarm] = useState<Farm | null>(null);
@@ -148,6 +149,7 @@ export default function OnboardingPage() {
             emitter_flow_lph: emitterFlow ? parseFloat(emitterFlow) : undefined,
             application_rate_mm_h: appRateMmH ? parseFloat(appRateMmH) : undefined,
             efficiency: parseFloat(efficiency) || 0.9,
+            distribution_uniformity: parseFloat(distributionUniformity) || 0.9,
           });
         }
       }
@@ -373,7 +375,18 @@ export default function OnboardingPage() {
                 step="0.01"
                 min="0"
                 max="1"
-                hint="Eficiência de distribuição. Tipicamente 0.85–0.95 para gota-a-gota."
+                hint="Fracção da água aplicada que chega à zona radicular. Tipicamente 0.85–0.95 para gota-a-gota."
+              />
+              <Input
+                label="Uniformidade de distribuição — DU (0–1)"
+                type="number"
+                value={distributionUniformity}
+                onChange={(e) => setDistributionUniformity(e.target.value)}
+                placeholder="0.90"
+                step="0.01"
+                min="0"
+                max="1"
+                hint="Uniformidade com que a água é distribuída no campo. Gota-a-gota novo ≈ 0.90–0.95; sistema mais antigo ≈ 0.75–0.85."
               />
               <div className="flex flex-col-reverse justify-between gap-3 pt-2 sm:flex-row">
                 <Button variant="ghost" onClick={() => setStep(3)} className="w-full sm:w-auto">

@@ -56,7 +56,8 @@ function reasonCat(category: string | undefined | null): ReasonCat {
   if (c === "confidence") return "confidence";
   if (c === "trigger") return "trigger";
   if (c === "config" || c.includes("default") || c.includes("missing")) return "config";
-  if (c.includes("weather") || c.includes("evapotranspiration") || c.includes("forecast") || c.includes("rain")) return "weather";
+  if (c.includes("weather") || c.includes("evapotranspiration") || c.includes("forecast") || c.includes("rain") || c === "dosage") return "weather";
+  if (c === "water_balance") return "soil";
   return "soil";
 }
 
@@ -163,16 +164,16 @@ export function RecommendationDetail({ rec, onUpdate }: RecommendationDetailProp
             </p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {rec.inputs_snapshot.et0_mm != null && (
-                <DataCell label="ET₀" value={`${rec.inputs_snapshot.et0_mm.toFixed(2)} mm`} />
+                <DataCell label="Evapotranspiração" value={`${rec.inputs_snapshot.et0_mm.toFixed(2)} mm/dia`} />
               )}
               {rec.inputs_snapshot.depletion_mm != null && (
-                <DataCell label="Depleção" value={`${rec.inputs_snapshot.depletion_mm.toFixed(1)} mm`} />
+                <DataCell label="Água em falta" value={`${rec.inputs_snapshot.depletion_mm.toFixed(1)} mm`} />
               )}
               {rec.inputs_snapshot.taw_mm != null && (
-                <DataCell label="TAW" value={`${rec.inputs_snapshot.taw_mm.toFixed(0)} mm`} />
+                <DataCell label="Água disponível" value={`${rec.inputs_snapshot.taw_mm.toFixed(0)} mm`} />
               )}
               {rec.inputs_snapshot.kc != null && (
-                <DataCell label="Kc" value={rec.inputs_snapshot.kc.toFixed(2)} />
+                <DataCell label="Factor da cultura" value={rec.inputs_snapshot.kc.toFixed(2)} />
               )}
             </div>
           </div>
@@ -199,16 +200,6 @@ export function RecommendationDetail({ rec, onUpdate }: RecommendationDetailProp
                     <span className="flex-1 text-[12px] leading-snug text-irrigai-text">
                       {r.message_pt}
                     </span>
-                    {r.data_value && r.data_key === "confidence_score" && (
-                      <span className="shrink-0 text-[11px] font-medium tabular-nums text-irrigai-text-muted">
-                        {Math.round(parseFloat(r.data_value) * 100)}%
-                      </span>
-                    )}
-                    {r.data_value && r.data_key === "depletion_mm" && (
-                      <span className="shrink-0 text-[11px] tabular-nums text-irrigai-text-muted">
-                        {parseFloat(r.data_value).toFixed(1)} mm
-                      </span>
-                    )}
                   </div>
                 );
               })}

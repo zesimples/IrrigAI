@@ -22,6 +22,7 @@ class IrrigationSystem(Base, TimestampMixin):
         Float, nullable=True, comment="Computed or overridden by user"
     )
     efficiency: Mapped[float] = mapped_column(Float, nullable=False, default=0.90)
+    distribution_uniformity: Mapped[float] = mapped_column(Float, nullable=False, default=0.90, comment="Fraction 0–1; how evenly water is distributed across the field")
     max_runtime_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     min_irrigation_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_irrigation_mm: Mapped[float | None] = mapped_column(Float, nullable=True)

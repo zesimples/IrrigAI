@@ -34,9 +34,11 @@ export default function SectorDetailPage({ params }: Props) {
   const [recLoading, setRecLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [cropProfile, setCropProfile] = useState<SectorCropProfile | null>(null);
+  const [sectorDetail, setSectorDetail] = useState<import("@/types").SectorDetail | null>(null);
 
   useEffect(() => {
     sectorsApi.cropProfile(sectorId).then(setCropProfile).catch(() => {});
+    sectorsApi.get(sectorId).then(setSectorDetail).catch(() => {});
   }, [sectorId]);
 
   useEffect(() => {
@@ -244,9 +246,11 @@ export default function SectorDetailPage({ params }: Props) {
           cropType={status.crop_type ?? "olive"}
           currentStage={status.current_stage ?? null}
           currentSoilPresetId={cropProfile?.soil_preset_id}
+          currentRainfallEffectiveness={sectorDetail?.rainfall_effectiveness ?? null}
           onStageUpdated={() => {
             refetch();
             sectorsApi.cropProfile(sectorId).then(setCropProfile).catch(() => {});
+            sectorsApi.get(sectorId).then(setSectorDetail).catch(() => {});
           }}
         />
 

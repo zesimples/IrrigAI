@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.pipeline import build_sector_context, build_weather_context, build_irrigation_context
+from app.engine.probe_interpreter import interpret_probes
 from app.models import Alert, Farm, Plot, Recommendation, RecommendationReason, Sector
 
 
@@ -63,6 +64,9 @@ class SectorAssistantContext:
 
     # Active alerts
     active_alerts: list[dict]
+
+    # Live probe readings (independent of last recommendation)
+    probe_live: dict | None
 
     # Data freshness
     generated_at: str | None
@@ -168,6 +172,30 @@ class AssistantContextBuilder:
             for a in alerts_result.scalars().all()
         ]
 
+        # Live probe snapshot — independent of recommendation age
+        probe_snapshot = await interpret_probes(eng_ctx, db)
+        rz = probe_snapshot.rootzone
+        probe_live: dict | None = None
+        if rz.has_data:
+            depths_info = [
+                {
+                    "depth_cm": d.depth_cm,
+                    "vwc": round(d.latest_vwc, 3) if d.latest_vwc is not None else None,
+                    "hours_since_reading": round(d.hours_since_last, 1) if d.hours_since_last is not None else None,
+                    "quality": d.quality,
+                }
+                for d in rz.depth_statuses
+                if d.latest_vwc is not None
+            ]
+            probe_live = {
+                "swc_weighted_avg": round(rz.swc_current, 3) if rz.swc_current is not None else None,
+                "swc_source": rz.swc_source,
+                "hours_since_any_reading": round(rz.hours_since_any_reading, 1) if rz.hours_since_any_reading is not None else None,
+                "all_depths_ok": rz.all_depths_ok,
+                "depths": depths_info,
+                "anomalies": probe_snapshot.anomalies_detected,
+            }
+
         return SectorAssistantContext(
             sector_id=sector_id,
             sector_name=eng_ctx.sector_name,
@@ -195,6 +223,7 @@ class AssistantContextBuilder:
             last_irrigation_date=last_irrig_date,
             total_irrigation_7d_mm=irrig_ctx.total_applied_7d_mm,
             active_alerts=active_alerts,
+            probe_live=probe_live,
             generated_at=rec.generated_at.isoformat() if rec else None,
         )
 

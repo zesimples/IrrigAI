@@ -28,7 +28,7 @@ def should_irrigate(
 
     # Rain skip
     if forecast_rain_next_48h >= 15.0:
-        return False, f"Rega adiada — previsão de {forecast_rain_next_48h:.0f} mm de chuva nas próximas 48h"
+        return False, f"Chuva prevista de {forecast_rain_next_48h:.0f} mm nas próximas 48 horas — não vale a pena regar agora"
 
     # RDI strategy — apply deficit factor to threshold
     effective_threshold = raw
@@ -39,7 +39,7 @@ def should_irrigate(
 
     if dr >= effective_threshold:
         pct_depleted = dr / wb.taw_mm * 100 if wb.taw_mm > 0 else 0
-        return True, f"Depleção {dr:.1f} mm ≥ limiar {effective_threshold:.1f} mm ({pct_depleted:.0f}% da TAW esgotada)"
+        return True, f"O solo já perdeu {pct_depleted:.0f}% da água disponível ({dr:.1f} mm em falta) — chegou a hora de regar"
 
     remaining = effective_threshold - dr
-    return False, f"Solo com reserva suficiente — faltam {remaining:.1f} mm para atingir o limiar de rega"
+    return False, f"O solo ainda tem reserva suficiente — faltam {remaining:.1f} mm para atingir o ponto de rega"

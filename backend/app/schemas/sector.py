@@ -45,6 +45,7 @@ class IrrigationSystemOut(BaseModel):
     emitter_spacing_m: float | None = None
     application_rate_mm_h: float | None = None
     efficiency: float
+    distribution_uniformity: float = 0.90
     max_runtime_hours: float | None = None
     min_irrigation_mm: float | None = None
     max_irrigation_mm: float | None = None
@@ -79,6 +80,7 @@ class IrrigationSystemCreate(BaseModel):
     emitter_spacing_m: float | None = None
     application_rate_mm_h: float | None = None
     efficiency: float = 0.90
+    distribution_uniformity: float = 0.90
     max_runtime_hours: float | None = None
     min_irrigation_mm: float | None = None
     max_irrigation_mm: float | None = None

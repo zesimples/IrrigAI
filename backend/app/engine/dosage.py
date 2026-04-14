@@ -30,7 +30,8 @@ def compute_dosage(wb: WaterBalanceResult, ctx: SectorContext) -> DosageResult:
     """
     net_mm = wb.depletion_mm
     efficiency = ctx.irrigation_efficiency if ctx.irrigation_efficiency > 0 else 0.90
-    gross_mm = net_mm / efficiency
+    du = ctx.distribution_uniformity if ctx.distribution_uniformity > 0 else 0.90
+    gross_mm = net_mm / (efficiency * du)
 
     capped = False
     cap_reason = None

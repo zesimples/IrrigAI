@@ -22,10 +22,11 @@ interface Props {
   cropType: string;
   currentStage: string | null;
   currentSoilPresetId?: string | null;
+  currentRainfallEffectiveness?: number | null;
   onStageUpdated?: () => void;
 }
 
-export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPresetId, onStageUpdated }: Props) {
+export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPresetId, currentRainfallEffectiveness, onStageUpdated }: Props) {
   const stageOptions = CROP_STAGES[cropType] ?? CROP_STAGES["olive"];
 
   const [stage, setStage] = useState(currentStage ?? "");
@@ -42,8 +43,18 @@ export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPr
   const [savingSoil, setSavingSoil] = useState(false);
   const [soilSaved, setSoilSaved] = useState(false);
 
+  // Rainfall effectiveness correction
+  const [rainfallEff, setRainfallEff] = useState(
+    currentRainfallEffectiveness != null ? String(currentRainfallEffectiveness) : "1.0"
+  );
+  const [savingRainfall, setSavingRainfall] = useState(false);
+  const [rainfallSaved, setRainfallSaved] = useState(false);
+
   useEffect(() => { setStage(currentStage ?? ""); }, [currentStage]);
   useEffect(() => { setSelectedSoilId(currentSoilPresetId ?? ""); }, [currentSoilPresetId]);
+  useEffect(() => {
+    setRainfallEff(currentRainfallEffectiveness != null ? String(currentRainfallEffectiveness) : "1.0");
+  }, [currentRainfallEffectiveness]);
 
   useEffect(() => {
     catalogApi.soilPresets().then(setSoilPresets).catch(() => {});
@@ -86,6 +97,22 @@ export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPr
       setUpdatingStage(false);
     }
   }
+
+  async function handleSaveRainfall() {
+    const val = parseFloat(rainfallEff);
+    if (isNaN(val) || val < 0 || val > 2) return;
+    setSavingRainfall(true);
+    setRainfallSaved(false);
+    try {
+      await sectorsApi.update(sectorId, { rainfall_effectiveness: val });
+      setRainfallSaved(true);
+      setTimeout(() => setRainfallSaved(false), 2500);
+    } finally {
+      setSavingRainfall(false);
+    }
+  }
+
+  const rainfallChanged = rainfallEff !== (currentRainfallEffectiveness != null ? String(currentRainfallEffectiveness) : "1.0");
 
   async function handleAnalyse() {
     setLoading(true);
@@ -179,6 +206,43 @@ export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPr
               >
                 Guardar
               </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Rainfall effectiveness correction */}
+        <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1">
+              <label className="mb-1 block text-sm font-semibold text-slate-800">
+                Correcção de eficácia da chuva
+              </label>
+              <input
+                type="number"
+                value={rainfallEff}
+                onChange={(e) => { setRainfallEff(e.target.value); setRainfallSaved(false); }}
+                step="0.05"
+                min="0"
+                max="2"
+                className="w-full rounded-lg border border-black/[0.1] bg-white px-3.5 py-2.5 text-[13px] focus:border-irrigai-green focus:outline-none focus:ring-1 focus:ring-irrigai-green/30"
+              />
+              <p className="mt-1 text-[11px] text-irrigai-text-muted">
+                Multiplicador local sobre o cálculo automático por tipo de solo e intensidade (1.0 = sem correcção). Use &lt;1.0 em terrenos com declive ou solo muito compactado; &gt;1.0 em terrenos planos e bem cobertos.
+              </p>
+            </div>
+            {rainfallChanged && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={handleSaveRainfall}
+                loading={savingRainfall}
+                className="w-full sm:w-auto"
+              >
+                Guardar
+              </Button>
+            )}
+            {rainfallSaved && !rainfallChanged && (
+              <span className="text-[12px] text-irrigai-green font-medium">Guardado ✓</span>
             )}
           </div>
         </div>

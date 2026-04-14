@@ -152,6 +152,7 @@ export interface IrrigationSystemOut {
   emitter_spacing_m: number | null;
   application_rate_mm_h: number | null;
   efficiency: number;
+  distribution_uniformity: number;
   max_runtime_hours: number | null;
   min_irrigation_mm: number | null;
   max_irrigation_mm: number | null;
@@ -163,6 +164,7 @@ export interface IrrigationSystemCreate {
   emitter_spacing_m?: number;
   application_rate_mm_h?: number;
   efficiency?: number;
+  distribution_uniformity?: number;
   max_runtime_hours?: number;
   min_irrigation_mm?: number;
   max_irrigation_mm?: number;

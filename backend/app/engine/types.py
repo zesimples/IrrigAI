@@ -37,6 +37,7 @@ class SectorContext:
     irrigation_system_type: str | None
     application_rate_mm_h: float | None  # None if system not configured
     irrigation_efficiency: float
+    distribution_uniformity: float       # 0–1, how evenly water is applied (default 0.90)
     emitter_flow_lph: float | None
     emitter_spacing_m: float | None
     row_spacing_m: float | None
