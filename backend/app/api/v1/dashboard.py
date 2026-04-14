@@ -1,0 +1,200 @@
+"""Dashboard aggregation endpoint.
+
+Returns a complete farm snapshot: weather, sector summaries, alerts, and missing-data prompts.
+All data is read from DB — no engine is re-run here.
+"""
+
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.models import (
+    Alert,
+    Farm,
+    IrrigationEvent,
+    Plot,
+    Probe,
+    Recommendation,
+    Sector,
+    WeatherForecast,
+    WeatherObservation,
+)
+from app.schemas.dashboard import (
+    AlertCounts,
+    DashboardResponse,
+    FarmOut,
+    SectorSummary,
+    WeatherToday,
+)
+
+router = APIRouter(tags=["dashboard"])
+
+
+@router.get("/farms/{farm_id}/dashboard", response_model=DashboardResponse)
+async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
+    farm = await db.get(Farm, farm_id)
+    if not farm:
+        raise HTTPException(404, detail="Farm not found")
+
+    today = datetime.now(UTC).date()
+
+    # --- Weather ---
+    latest_obs = (
+        await db.execute(
+            select(WeatherObservation)
+            .where(WeatherObservation.farm_id == farm_id)
+            .order_by(WeatherObservation.timestamp.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    forecasts = (
+        await db.execute(
+            select(WeatherForecast)
+            .where(WeatherForecast.farm_id == farm_id)
+            .order_by(WeatherForecast.forecast_date)
+            .limit(2)
+        )
+    ).scalars().all()
+
+    rain_48h = sum((f.rainfall_mm or 0.0) for f in forecasts[:2])
+    rain_prob = forecasts[0].rainfall_probability_pct if forecasts else None
+
+    weather_today = WeatherToday(
+        et0_mm=latest_obs.et0_mm if latest_obs else None,
+        temperature_max_c=latest_obs.temperature_max_c if latest_obs else None,
+        temperature_min_c=latest_obs.temperature_min_c if latest_obs else None,
+        rainfall_mm=latest_obs.rainfall_mm if latest_obs else None,
+        forecast_rain_next_48h_mm=rain_48h,
+        forecast_rain_probability=rain_prob,
+    )
+
+    # --- Load all sectors for this farm ---
+    plots = (
+        await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+    ).scalars().all()
+
+    sectors: list[Sector] = []
+    for plot in plots:
+        s = (
+            await db.execute(select(Sector).where(Sector.plot_id == plot.id))
+        ).scalars().all()
+        sectors.extend(s)
+
+    # --- Per-sector aggregation ---
+    sector_summaries: list[SectorSummary] = []
+    all_alerts_critical = all_alerts_warning = all_alerts_info = 0
+    missing_prompts: list[str] = []
+
+    for sector in sectors:
+        sid = sector.id
+
+        # Latest recommendation
+        latest_rec = (
+            await db.execute(
+                select(Recommendation)
+                .where(Recommendation.sector_id == sid)
+                .order_by(Recommendation.generated_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        # Active alerts for this sector
+        sec_alerts = (
+            await db.execute(
+                select(Alert).where(Alert.sector_id == sid, Alert.is_active.is_(True))
+            )
+        ).scalars().all()
+        crit = sum(1 for a in sec_alerts if a.severity == "critical")
+        warn = sum(1 for a in sec_alerts if a.severity == "warning")
+        info = sum(1 for a in sec_alerts if a.severity == "info")
+        all_alerts_critical += crit
+        all_alerts_warning += warn
+        all_alerts_info += info
+
+        # Last irrigation event
+        last_event = (
+            await db.execute(
+                select(IrrigationEvent)
+                .where(IrrigationEvent.sector_id == sid)
+                .order_by(IrrigationEvent.start_time.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        # Probe health
+        probes = (
+            await db.execute(select(Probe).where(Probe.sector_id == sid))
+        ).scalars().all()
+
+        if not probes:
+            probe_health = "no_probes"
+        elif any(p.health_status in ("error", "offline") for p in probes):
+            probe_health = "error"
+        elif any(p.health_status == "warning" for p in probes):
+            probe_health = "warning"
+        else:
+            probe_health = "ok"
+
+        # Rootzone status from snapshot
+        rootzone_status = "unknown"
+        if latest_rec and latest_rec.inputs_snapshot:
+            snap = latest_rec.inputs_snapshot
+            taw_mm = snap.get("taw_mm")
+            depletion_mm = snap.get("depletion_mm")
+            if taw_mm and depletion_mm is not None and taw_mm > 0:
+                pct = depletion_mm / taw_mm * 100
+                if pct < 20:
+                    rootzone_status = "wet"
+                elif pct < 60:
+                    rootzone_status = "optimal"
+                elif pct < 85:
+                    rootzone_status = "dry"
+                else:
+                    rootzone_status = "critical"
+
+        sector_summaries.append(SectorSummary(
+            sector_id=sid,
+            sector_name=sector.name,
+            crop_type=sector.crop_type,
+            current_stage=sector.current_phenological_stage,
+            action=latest_rec.action if latest_rec else None,
+            irrigation_depth_mm=latest_rec.irrigation_depth_mm if latest_rec else None,
+            runtime_min=latest_rec.irrigation_runtime_min if latest_rec else None,
+            confidence_level=latest_rec.confidence_level if latest_rec else None,
+            confidence_score=latest_rec.confidence_score if latest_rec else None,
+            rootzone_status=rootzone_status,
+            active_alerts=crit + warn + info,
+            probe_health=probe_health,
+            last_irrigated=last_event.start_time.date() if last_event else None,
+            last_irrigated_mm=last_event.applied_mm if last_event else None,
+            recommendation_generated_at=latest_rec.generated_at if latest_rec else None,
+        ))
+
+        # Missing data prompts (Portuguese, shown to user)
+        if not latest_rec:
+            missing_prompts.append(
+                f"O setor '{sector.name}' não tem recomendação gerada. "
+                f"Clique em 'Gerar' para obter a recomendação de hoje."
+            )
+        elif sector.current_phenological_stage is None:
+            missing_prompts.append(
+                f"O estádio fenológico do '{sector.name}' não está definido. "
+                f"Defina-o para melhorar as recomendações."
+            )
+
+    return DashboardResponse(
+        farm=FarmOut(id=farm.id, name=farm.name, region=farm.region),
+        date=today,
+        weather_today=weather_today,
+        sectors_summary=sector_summaries,
+        active_alerts_count=AlertCounts(
+            critical=all_alerts_critical,
+            warning=all_alerts_warning,
+            info=all_alerts_info,
+        ),
+        missing_data_prompts=missing_prompts,
+    )

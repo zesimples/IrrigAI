@@ -1,0 +1,70 @@
+{
+  "_comment": "Hypothetical raw response from a weather/agro-met API. Shows the mapping to WeatherObservationDTO and WeatherForecastDTO.",
+  "_mapping_observation": {
+    "station_id": "→ used for source field",
+    "observations[].date": "→ WeatherObservationDTO.timestamp (set to noon UTC of that date)",
+    "observations[].temp_max": "→ WeatherObservationDTO.temperature_max_c",
+    "observations[].temp_min": "→ WeatherObservationDTO.temperature_min_c",
+    "observations[].rh_mean": "→ WeatherObservationDTO.humidity_pct",
+    "observations[].wind_avg_ms": "→ WeatherObservationDTO.wind_speed_ms",
+    "observations[].rad_mj_m2": "→ WeatherObservationDTO.solar_radiation_mjm2",
+    "observations[].precip_mm": "→ WeatherObservationDTO.rainfall_mm",
+    "observations[].eto_fao56": "→ WeatherObservationDTO.et0_mm (use this; fall back to Hargreaves if null)"
+  },
+  "_mapping_forecast": {
+    "forecast[].valid_date": "→ WeatherForecastDTO.forecast_date",
+    "forecast[].run_time": "→ WeatherForecastDTO.issued_at",
+    "forecast[].precip_prob": "→ WeatherForecastDTO.rainfall_probability_pct (0–1 → multiply by 100)"
+  },
+  "station_id": "EVORA-AGR-07",
+  "latitude": 38.57,
+  "longitude": -7.91,
+  "observations": [
+    {
+      "date": "2026-04-06",
+      "temp_max": 34.8,
+      "temp_min": 19.2,
+      "temp_mean": 27.0,
+      "rh_mean": 31.5,
+      "wind_avg_ms": 3.8,
+      "rad_mj_m2": 23.4,
+      "precip_mm": 0.0,
+      "eto_fao56": 6.82
+    },
+    {
+      "date": "2026-04-05",
+      "temp_max": 36.2,
+      "temp_min": 20.1,
+      "temp_mean": 28.2,
+      "rh_mean": 27.3,
+      "wind_avg_ms": 4.1,
+      "rad_mj_m2": 24.1,
+      "precip_mm": 0.0,
+      "eto_fao56": 7.31
+    }
+  ],
+  "forecast": [
+    {
+      "valid_date": "2026-04-08",
+      "run_time": "2026-04-07T06:00:00Z",
+      "temp_max": 35.0,
+      "temp_min": 18.5,
+      "rh_mean": 30.0,
+      "wind_avg_ms": 3.5,
+      "precip_mm": 0.0,
+      "precip_prob": 0.05,
+      "eto_est": 6.95
+    },
+    {
+      "valid_date": "2026-04-09",
+      "run_time": "2026-04-07T06:00:00Z",
+      "temp_max": 28.0,
+      "temp_min": 16.0,
+      "rh_mean": 52.0,
+      "wind_avg_ms": 5.2,
+      "precip_mm": 18.0,
+      "precip_prob": 0.72,
+      "eto_est": 4.21
+    }
+  ]
+}

@@ -1,0 +1,438 @@
+{
+  "_comment": "7-day mock readings for SAMPLE-PROBE-001, 4 depths (10/30/60/90cm), hourly. First 48 of 672 total records shown.",
+  "total_readings": 676,
+  "sample": [
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T11:00:00+00:00",
+      "raw_value": 0.2197,
+      "calibrated_value": 0.2197,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T12:00:00+00:00",
+      "raw_value": 0.2145,
+      "calibrated_value": 0.2145,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T13:00:00+00:00",
+      "raw_value": 0.2073,
+      "calibrated_value": 0.2073,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T14:00:00+00:00",
+      "raw_value": 0.2028,
+      "calibrated_value": 0.2028,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T15:00:00+00:00",
+      "raw_value": 0.1961,
+      "calibrated_value": 0.1961,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T16:00:00+00:00",
+      "raw_value": -0.0796,
+      "calibrated_value": -0.0796,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T17:00:00+00:00",
+      "raw_value": 0.1906,
+      "calibrated_value": 0.1906,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T18:00:00+00:00",
+      "raw_value": 0.1851,
+      "calibrated_value": 0.1851,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T19:00:00+00:00",
+      "raw_value": 0.1826,
+      "calibrated_value": 0.1826,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T20:00:00+00:00",
+      "raw_value": 0.1792,
+      "calibrated_value": 0.1792,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T21:00:00+00:00",
+      "raw_value": 0.1757,
+      "calibrated_value": 0.1757,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T22:00:00+00:00",
+      "raw_value": 0.1743,
+      "calibrated_value": 0.1743,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-03-31T23:00:00+00:00",
+      "raw_value": 0.1702,
+      "calibrated_value": 0.1702,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T00:00:00+00:00",
+      "raw_value": 0.1664,
+      "calibrated_value": 0.1664,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T01:00:00+00:00",
+      "raw_value": 0.1637,
+      "calibrated_value": 0.1637,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T02:00:00+00:00",
+      "raw_value": 0.1604,
+      "calibrated_value": 0.1604,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T03:00:00+00:00",
+      "raw_value": 0.1546,
+      "calibrated_value": 0.1546,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T04:00:00+00:00",
+      "raw_value": 0.153,
+      "calibrated_value": 0.153,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T05:00:00+00:00",
+      "raw_value": 0.1498,
+      "calibrated_value": 0.1498,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T06:00:00+00:00",
+      "raw_value": 0.1452,
+      "calibrated_value": 0.1452,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T07:00:00+00:00",
+      "raw_value": 0.1446,
+      "calibrated_value": 0.1446,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T08:00:00+00:00",
+      "raw_value": 0.1452,
+      "calibrated_value": 0.1452,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T09:00:00+00:00",
+      "raw_value": 0.1442,
+      "calibrated_value": 0.1442,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T10:00:00+00:00",
+      "raw_value": 0.1445,
+      "calibrated_value": 0.1445,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T11:00:00+00:00",
+      "raw_value": 0.145,
+      "calibrated_value": 0.145,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T12:00:00+00:00",
+      "raw_value": 0.1457,
+      "calibrated_value": 0.1457,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T13:00:00+00:00",
+      "raw_value": 0.1454,
+      "calibrated_value": 0.1454,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T14:00:00+00:00",
+      "raw_value": 0.1446,
+      "calibrated_value": 0.1446,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T15:00:00+00:00",
+      "raw_value": 0.143,
+      "calibrated_value": 0.143,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T16:00:00+00:00",
+      "raw_value": 0.1454,
+      "calibrated_value": 0.1454,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T17:00:00+00:00",
+      "raw_value": 0.1453,
+      "calibrated_value": 0.1453,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T18:00:00+00:00",
+      "raw_value": 0.1461,
+      "calibrated_value": 0.1461,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T19:00:00+00:00",
+      "raw_value": 0.1465,
+      "calibrated_value": 0.1465,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T20:00:00+00:00",
+      "raw_value": 0.1447,
+      "calibrated_value": 0.1447,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T21:00:00+00:00",
+      "raw_value": 0.1448,
+      "calibrated_value": 0.1448,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T22:00:00+00:00",
+      "raw_value": 0.1444,
+      "calibrated_value": 0.1444,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-01T23:00:00+00:00",
+      "raw_value": 0.1446,
+      "calibrated_value": 0.1446,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T00:00:00+00:00",
+      "raw_value": 0.1465,
+      "calibrated_value": 0.1465,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T01:00:00+00:00",
+      "raw_value": 0.1439,
+      "calibrated_value": 0.1439,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T02:00:00+00:00",
+      "raw_value": 0.1453,
+      "calibrated_value": 0.1453,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T03:00:00+00:00",
+      "raw_value": 0.146,
+      "calibrated_value": 0.146,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T04:00:00+00:00",
+      "raw_value": 0.1455,
+      "calibrated_value": 0.1455,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T05:00:00+00:00",
+      "raw_value": 0.1442,
+      "calibrated_value": 0.1442,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T06:00:00+00:00",
+      "raw_value": 0.1451,
+      "calibrated_value": 0.1451,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T07:00:00+00:00",
+      "raw_value": 0.1454,
+      "calibrated_value": 0.1454,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T08:00:00+00:00",
+      "raw_value": 0.1454,
+      "calibrated_value": 0.1454,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T09:00:00+00:00",
+      "raw_value": 0.1449,
+      "calibrated_value": 0.1449,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    },
+    {
+      "probe_external_id": "SAMPLE-PROBE-001",
+      "depth_cm": 10,
+      "timestamp": "2026-04-02T10:00:00+00:00",
+      "raw_value": 0.1469,
+      "calibrated_value": 0.1469,
+      "unit": "vwc_m3m3",
+      "sensor_type": "moisture"
+    }
+  ]
+}

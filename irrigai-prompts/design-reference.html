@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IrrigAI — Dashboard Design Reference</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500&family=Fraunces:opsz,wght@9..144,400;9..144,500&display=swap" rel="stylesheet">
+<style>
+/*
+  ============================================================
+  IrrigAI DESIGN REFERENCE
+  ============================================================
+  
+  This is the visual design spec for the IrrigAI dashboard.
+  Open this file in a browser to see the target design.
+  
+  DESIGN SYSTEM:
+  - Font body: DM Sans 400/500
+  - Font display: Fraunces 400/500 (numbers, farm name)
+  - Color palette: flat, minimal, semantic
+  - Layout: mobile-first, single column, card-based
+  - Language: Portuguese (pt-PT) primary
+  
+  COLOR TOKENS (map these to Tailwind/CSS vars in the app):
+  --irrigai-green:       #639922  (healthy, irrigate, high confidence)
+  --irrigai-green-bg:    #EAF3DE
+  --irrigai-green-dark:  #27500A
+  --irrigai-amber:       #EF9F27  (warning, medium confidence, reduce)
+  --irrigai-amber-bg:    #FAEEDA
+  --irrigai-amber-dark:  #633806
+  --irrigai-red:         #E24B4A  (critical, low confidence, PWP)
+  --irrigai-red-bg:      #FCEBEB
+  --irrigai-red-dark:    #791F1F
+  --irrigai-blue:        #85B7EB  (water, FC reference, info)
+  --irrigai-blue-bg:     #E6F1FB
+  --irrigai-blue-dark:   #0C447C
+  --irrigai-teal:        #5DCAA5  (probe 30cm line)
+  --irrigai-purple:      #AFA9EC  (probe 60cm line)
+  --irrigai-gray:        #B4B2A9  (neutral, skip, muted)
+  --irrigai-gray-bg:     #F5F4F0
+  --irrigai-text:        #1a1a1a
+  --irrigai-text-muted:  #6b6b68
+  --irrigai-text-hint:   #9b9b97
+  --irrigai-border:      rgba(0,0,0,0.08)
+  --irrigai-bg:          #ffffff
+  --irrigai-surface:     #F5F4F0
+  
+  COMPONENT INVENTORY (map to React components):
+  1. AppHeader         - Farm name, date, avatar, lang toggle
+  2. WeatherStrip      - Today's weather summary (ET0, temp, rain, forecast)
+  3. SetupCompletionBar - Progressive config completion (dismissible)
+  4. SectorCard        - Per-sector recommendation card
+  5. AlertStrip        - Inline alert with action
+  6. MissingDataCard   - Missing config prompts
+  7. ProbeChart        - Multi-depth time series with reference lines
+  8. RecommendationDetail - Full explainability panel
+  9. ConfidenceBadge   - Dot + label (high/medium/low)
+  10. RootzoneBar      - Mini horizontal soil status bar
+  11. DepthBars        - Per-depth moisture visualization
+  12. ReasonsList      - Categorized recommendation reasons
+  13. BottomNav        - Mobile tab navigation
+  
+  ============================================================
+*/
+
+:root {
+  --irrigai-green: #639922;
+  --irrigai-green-bg: #EAF3DE;
+  --irrigai-green-dark: #27500A;
+  --irrigai-amber: #EF9F27;
+  --irrigai-amber-bg: #FAEEDA;
+  --irrigai-amber-dark: #633806;
+  --irrigai-red: #E24B4A;
+  --irrigai-red-bg: #FCEBEB;
+  --irrigai-red-dark: #791F1F;
+  --irrigai-blue: #85B7EB;
+  --irrigai-blue-bg: #E6F1FB;
+  --irrigai-blue-dark: #0C447C;
+  --irrigai-teal: #5DCAA5;
+  --irrigai-purple: #AFA9EC;
+  --irrigai-gray: #B4B2A9;
+  --irrigai-gray-bg: #F5F4F0;
+  --irrigai-text: #1a1a1a;
+  --irrigai-text-muted: #6b6b68;
+  --irrigai-text-hint: #9b9b97;
+  --irrigai-border: rgba(0,0,0,0.08);
+  --irrigai-bg: #ffffff;
+  --irrigai-surface: #F5F4F0;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'DM Sans', -apple-system, sans-serif;
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--irrigai-text);
+  background: var(--irrigai-bg);
+  padding: 16px;
+  max-width: 900px;
+  margin: 0 auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== COMPONENT: AppHeader ===== */
+.app-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 0 20px;
+  border-bottom: 0.5px solid var(--irrigai-border);
+  margin-bottom: 20px;
+}
+
+.farm-name {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 20px; font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--irrigai-text);
+}
+
+.farm-date {
+  font-size: 12px; color: var(--irrigai-text-muted);
+  margin-top: 2px;
+}
+
+.header-actions { display: flex; gap: 8px; align-items: center; }
+
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--irrigai-blue-bg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 500; color: var(--irrigai-blue-dark);
+}
+
+.lang-toggle {
+  font-size: 11px; color: var(--irrigai-text-muted);
+  background: var(--irrigai-surface); border: 0.5px solid var(--irrigai-border);
+  border-radius: 6px; padding: 4px 8px; cursor: pointer;
+}
+
+/* ===== COMPONENT: WeatherStrip ===== */
+.weather-strip {
+  display: flex; gap: 16px; flex-wrap: wrap;
+  padding: 12px 16px;
+  background: var(--irrigai-surface);
+  border-radius: 12px;
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+
+.weather-item { display: flex; align-items: center; gap: 6px; }
+.weather-label { color: var(--irrigai-text-muted); font-size: 11px; }
+.weather-value { font-weight: 500; font-size: 13px; }
+.weather-icon { width: 16px; height: 16px; display: flex; align-items: center; }
+
+/* ===== COMPONENT: SetupCompletionBar ===== */
+.setup-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: var(--irrigai-amber-bg); border-radius: 8px;
+  margin-bottom: 20px; font-size: 12px; color: var(--irrigai-amber-dark);
+}
+
+.setup-progress {
+  flex: 1; height: 4px; background: #FAC775; border-radius: 2px; overflow: hidden;
+}
+.setup-fill { height: 100%; width: 82%; background: #854F0B; border-radius: 2px; }
+.setup-link { color: #854F0B; font-weight: 500; text-decoration: underline; cursor: pointer; white-space: nowrap; }
+
+/* ===== COMPONENT: SectorCard ===== */
+.section-label {
+  font-size: 11px; font-weight: 500; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--irrigai-text-hint);
+  margin-bottom: 10px;
+}
+
+.sectors-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px; margin-bottom: 24px;
+}
+
+.sector-card {
+  background: var(--irrigai-bg);
+  border: 0.5px solid var(--irrigai-border);
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.sector-card:hover {
+  border-color: rgba(0,0,0,0.15);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+.sector-top {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.sector-name { font-weight: 500; font-size: 14px; }
+.sector-crop { font-size: 11px; color: var(--irrigai-text-muted); margin-top: 2px; }
+
+.action-badge {
+  font-size: 11px; font-weight: 500; padding: 3px 10px;
+  border-radius: 100px; white-space: nowrap;
+}
+.action-irrigate { background: var(--irrigai-green-bg); color: var(--irrigai-green-dark); }
+.action-skip { background: var(--irrigai-surface); color: var(--irrigai-text-muted); }
+.action-reduce { background: var(--irrigai-amber-bg); color: var(--irrigai-amber-dark); }
+
+.sector-recommendation {
+  display: flex; gap: 20px; align-items: baseline;
+  margin-bottom: 12px;
+}
+
+.rec-value {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 28px; font-weight: 500; letter-spacing: -0.03em;
+}
+.rec-unit { font-size: 11px; color: var(--irrigai-text-muted); margin-left: 2px; }
+.rec-detail { font-size: 12px; color: var(--irrigai-text-muted); }
+
+.sector-meta {
+  display: flex; gap: 16px; font-size: 11px; color: var(--irrigai-text-muted);
+  padding-top: 10px; border-top: 0.5px solid var(--irrigai-border);
+}
+
+/* ===== COMPONENT: ConfidenceBadge ===== */
+.confidence-dot {
+  width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 4px;
+}
+.conf-high { background: var(--irrigai-green); }
+.conf-medium { background: var(--irrigai-amber); }
+.conf-low { background: var(--irrigai-red); }
+
+/* ===== COMPONENT: RootzoneBar ===== */
+.rootzone-bar {
+  width: 60px; height: 4px; background: rgba(0,0,0,0.06);
+  border-radius: 2px; overflow: hidden; display: inline-block;
+  vertical-align: middle; margin-left: 4px;
+}
+.rootzone-fill { height: 100%; border-radius: 2px; }
+.rz-optimal { background: var(--irrigai-green); }
+.rz-dry { background: var(--irrigai-amber); }
+.rz-critical { background: var(--irrigai-red); }
+
+/* ===== COMPONENT: AlertStrip ===== */
+.alert-strip {
+  display: flex; gap: 10px; align-items: center;
+  padding: 10px 14px;
+  background: var(--irrigai-bg);
+  border: 0.5px solid var(--irrigai-border);
+  border-left: 3px solid var(--irrigai-amber);
+  border-radius: 0 8px 8px 0;
+  margin-bottom: 10px; font-size: 12px;
+}
+.alert-icon { width: 14px; height: 14px; }
+
+/* ===== COMPONENT: MissingDataCard ===== */
+.missing-data-card {
+  background: var(--irrigai-surface);
+  border-radius: 12px;
+  padding: 14px 16px; margin-bottom: 24px;
+}
+.missing-title { font-size: 12px; font-weight: 500; margin-bottom: 8px; color: var(--irrigai-text-muted); }
+.missing-item {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--irrigai-text);
+  padding: 6px 0;
+}
+.missing-action {
+  color: #185FA5; font-weight: 500; cursor: pointer;
+  margin-left: auto; white-space: nowrap;
+}
+
+/* ===== COMPONENT: ProbeChart ===== */
+.probe-preview {
+  background: var(--irrigai-bg);
+  border: 0.5px solid var(--irrigai-border);
+  border-radius: 12px;
+  padding: 16px; margin-bottom: 24px;
+}
+
+.probe-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 14px;
+}
+.probe-title { font-weight: 500; font-size: 14px; }
+
+.probe-range { display: flex; gap: 4px; }
+.range-btn {
+  font-size: 11px; padding: 3px 8px;
+  border-radius: 6px;
+  background: transparent; border: 0.5px solid var(--irrigai-border);
+  color: var(--irrigai-text-muted); cursor: pointer;
+  font-family: inherit;
+}
+.range-btn.active {
+  background: var(--irrigai-text); color: var(--irrigai-bg);
+  border-color: var(--irrigai-text);
+}
+
+.chart-area {
+  position: relative; height: 200px; margin-bottom: 8px;
+  border-bottom: 0.5px solid var(--irrigai-border);
+}
+
+.chart-y-axis {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 36px;
+  display: flex; flex-direction: column; justify-content: space-between;
+  font-size: 10px; color: var(--irrigai-text-hint); padding: 4px 0;
+}
+
+.chart-body {
+  position: absolute; left: 40px; right: 0; top: 0; bottom: 0;
+}
+
+.ref-line {
+  position: absolute; left: 0; right: 0; height: 0;
+  border-top: 1px dashed;
+}
+.ref-fc { top: 20%; border-color: var(--irrigai-blue); }
+.ref-mad { top: 55%; border-color: var(--irrigai-amber); }
+.ref-pwp { top: 85%; border-color: var(--irrigai-red); }
+
+.ref-label {
+  position: absolute; right: 4px; font-size: 9px; padding: 1px 4px;
+  border-radius: 2px; transform: translateY(-50%);
+}
+.ref-fc .ref-label { color: var(--irrigai-blue-dark); background: var(--irrigai-blue-bg); }
+.ref-mad .ref-label { color: var(--irrigai-amber-dark); background: var(--irrigai-amber-bg); }
+.ref-pwp .ref-label { color: var(--irrigai-red-dark); background: var(--irrigai-red-bg); }
+
+.irrigation-marker {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: #97C459; opacity: 0.6;
+}
+.irr-label {
+  position: absolute; top: -2px; left: 50%; transform: translateX(-50%);
+  font-size: 8px; color: var(--irrigai-green-dark); background: var(--irrigai-green-bg);
+  padding: 1px 3px; border-radius: 2px; white-space: nowrap;
+}
+
+.chart-legend {
+  display: flex; gap: 16px; font-size: 11px; color: var(--irrigai-text-muted);
+}
+.legend-item { display: flex; align-items: center; gap: 4px; }
+.legend-line { width: 16px; height: 2px; border-radius: 1px; }
+
+/* ===== COMPONENT: RecommendationDetail ===== */
+.rec-detail-card {
+  background: var(--irrigai-bg);
+  border: 0.5px solid var(--irrigai-border);
+  border-radius: 12px;
+  padding: 16px; margin-bottom: 12px;
+}
+
+.confidence-bar-wrap {
+  display: flex; align-items: center; gap: 10px; margin: 12px 0;
+}
+.confidence-bar {
+  flex: 1; height: 6px; background: rgba(0,0,0,0.06);
+  border-radius: 3px; overflow: hidden;
+}
+.confidence-fill { height: 100%; border-radius: 3px; background: var(--irrigai-green); }
+.confidence-label { font-size: 12px; font-weight: 500; min-width: 30px; }
+
+/* ===== COMPONENT: DepthBars ===== */
+.depth-bars { margin: 12px 0; }
+.depth-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  font-size: 11px;
+}
+.depth-label { width: 40px; color: var(--irrigai-text-muted); text-align: right; }
+.depth-track {
+  flex: 1; height: 8px; background: rgba(0,0,0,0.04);
+  border-radius: 4px; position: relative;
+}
+.depth-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 4px; }
+.df-wet { background: var(--irrigai-blue); }
+.df-optimal { background: var(--irrigai-green); }
+.df-dry { background: var(--irrigai-amber); }
+.depth-value { width: 55px; font-size: 10px; color: var(--irrigai-text-muted); }
+
+/* ===== COMPONENT: ReasonsList ===== */
+.reason-list { list-style: none; padding: 0; }
+.reason-item {
+  display: flex; gap: 8px; padding: 8px 0;
+  border-bottom: 0.5px solid var(--irrigai-border);
+  font-size: 12px; line-height: 1.5;
+}
+.reason-item:last-child { border-bottom: none; }
+.reason-icon {
+  width: 20px; height: 20px; min-width: 20px;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; margin-top: 1px;
+}
+.ri-trigger { background: var(--irrigai-green-bg); color: var(--irrigai-green-dark); }
+.ri-weather { background: var(--irrigai-blue-bg); color: var(--irrigai-blue-dark); }
+.ri-probe { background: #E1F5EE; color: #085041; }
+.ri-assumption { background: var(--irrigai-amber-bg); color: var(--irrigai-amber-dark); }
+
+/* ===== Buttons ===== */
+.btn-primary {
+  flex: 1; background: var(--irrigai-text); color: var(--irrigai-bg);
+  border: none; padding: 10px; border-radius: 8px;
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: opacity 0.15s;
+}
+.btn-primary:hover { opacity: 0.88; }
+
+.btn-secondary {
+  flex: 1; background: transparent; color: var(--irrigai-text);
+  border: 0.5px solid var(--irrigai-border); padding: 10px; border-radius: 8px;
+  font-size: 13px; cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: background 0.15s;
+}
+.btn-secondary:hover { background: var(--irrigai-surface); }
+
+/* ===== COMPONENT: BottomNav ===== */
+.bottom-nav {
+  display: flex; justify-content: space-around;
+  padding: 10px 0 4px;
+  border-top: 0.5px solid var(--irrigai-border);
+  margin-top: 24px;
+}
+.nav-item {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  font-size: 10px; color: var(--irrigai-text-hint); cursor: pointer;
+  transition: color 0.15s;
+}
+.nav-item.active { color: var(--irrigai-text); }
+.nav-item:hover { color: var(--irrigai-text-muted); }
+.nav-icon { width: 16px; height: 16px; line-height: 1; }
+.nav-badge {
+  position: relative; top: -2px;
+  background: var(--irrigai-red); color: white; font-size: 9px;
+  padding: 1px 4px; border-radius: 100px; margin-left: -4px;
+}
+
+/* ===== Layout helpers ===== */
+.divider {
+  border: none; border-top: 0.5px solid var(--irrigai-border);
+  margin: 24px 0;
+}
+.section-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 12px;
+}
+
+/* ===== Responsive: mobile viewport ===== */
+@media (max-width: 640px) {
+  body { padding: 12px; }
+  .sectors-grid { grid-template-columns: 1fr; }
+  .weather-strip { gap: 12px; }
+  .sector-meta { flex-wrap: wrap; gap: 8px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== APP HEADER ===== -->
+<div class="app-header">
+  <div>
+    <div class="farm-name">Herdade do Monte Novo</div>
+    <div class="farm-date">Terça-feira, 15 de Julho 2025</div>
+  </div>
+  <div class="header-actions">
+    <span class="lang-toggle">PT</span>
+    <div class="avatar">JS</div>
+  </div>
+</div>
+
+<!-- ===== WEATHER STRIP ===== -->
+<div class="weather-strip">
+  <div class="weather-item">
+    <span class="weather-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="4" fill="#EF9F27"/><g stroke="#EF9F27" stroke-width="1.2"><line x1="8" y1="0.5" x2="8" y2="2.5"/><line x1="8" y1="13.5" x2="8" y2="15.5"/><line x1="0.5" y1="8" x2="2.5" y2="8"/><line x1="13.5" y1="8" x2="15.5" y2="8"/></g></svg>
+    </span>
+    <div><span class="weather-label">Máx/Mín</span><br><span class="weather-value">38° / 21°C</span></div>
+  </div>
+  <div class="weather-item">
+    <span class="weather-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 14a5 5 0 0 0 5-5C13 5 8 1 8 1S3 5 3 9a5 5 0 0 0 5 5z" fill="#85B7EB"/></svg>
+    </span>
+    <div><span class="weather-label">ET0 hoje</span><br><span class="weather-value">7.2 mm</span></div>
+  </div>
+  <div class="weather-item">
+    <span class="weather-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 9a5 5 0 1 0 10 0c0-2-2-4-4-6L8 1.5 6 4C4 6 3 7.5 3 9z" stroke="#85B7EB" stroke-width="1.2" fill="none"/></svg>
+    </span>
+    <div><span class="weather-label">Chuva 48h</span><br><span class="weather-value">0.0 mm</span></div>
+  </div>
+  <div class="weather-item">
+    <span class="weather-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="9" r="4" stroke="#B4B2A9" stroke-width="1.2" fill="none"/><path d="M4 5 Q8 2 12 5" stroke="#B4B2A9" stroke-width="1.2" fill="none"/></svg>
+    </span>
+    <div><span class="weather-label">Previsão 72h</span><br><span class="weather-value">2 mm <span style="color: var(--irrigai-text-hint); font-weight: 400; font-size: 11px;">30%</span></span></div>
+  </div>
+</div>
+
+<!-- ===== SETUP COMPLETION BAR ===== -->
+<div class="setup-bar">
+  <span style="font-weight: 500;">Configuração: 82%</span>
+  <div class="setup-progress"><div class="setup-fill"></div></div>
+  <span class="setup-link">Completar</span>
+</div>
+
+<!-- ===== SECTOR CARDS ===== -->
+<div class="section-label">Setores — recomendações de hoje</div>
+
+<div class="sectors-grid">
+
+  <!-- Sector 1: Irrigate, high confidence -->
+  <div class="sector-card">
+    <div class="sector-top">
+      <div>
+        <div class="sector-name">Setor 1 — Arbequina</div>
+        <div class="sector-crop">Olival super-intensivo · Acumulação de azeite</div>
+      </div>
+      <span class="action-badge action-irrigate">Irrigar</span>
+    </div>
+    <div class="sector-recommendation">
+      <div><span class="rec-value">4.5</span><span class="rec-unit">mm</span></div>
+      <div><span class="rec-value">92</span><span class="rec-unit">min</span></div>
+    </div>
+    <div class="rec-detail">Janela sugerida: 05:00 – 07:30</div>
+    <div class="sector-meta">
+      <span><span class="confidence-dot conf-high"></span>Confiança alta</span>
+      <span>Solo <span class="rootzone-bar"><span class="rootzone-fill rz-optimal" style="width:62%"></span></span></span>
+      <span>Última rega: há 3d</span>
+    </div>
+  </div>
+
+  <!-- Sector 2: Irrigate, high confidence, dry -->
+  <div class="sector-card">
+    <div class="sector-top">
+      <div>
+        <div class="sector-name">Setor 2 — Cobrançosa</div>
+        <div class="sector-crop">Olival intensivo · Acumulação de azeite</div>
+      </div>
+      <span class="action-badge action-irrigate">Irrigar</span>
+    </div>
+    <div class="sector-recommendation">
+      <div><span class="rec-value">5.1</span><span class="rec-unit">mm</span></div>
+      <div><span class="rec-value">104</span><span class="rec-unit">min</span></div>
+    </div>
+    <div class="rec-detail">Janela sugerida: 05:00 – 07:45</div>
+    <div class="sector-meta">
+      <span><span class="confidence-dot conf-high"></span>Confiança alta</span>
+      <span>Solo <span class="rootzone-bar"><span class="rootzone-fill rz-dry" style="width:38%"></span></span></span>
+      <span>Última rega: há 4d</span>
+    </div>
+  </div>
+
+  <!-- Sector 3: Reduce (rain forecast) -->
+  <div class="sector-card">
+    <div class="sector-top">
+      <div>
+        <div class="sector-name">Setor 3 — Lauranne</div>
+        <div class="sector-crop">Amendoal intensivo · Enchimento do miolo</div>
+      </div>
+      <span class="action-badge action-reduce">Reduzir</span>
+    </div>
+    <div class="sector-recommendation">
+      <div><span class="rec-value">3.2</span><span class="rec-unit">mm</span></div>
+      <div><span class="rec-value">48</span><span class="rec-unit">min</span></div>
+    </div>
+    <div class="rec-detail">Chuva prevista (2 mm) reduz necessidade</div>
+    <div class="sector-meta">
+      <span><span class="confidence-dot conf-medium"></span>Confiança média</span>
+      <span>Solo <span class="rootzone-bar"><span class="rootzone-fill rz-optimal" style="width:55%"></span></span></span>
+      <span>Última rega: há 2d</span>
+    </div>
+  </div>
+
+  <!-- Sector 4: Skip, low confidence, missing stage -->
+  <div class="sector-card">
+    <div class="sector-top">
+      <div>
+        <div class="sector-name">Setor 4 — Guara</div>
+        <div class="sector-crop">Amendoal intensivo · <span style="color: var(--irrigai-amber);">Estádio não definido</span></div>
+      </div>
+      <span class="action-badge action-skip">Não irrigar</span>
+    </div>
+    <div class="sector-recommendation">
+      <div style="font-size: 12px; color: var(--irrigai-text-muted); line-height: 1.5;">
+        Solo com humidade adequada.<br>Próxima verificação amanhã.
+      </div>
+    </div>
+    <div class="sector-meta">
+      <span><span class="confidence-dot conf-low"></span>Confiança baixa</span>
+      <span>Solo <span class="rootzone-bar"><span class="rootzone-fill rz-optimal" style="width:70%"></span></span></span>
+      <span style="color: var(--irrigai-amber);">Configurar estádio</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ===== ALERT STRIP ===== -->
+<div class="alert-strip">
+  <span class="alert-icon">
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L1 12h12L7 1z" stroke="#EF9F27" stroke-width="1.2" fill="none"/><line x1="7" y1="5" x2="7" y2="8" stroke="#EF9F27" stroke-width="1.2"/><circle cx="7" cy="10" r="0.5" fill="#EF9F27"/></svg>
+  </span>
+  <span style="flex: 1;">Sonda do Setor 2 — leitura a 10cm estável há 8h. Possível anomalia de sensor.</span>
+  <span style="color: #854F0B; font-weight: 500; cursor: pointer;">Ver</span>
+</div>
+
+<!-- ===== MISSING DATA PROMPTS ===== -->
+<div class="missing-data-card">
+  <div class="missing-title">Para melhorar as recomendações</div>
+  <div class="missing-item">
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="#EF9F27" stroke-width="1"/><line x1="7" y1="4" x2="7" y2="8" stroke="#EF9F27" stroke-width="1"/><circle cx="7" cy="10" r="0.5" fill="#EF9F27"/></svg>
+    <span>O Setor 4 não tem estádio fenológico definido.</span>
+    <span class="missing-action">Definir agora</span>
+  </div>
+  <div class="missing-item">
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="#B4B2A9" stroke-width="1"/><path d="M5 7h4M7 5v4" stroke="#B4B2A9" stroke-width="1"/></svg>
+    <span>Parâmetros de solo do Bloco Norte são valores por defeito.</span>
+    <span class="missing-action">Personalizar</span>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ===== PROBE CHART ===== -->
+<div class="section-header">
+  <div class="section-label" style="margin-bottom: 0;">Sonda — Setor 1 Arbequina</div>
+  <div class="probe-range">
+    <button class="range-btn">24h</button>
+    <button class="range-btn">48h</button>
+    <button class="range-btn active">7d</button>
+    <button class="range-btn">30d</button>
+  </div>
+</div>
+
+<div class="probe-preview">
+  <div class="chart-area">
+    <div class="chart-y-axis">
+      <span>0.32</span>
+      <span>0.24</span>
+      <span>0.16</span>
+      <span>0.08</span>
+    </div>
+    <div class="chart-body">
+      <div class="ref-line ref-fc"><span class="ref-label">CC</span></div>
+      <div class="ref-line ref-mad"><span class="ref-label">LGA</span></div>
+      <div class="ref-line ref-pwp"><span class="ref-label">PMP</span></div>
+
+      <div class="irrigation-marker" style="left: 28%;"><span class="irr-label">Rega 5.0mm</span></div>
+      <div class="irrigation-marker" style="left: 62%;"><span class="irr-label">Rega 4.2mm</span></div>
+
+      <svg style="overflow: visible; width: 100%; height: 100%;" viewBox="0 0 600 200" preserveAspectRatio="none">
+        <polyline fill="none" stroke="#85B7EB" stroke-width="2" points="0,60 30,62 60,68 90,72 100,75 110,82 120,90 140,92 160,55 180,58 200,62 230,68 260,75 280,80 300,85 320,90 340,95 350,98 360,60 380,62 400,66 420,72 450,78 480,85 510,90 540,96 570,100 600,106"/>
+        <polyline fill="none" stroke="#5DCAA5" stroke-width="2" points="0,80 30,82 60,85 90,88 100,90 110,95 120,100 140,102 160,75 180,78 200,82 230,86 260,92 280,96 300,100 320,104 340,108 350,110 360,78 380,80 400,84 420,88 450,94 480,98 510,104 540,108 570,112 600,116"/>
+        <polyline fill="none" stroke="#AFA9EC" stroke-width="1.5" points="0,110 30,111 60,112 90,113 100,114 110,115 120,116 140,116 160,108 180,109 200,110 230,112 260,114 280,115 300,116 320,117 340,118 350,118 360,110 380,111 400,112 420,113 450,114 480,116 510,117 540,118 570,119 600,120"/>
+        <polyline fill="none" stroke="#D3D1C7" stroke-width="1" stroke-dasharray="4,3" points="0,130 30,130 60,131 90,131 100,131 110,131 120,132 140,132 160,130 180,130 200,130 230,131 260,131 280,131 300,131 320,132 340,132 350,132 360,130 380,130 400,131 420,131 450,131 480,131 510,131 540,132 570,132 600,132"/>
+      </svg>
+    </div>
+  </div>
+  <div class="chart-legend">
+    <span class="legend-item"><span class="legend-line" style="background:#85B7EB"></span>10 cm</span>
+    <span class="legend-item"><span class="legend-line" style="background:#5DCAA5"></span>30 cm</span>
+    <span class="legend-item"><span class="legend-line" style="background:#AFA9EC"></span>60 cm</span>
+    <span class="legend-item"><span class="legend-line" style="background:#D3D1C7"></span>90 cm</span>
+    <span class="legend-item" style="margin-left: auto;"><span style="display: inline-block; width: 2px; height: 12px; background: #97C459; border-radius: 1px; vertical-align: middle; margin-right: 4px;"></span>Rega</span>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ===== RECOMMENDATION DETAIL ===== -->
+<div class="section-label">Detalhe da recomendação — Setor 1</div>
+
+<div class="rec-detail-card">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+    <div>
+      <span class="action-badge action-irrigate" style="font-size: 13px; padding: 4px 14px;">Irrigar</span>
+      <span style="font-size: 12px; color: var(--irrigai-text-muted); margin-left: 8px;">4.5 mm · 92 min</span>
+    </div>
+    <div class="confidence-label">82%</div>
+  </div>
+
+  <div class="confidence-bar-wrap">
+    <span style="font-size: 11px; color: var(--irrigai-text-muted); min-width: 60px;">Confiança</span>
+    <div class="confidence-bar"><div class="confidence-fill" style="width: 82%;"></div></div>
+    <span style="font-size: 11px; color: var(--irrigai-green-dark); font-weight: 500;">Alta</span>
+  </div>
+
+  <div class="section-label" style="margin-top: 14px;">Zona radicular</div>
+  <div class="depth-bars">
+    <div class="depth-row">
+      <span class="depth-label">10 cm</span>
+      <div class="depth-track"><div class="depth-fill df-optimal" style="width: 65%;"></div></div>
+      <span class="depth-value">0.21 m³/m³</span>
+    </div>
+    <div class="depth-row">
+      <span class="depth-label">30 cm</span>
+      <div class="depth-track"><div class="depth-fill df-optimal" style="width: 58%;"></div></div>
+      <span class="depth-value">0.19 m³/m³</span>
+    </div>
+    <div class="depth-row">
+      <span class="depth-label">60 cm</span>
+      <div class="depth-track"><div class="depth-fill df-wet" style="width: 72%;"></div></div>
+      <span class="depth-value">0.24 m³/m³</span>
+    </div>
+    <div class="depth-row">
+      <span class="depth-label">90 cm</span>
+      <div class="depth-track"><div class="depth-fill df-wet" style="width: 78%;"></div></div>
+      <span class="depth-value">0.26 m³/m³</span>
+    </div>
+  </div>
+
+  <div class="section-label" style="margin-top: 14px;">Razões</div>
+  <ul class="reason-list">
+    <li class="reason-item">
+      <span class="reason-icon ri-trigger">
+        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 1v4l2.5 1.5" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+      </span>
+      <span>Depleção do solo atingiu 68% da água disponível, acima do limiar de 65% (MAD).</span>
+    </li>
+    <li class="reason-item">
+      <span class="reason-icon ri-weather">
+        <svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3" fill="currentColor"/></svg>
+      </span>
+      <span>ET0 elevado (7.2 mm) e sem chuva significativa prevista nas próximas 48h.</span>
+    </li>
+    <li class="reason-item">
+      <span class="reason-icon ri-probe">
+        <svg width="10" height="10" viewBox="0 0 10 10"><rect x="3" y="1" width="4" height="8" rx="1" stroke="currentColor" stroke-width="1" fill="none"/></svg>
+      </span>
+      <span>Tendência de secagem nas últimas 24h a 10 cm e 30 cm. Sem anomalias detetadas.</span>
+    </li>
+    <li class="reason-item">
+      <span class="reason-icon ri-assumption">
+        <svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" stroke="currentColor" stroke-width="1" fill="none"/><path d="M5 3v3" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="7.5" r="0.5" fill="currentColor"/></svg>
+      </span>
+      <span>Parâmetros de solo baseados no preset "Franco-argiloso". Valores medidos melhorariam a precisão.</span>
+    </li>
+  </ul>
+
+  <div style="display: flex; gap: 8px; margin-top: 16px;">
+    <button class="btn-primary">Aceitar recomendação</button>
+    <button class="btn-secondary">Rejeitar</button>
+  </div>
+</div>
+
+<!-- ===== BOTTOM NAV ===== -->
+<div class="bottom-nav">
+  <div class="nav-item active">
+    <span class="nav-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8l6-5.5L14 8v6H2V8z" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+    </span>
+    Início
+  </div>
+  <div class="nav-item">
+    <span class="nav-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13 6a5 5 0 1 0-1.5 3.5L14 12" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+    </span>
+    Alertas <span class="nav-badge">1</span>
+  </div>
+  <div class="nav-item">
+    <span class="nav-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 14a5 5 0 0 0 5-5C13 5 8 1 8 1S3 5 3 9a5 5 0 0 0 5 5z" stroke="currentColor" stroke-width="1.2" fill="none"/><line x1="6" y1="8" x2="10" y2="8" stroke="currentColor" stroke-width="1"/></svg>
+    </span>
+    Registar rega
+  </div>
+  <div class="nav-item">
+    <span class="nav-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1" fill="none"/></svg>
+    </span>
+    Definições
+  </div>
+</div>
+
+</body>
+</html>

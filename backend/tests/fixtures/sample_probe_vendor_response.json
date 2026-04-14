@@ -1,0 +1,62 @@
+{
+  "_comment": "Hypothetical raw response from a probe vendor API (proprietary format). Shows the mapping to ProbeReadingDTO fields.",
+  "_mapping": {
+    "device_id": "→ ProbeReadingDTO.probe_external_id",
+    "readings[].sensor_depth": "→ ProbeReadingDTO.depth_cm (vendor uses strings like '10cm', parse int)",
+    "readings[].recorded_at": "→ ProbeReadingDTO.timestamp (vendor uses ISO8601, ensure tz-aware)",
+    "readings[].raw_count": "→ ProbeReadingDTO.raw_value",
+    "readings[].vwc": "→ ProbeReadingDTO.calibrated_value (vendor pre-applies factory calibration)",
+    "readings[].sensor_type": "→ ProbeReadingDTO.sensor_type ('soil_moisture' → 'moisture')",
+    "readings[].unit": "→ ProbeReadingDTO.unit ('m3/m3' → 'vwc_m3m3')"
+  },
+  "device_id": "VS-FIELD-042",
+  "farm_id": "external-farm-ref-001",
+  "retrieved_at": "2026-04-07T10:00:00Z",
+  "readings": [
+    {
+      "sensor_depth": "10cm",
+      "recorded_at": "2026-04-07T09:00:00Z",
+      "raw_count": 2341,
+      "vwc": 0.2218,
+      "sensor_type": "soil_moisture",
+      "unit": "m3/m3",
+      "battery_mv": 3850,
+      "temperature_c": 24.1
+    },
+    {
+      "sensor_depth": "30cm",
+      "recorded_at": "2026-04-07T09:00:00Z",
+      "raw_count": 2498,
+      "vwc": 0.2441,
+      "sensor_type": "soil_moisture",
+      "unit": "m3/m3",
+      "battery_mv": 3850,
+      "temperature_c": 22.8
+    },
+    {
+      "sensor_depth": "60cm",
+      "recorded_at": "2026-04-07T09:00:00Z",
+      "raw_count": 2612,
+      "vwc": 0.2580,
+      "sensor_type": "soil_moisture",
+      "unit": "m3/m3",
+      "battery_mv": 3850,
+      "temperature_c": 20.5
+    },
+    {
+      "sensor_depth": "90cm",
+      "recorded_at": "2026-04-07T09:00:00Z",
+      "raw_count": 2710,
+      "vwc": 0.2695,
+      "sensor_type": "soil_moisture",
+      "unit": "m3/m3",
+      "battery_mv": 3850,
+      "temperature_c": 19.2
+    }
+  ],
+  "device_status": {
+    "connection": "online",
+    "last_sync": "2026-04-07T09:05:00Z",
+    "firmware": "2.3.1"
+  }
+}
