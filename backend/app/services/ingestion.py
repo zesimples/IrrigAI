@@ -303,10 +303,12 @@ async def ingest_weather_forecasts(
 # Farm-level ingestion wrapper (used by scheduler)
 # ---------------------------------------------------------------------------
 
-async def ingest_farm(farm_id: str, db: AsyncSession) -> dict:
+async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -> dict:
     """Run probe + weather ingestion for all probes of a farm.
 
     Returns counts of inserted records.
+    lookback_hours: how far back to fetch probe readings (default 2h for scheduler,
+                    use a larger value for initial backfill).
     """
     from datetime import timedelta
     from app.adapters.factory import get_probe_provider, get_weather_provider
@@ -321,7 +323,7 @@ async def ingest_farm(farm_id: str, db: AsyncSession) -> dict:
     probe_provider = get_probe_provider(settings, farm=farm)
     weather_provider = get_weather_provider(settings, farm=farm)
     now = datetime.now(UTC)
-    since = now - timedelta(hours=2)
+    since = now - timedelta(hours=lookback_hours)
 
     probe_total = 0
     plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))

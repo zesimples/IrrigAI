@@ -82,7 +82,7 @@ async def _run_data_ingestion() -> None:
             farms = farms_result.scalars().all()
             for farm in farms:
                 try:
-                    await ingest_farm(farm.id, db)
+                    await ingest_farm(farm.id, db, lookback_hours=4)
                 except Exception:
                     logger.exception("Data ingestion failed for farm %s", farm.id)
         except Exception:
@@ -115,10 +115,10 @@ def start_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=600,
     )
 
-    # Data ingestion every 30 minutes
+    # Data ingestion every 15 minutes
     _scheduler.add_job(
         _run_data_ingestion,
-        trigger=IntervalTrigger(minutes=30),
+        trigger=IntervalTrigger(minutes=15),
         id="data_ingestion",
         replace_existing=True,
         misfire_grace_time=120,

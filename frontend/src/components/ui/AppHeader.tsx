@@ -28,7 +28,9 @@ export function AppHeader({ crumbs, right, farmDate }: AppHeaderProps) {
       <header className="px-4 pt-5 pb-5 sm:px-6 border-b border-black/[0.07]">
         <div className="mx-auto max-w-3xl flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
-            <Logo size={28} />
+            <Link href="/" className="shrink-0 hover:opacity-70 transition-opacity" aria-label="Explorações">
+              <Logo size={28} />
+            </Link>
             <div>
               <h1 className="font-display text-[20px] font-[500] leading-none tracking-[-0.02em] text-irrigai-text">
                 {crumbs[0].label}

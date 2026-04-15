@@ -902,10 +902,10 @@ def seed(engine) -> None:
             session.flush()
 
             # ProbeDepth records — depths and sensor type differ by probe model.
-            # Vineyard TDT probes report vol% (0–100); calibration_factor=0.01
-            # converts to m³/m³ (0–1) expected by the quality checker and engine.
+            # The MyIrrigation adapter normalises vol% → m³/m³ at ingest time,
+            # so calibration_factor=1.0 for all VWC probes (no double-conversion).
             sensor_type = "soil_moisture" if is_vineyard else "soil_tension"
-            cal_factor  = 0.01 if is_vineyard else 1.0
+            cal_factor  = 1.0
             for depth_cm in depth_levels:
                 pd = ProbeDepth(
                     id=str(uuid.uuid4()),
@@ -1087,6 +1087,7 @@ def seed(engine) -> None:
 
         conq_sectors = [
             # ── Amendoal (project 959) ────────────────────────────────────
+            # Depths confirmed via MyIrrigation API 2026-04-14.
             {
                 "plot_id": plot_amendoal.id,
                 "name": "Turno 1 (S02)",
@@ -1097,6 +1098,7 @@ def seed(engine) -> None:
                 "template": almond_tmpl,
                 "irrig_system": _DRIP_CONQ_ALMOND,
                 "probe_external_id": PROBE_CONQ_S02,
+                "probe_depths": [10, 20, 30, 40, 50, 60, 70, 80, 90],
             },
             {
                 "plot_id": plot_amendoal.id,
@@ -1108,6 +1110,7 @@ def seed(engine) -> None:
                 "template": almond_tmpl,
                 "irrig_system": _DRIP_CONQ_ALMOND,
                 "probe_external_id": PROBE_CONQ_S03,
+                "probe_depths": [5, 15, 25, 35, 45, 55, 65, 75, 85],
             },
             {
                 "plot_id": plot_amendoal.id,
@@ -1119,6 +1122,8 @@ def seed(engine) -> None:
                 "template": almond_tmpl,
                 "irrig_system": _DRIP_CONQ_ALMOND,
                 "probe_external_id": PROBE_CONQ_S10,
+                # depths not yet confirmed from API — keep conservative default
+                "probe_depths": [40, 60],
             },
             {
                 "plot_id": plot_amendoal.id,
@@ -1130,6 +1135,7 @@ def seed(engine) -> None:
                 "template": almond_tmpl,
                 "irrig_system": _DRIP_CONQ_ALMOND,
                 "probe_external_id": PROBE_CONQ_S12,
+                "probe_depths": [10, 20, 30, 40, 50, 60, 70, 80, 90],
             },
             {
                 "plot_id": plot_amendoal.id,
@@ -1141,6 +1147,7 @@ def seed(engine) -> None:
                 "template": almond_tmpl,
                 "irrig_system": _DRIP_CONQ_ALMOND,
                 "probe_external_id": PROBE_CONQ_S19,
+                "probe_depths": [10, 20, 30, 40, 50, 60],
             },
             {
                 "plot_id": plot_amendoal.id,
@@ -1152,6 +1159,7 @@ def seed(engine) -> None:
                 "template": almond_tmpl,
                 "irrig_system": _DRIP_CONQ_ALMOND,
                 "probe_external_id": PROBE_CONQ_S25,
+                "probe_depths": [10, 20, 30, 40, 50, 60],
             },
             # ── Olival (project 1597) ─────────────────────────────────────
             {
@@ -1164,6 +1172,7 @@ def seed(engine) -> None:
                 "template": olive_tmpl,
                 "irrig_system": _DRIP_CONQ_OLIVE,
                 "probe_external_id": PROBE_CONQ_O01A,
+                "probe_depths": [10, 20, 30, 40, 50, 60, 70, 80, 90],
             },
             {
                 "plot_id": plot_olival.id,
@@ -1175,6 +1184,7 @@ def seed(engine) -> None:
                 "template": olive_tmpl,
                 "irrig_system": _DRIP_CONQ_OLIVE,
                 "probe_external_id": PROBE_CONQ_O01B,
+                "probe_depths": [5, 15, 25, 35, 45, 55],
             },
             {
                 "plot_id": plot_olival.id,
@@ -1186,6 +1196,7 @@ def seed(engine) -> None:
                 "template": olive_tmpl,
                 "irrig_system": _DRIP_CONQ_OLIVE,
                 "probe_external_id": PROBE_CONQ_O01C,
+                "probe_depths": [5, 15, 25, 35, 45, 55],
             },
             {
                 "plot_id": plot_olival.id,
@@ -1197,6 +1208,7 @@ def seed(engine) -> None:
                 "template": olive_tmpl,
                 "irrig_system": _DRIP_CONQ_OLIVE,
                 "probe_external_id": PROBE_CONQ_O02,
+                "probe_depths": [10, 20, 30, 40, 50, 60, 70, 80, 90],
             },
             {
                 "plot_id": plot_olival.id,
@@ -1208,6 +1220,8 @@ def seed(engine) -> None:
                 "template": olive_tmpl,
                 "irrig_system": _DRIP_CONQ_OLIVE,
                 "probe_external_id": PROBE_CONQ_O03,
+                # depths not yet confirmed from API — keep conservative default
+                "probe_depths": [40, 60],
             },
             {
                 "plot_id": plot_olival.id,
@@ -1219,6 +1233,8 @@ def seed(engine) -> None:
                 "template": olive_tmpl,
                 "irrig_system": _DRIP_CONQ_OLIVE,
                 "probe_external_id": PROBE_CONQ_O04,
+                # depths not yet confirmed from API — keep conservative default
+                "probe_depths": [40, 60],
             },
             {
                 "plot_id": plot_olival.id,
@@ -1230,6 +1246,7 @@ def seed(engine) -> None:
                 "template": olive_tmpl,
                 "irrig_system": _DRIP_CONQ_OLIVE,
                 "probe_external_id": PROBE_CONQ_O05,
+                "probe_depths": [10, 20, 30, 40, 50, 60, 70, 80, 90],
             },
         ]
 
@@ -1239,6 +1256,7 @@ def seed(engine) -> None:
             tmpl = sd.pop("template")
             irrig_data = sd.pop("irrig_system")
             probe_ext_id = sd.pop("probe_external_id")
+            depth_levels = sd.pop("probe_depths", [40, 60])
 
             sector = Sector(id=str(uuid.uuid4()), **sd)
             session.add(sector)
@@ -1279,12 +1297,12 @@ def seed(engine) -> None:
             session.add(probe)
             session.flush()
 
-            for depth_cm in [40, 60]:
+            for depth_cm in depth_levels:
                 pd = ProbeDepth(
                     id=str(uuid.uuid4()),
                     probe_id=probe.id,
                     depth_cm=depth_cm,
-                    sensor_type="soil_tension",
+                    sensor_type="soil_moisture",
                     calibration_offset=0.0,
                     calibration_factor=1.0,
                 )

@@ -477,9 +477,11 @@ def _parse_device_readings(raw: dict | list, probe_external_id: str) -> list[Pro
             if unit_key == "soil_tension_cbar" and (value <= -200 or value >= 253):
                 continue
 
-            # Store raw value as-is (vol% for TDT probes, cBar for Watermark).
-            # The ingestion service applies ProbeDepth.calibration_factor to convert
-            # vol% → m³/m³ (factor=0.01 set on vineyard probe depths at seed time).
+            # Normalise VWC: iMetos TDT probes report vol% (e.g. 23.3).
+            # Our internal unit is m³/m³ (fractional). Any value > 1.0 is
+            # unambiguously in percentage scale → divide by 100.
+            if unit_key == "vwc_m3m3" and value > 1.0:
+                value = value / 100.0
             raw_value = value
 
             ts = _unix_ms_to_datetime(ts_str)
