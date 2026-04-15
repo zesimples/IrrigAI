@@ -56,6 +56,27 @@ PROBE_T63_CAMPO      = "604/1881"  # T63 Campo Ampelográfico TA 10 — depths 2
 PROBE_T76_TFRANCA    = "604/1880"  # T76 Touriga Franca TA 15    — depths 20/40/60/80/100cm
 PROBE_T84_ALFROCH    = "604/5809"  # T84 Alfrocheiro             — depths 20/40/60/80cm
 
+# ---------------------------------------------------------------------------
+# Conqueiros — Amendoal (project 959) — Watermark WM200SS, cBar
+# ---------------------------------------------------------------------------
+PROBE_CONQ_S02  = "959/4914"   # Turno 1 (S02) — almond
+PROBE_CONQ_S03  = "959/4915"   # Turno 1 (S03) — almond
+PROBE_CONQ_S10  = "959/4913"   # Turno 2 (S10) — almond
+PROBE_CONQ_S12  = "959/4912"   # Turno 2 (S12) — almond
+PROBE_CONQ_S19  = "959/8404"   # Turno 3 (S19) Amendoal Novo — almond
+PROBE_CONQ_S25  = "959/7044"   # Turno 4 (S25) Amendoal Novo — almond
+
+# ---------------------------------------------------------------------------
+# Conqueiros — Olival (project 1597) — Watermark WM200SS, cBar
+# ---------------------------------------------------------------------------
+PROBE_CONQ_O01A = "1597/3634"  # Turno 1 (S01) — olive
+PROBE_CONQ_O01B = "1597/7674"  # Turno 1 (S02) — olive
+PROBE_CONQ_O01C = "1597/7673"  # Turno 1 (S03) — olive
+PROBE_CONQ_O02  = "1597/3891"  # Turno 2 (S08) — olive
+PROBE_CONQ_O03  = "1597/3633"  # Turno 3 (S12) — olive
+PROBE_CONQ_O04  = "1597/3629"  # Turno 4 (S15) — olive
+PROBE_CONQ_O05  = "1597/3832"  # Turno 5 (S20) — olive
+
 import copy
 import math
 import random
@@ -455,6 +476,11 @@ def seed(engine) -> None:
             region="Alentejo",
             timezone="Europe/Lisbon",
             owner_id=grower.id,
+            myirrigation_username="esporao_api",
+            myirrigation_password="esporao_api",
+            myirrigation_client_id="7JTTP4XGVZ9S1M7PEABD",
+            myirrigation_client_secret="PKVSK5BPNNYE4JE2KOQ2",
+            myirrigation_weather_device_id="1583",
         )
         session.add(farm)
         session.flush()
@@ -925,6 +951,345 @@ def seed(engine) -> None:
             session.add(evt)
 
         session.commit()
+
+    # ----------------------------------------------------------------
+    # C) Sample farm — Herdade dos Conqueiros
+    # ----------------------------------------------------------------
+    print("\n[3/3] Seeding sample farm 'Herdade dos Conqueiros'...")
+    with Session(engine) as session:
+        existing_conq = session.execute(
+            select(Farm).where(Farm.name == "Herdade dos Conqueiros")
+        ).scalar_one_or_none()
+
+        if existing_conq:
+            print("  Clearing existing Conqueiros data...")
+            sector_ids = [
+                row[0] for row in session.execute(
+                    text("""
+                        SELECT s.id FROM sector s
+                        JOIN plot p ON s.plot_id = p.id
+                        WHERE p.farm_id = :farm_id
+                    """),
+                    {"farm_id": existing_conq.id},
+                ).fetchall()
+            ]
+            if sector_ids:
+                probe_ids = [
+                    row[0] for row in session.execute(
+                        text("SELECT id FROM probe WHERE sector_id = ANY(:ids)"),
+                        {"ids": sector_ids},
+                    ).fetchall()
+                ]
+                if probe_ids:
+                    depth_ids = [
+                        row[0] for row in session.execute(
+                            text("SELECT id FROM probe_depth WHERE probe_id = ANY(:ids)"),
+                            {"ids": probe_ids},
+                        ).fetchall()
+                    ]
+                    if depth_ids:
+                        session.execute(
+                            text("DELETE FROM probe_reading WHERE probe_depth_id = ANY(:ids)"),
+                            {"ids": depth_ids},
+                        )
+            session.delete(existing_conq)
+            session.flush()
+            print("  Existing Conqueiros data cleared.")
+
+        # Reuse same owner/agronomist as Esporão
+        grower = session.execute(
+            select(User).where(User.email == "joao.silva@demo.irrigai.pt")
+        ).scalar_one()
+
+        # Almond and olive templates
+        almond_tmpl = session.execute(
+            select(CropProfileTemplate).where(
+                CropProfileTemplate.crop_type == "almond",
+                CropProfileTemplate.is_system_default.is_(True),
+            )
+        ).scalar_one()
+        olive_tmpl = session.execute(
+            select(CropProfileTemplate).where(
+                CropProfileTemplate.crop_type == "olive",
+                CropProfileTemplate.is_system_default.is_(True),
+            )
+        ).scalar_one()
+
+        # Sandy-clay-loam soil for Conqueiros
+        sandy_clay_loam = session.execute(
+            select(SoilPreset).where(SoilPreset.texture == "sandy_clay_loam")
+        ).scalar_one_or_none()
+        clay_loam = session.execute(
+            select(SoilPreset).where(SoilPreset.texture == "clay_loam")
+        ).scalar_one()
+        soil = sandy_clay_loam or clay_loam
+
+        farm_conq = Farm(
+            id=str(uuid.uuid4()),
+            name="Herdade dos Conqueiros",
+            location_lat=37.95,
+            location_lon=-7.45,
+            region="Alentejo",
+            timezone="Europe/Lisbon",
+            owner_id=grower.id,
+            myirrigation_username="conqueiros_api",
+            myirrigation_password="conqueiros_api",
+            myirrigation_client_id="YYRIcSNREmmcFwNbt1i02w",
+            myirrigation_client_secret="BTF77w9Yf6gUjabINuiFRA",
+            myirrigation_weather_device_id="824",
+        )
+        session.add(farm_conq)
+        session.flush()
+
+        _DRIP_CONQ_ALMOND = {
+            "system_type": "drip",
+            "emitter_flow_lh": 2.3,
+            "emitter_spacing_m": 0.5,
+            "lateral_spacing_m": 6.0,
+            "distribution_uniformity": 0.88,
+        }
+        _DRIP_CONQ_OLIVE = {
+            "system_type": "drip",
+            "emitter_flow_lh": 2.3,
+            "emitter_spacing_m": 0.5,
+            "lateral_spacing_m": 7.0,
+            "distribution_uniformity": 0.88,
+        }
+
+        plot_amendoal = Plot(
+            id=str(uuid.uuid4()),
+            farm_id=farm_conq.id,
+            name="Amendoal Conqueiros",
+            area_ha=None,
+            soil_texture=soil.texture,
+            field_capacity=soil.field_capacity,
+            wilting_point=soil.wilting_point,
+            stone_content_pct=5.0,
+            soil_preset_id=soil.id,
+        )
+        plot_olival = Plot(
+            id=str(uuid.uuid4()),
+            farm_id=farm_conq.id,
+            name="Olival",
+            area_ha=None,
+            soil_texture=clay_loam.texture,
+            field_capacity=clay_loam.field_capacity,
+            wilting_point=clay_loam.wilting_point,
+            stone_content_pct=5.0,
+            soil_preset_id=clay_loam.id,
+        )
+        session.add_all([plot_amendoal, plot_olival])
+        session.flush()
+
+        conq_sectors = [
+            # ── Amendoal (project 959) ────────────────────────────────────
+            {
+                "plot_id": plot_amendoal.id,
+                "name": "Turno 1 (S02)",
+                "crop_type": "almond",
+                "variety": "Amendoeira",
+                "current_phenological_stage": "almond_flowering",
+                "irrigation_strategy": "full_etc",
+                "template": almond_tmpl,
+                "irrig_system": _DRIP_CONQ_ALMOND,
+                "probe_external_id": PROBE_CONQ_S02,
+            },
+            {
+                "plot_id": plot_amendoal.id,
+                "name": "Turno 1 (S03)",
+                "crop_type": "almond",
+                "variety": "Amendoeira",
+                "current_phenological_stage": "almond_flowering",
+                "irrigation_strategy": "full_etc",
+                "template": almond_tmpl,
+                "irrig_system": _DRIP_CONQ_ALMOND,
+                "probe_external_id": PROBE_CONQ_S03,
+            },
+            {
+                "plot_id": plot_amendoal.id,
+                "name": "Turno 2 (S10)",
+                "crop_type": "almond",
+                "variety": "Amendoeira",
+                "current_phenological_stage": "almond_flowering",
+                "irrigation_strategy": "full_etc",
+                "template": almond_tmpl,
+                "irrig_system": _DRIP_CONQ_ALMOND,
+                "probe_external_id": PROBE_CONQ_S10,
+            },
+            {
+                "plot_id": plot_amendoal.id,
+                "name": "Turno 2 (S12)",
+                "crop_type": "almond",
+                "variety": "Amendoeira",
+                "current_phenological_stage": "almond_flowering",
+                "irrigation_strategy": "full_etc",
+                "template": almond_tmpl,
+                "irrig_system": _DRIP_CONQ_ALMOND,
+                "probe_external_id": PROBE_CONQ_S12,
+            },
+            {
+                "plot_id": plot_amendoal.id,
+                "name": "Turno 3 (S19) Amendoal Novo",
+                "crop_type": "almond",
+                "variety": "Amendoeira",
+                "current_phenological_stage": "almond_flowering",
+                "irrigation_strategy": "full_etc",
+                "template": almond_tmpl,
+                "irrig_system": _DRIP_CONQ_ALMOND,
+                "probe_external_id": PROBE_CONQ_S19,
+            },
+            {
+                "plot_id": plot_amendoal.id,
+                "name": "Turno 4 (S25) Amendoal Novo",
+                "crop_type": "almond",
+                "variety": "Amendoeira",
+                "current_phenological_stage": "almond_flowering",
+                "irrigation_strategy": "full_etc",
+                "template": almond_tmpl,
+                "irrig_system": _DRIP_CONQ_ALMOND,
+                "probe_external_id": PROBE_CONQ_S25,
+            },
+            # ── Olival (project 1597) ─────────────────────────────────────
+            {
+                "plot_id": plot_olival.id,
+                "name": "Turno 1 (S01)",
+                "crop_type": "olive",
+                "variety": "Oliveira",
+                "current_phenological_stage": "olive_bud_break",
+                "irrigation_strategy": "full_etc",
+                "template": olive_tmpl,
+                "irrig_system": _DRIP_CONQ_OLIVE,
+                "probe_external_id": PROBE_CONQ_O01A,
+            },
+            {
+                "plot_id": plot_olival.id,
+                "name": "Turno 1 (S02)",
+                "crop_type": "olive",
+                "variety": "Oliveira",
+                "current_phenological_stage": "olive_bud_break",
+                "irrigation_strategy": "full_etc",
+                "template": olive_tmpl,
+                "irrig_system": _DRIP_CONQ_OLIVE,
+                "probe_external_id": PROBE_CONQ_O01B,
+            },
+            {
+                "plot_id": plot_olival.id,
+                "name": "Turno 1 (S03)",
+                "crop_type": "olive",
+                "variety": "Oliveira",
+                "current_phenological_stage": "olive_bud_break",
+                "irrigation_strategy": "full_etc",
+                "template": olive_tmpl,
+                "irrig_system": _DRIP_CONQ_OLIVE,
+                "probe_external_id": PROBE_CONQ_O01C,
+            },
+            {
+                "plot_id": plot_olival.id,
+                "name": "Turno 2 (S08)",
+                "crop_type": "olive",
+                "variety": "Oliveira",
+                "current_phenological_stage": "olive_bud_break",
+                "irrigation_strategy": "full_etc",
+                "template": olive_tmpl,
+                "irrig_system": _DRIP_CONQ_OLIVE,
+                "probe_external_id": PROBE_CONQ_O02,
+            },
+            {
+                "plot_id": plot_olival.id,
+                "name": "Turno 3 (S12)",
+                "crop_type": "olive",
+                "variety": "Oliveira",
+                "current_phenological_stage": "olive_bud_break",
+                "irrigation_strategy": "full_etc",
+                "template": olive_tmpl,
+                "irrig_system": _DRIP_CONQ_OLIVE,
+                "probe_external_id": PROBE_CONQ_O03,
+            },
+            {
+                "plot_id": plot_olival.id,
+                "name": "Turno 4 (S15)",
+                "crop_type": "olive",
+                "variety": "Oliveira",
+                "current_phenological_stage": "olive_bud_break",
+                "irrigation_strategy": "full_etc",
+                "template": olive_tmpl,
+                "irrig_system": _DRIP_CONQ_OLIVE,
+                "probe_external_id": PROBE_CONQ_O04,
+            },
+            {
+                "plot_id": plot_olival.id,
+                "name": "Turno 5 (S20)",
+                "crop_type": "olive",
+                "variety": "Oliveira",
+                "current_phenological_stage": "olive_bud_break",
+                "irrigation_strategy": "full_etc",
+                "template": olive_tmpl,
+                "irrig_system": _DRIP_CONQ_OLIVE,
+                "probe_external_id": PROBE_CONQ_O05,
+            },
+        ]
+
+        now = datetime.now(UTC)
+
+        for sd in conq_sectors:
+            tmpl = sd.pop("template")
+            irrig_data = sd.pop("irrig_system")
+            probe_ext_id = sd.pop("probe_external_id")
+
+            sector = Sector(id=str(uuid.uuid4()), **sd)
+            session.add(sector)
+            session.flush()
+
+            scp = SectorCropProfile(
+                id=str(uuid.uuid4()),
+                sector_id=sector.id,
+                source_template_id=tmpl.id,
+                crop_type=tmpl.crop_type,
+                mad=tmpl.mad,
+                root_depth_mature_m=tmpl.root_depth_mature_m,
+                root_depth_young_m=tmpl.root_depth_young_m,
+                maturity_age_years=tmpl.maturity_age_years,
+                stages=copy.deepcopy(tmpl.stages),
+                is_customized=False,
+            )
+            session.add(scp)
+
+            irrig_sys = IrrigationSystem(
+                id=str(uuid.uuid4()),
+                sector_id=sector.id,
+                **irrig_data,
+            )
+            session.add(irrig_sys)
+
+            probe = Probe(
+                id=str(uuid.uuid4()),
+                sector_id=sector.id,
+                external_id=probe_ext_id,
+                manufacturer="Pessl Instruments",
+                model="Watermark WM200SS",
+                install_date=date(2023, 3, 15),
+                health_status="ok",
+                last_reading_at=None,
+                is_reference=True,
+            )
+            session.add(probe)
+            session.flush()
+
+            for depth_cm in [40, 60]:
+                pd = ProbeDepth(
+                    id=str(uuid.uuid4()),
+                    probe_id=probe.id,
+                    depth_cm=depth_cm,
+                    sensor_type="soil_tension",
+                    calibration_offset=0.0,
+                    calibration_factor=1.0,
+                )
+                session.add(pd)
+
+            print(f"  [+] Sector '{sector.name}' | probe={probe_ext_id}")
+
+        session.commit()
+        print(f"  Conqueiros: 2 plots, {len(conq_sectors)} sectors seeded ✓")
 
     # Verify counts
     with Session(engine) as session:

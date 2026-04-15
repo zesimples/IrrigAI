@@ -1,8 +1,8 @@
 """Adapter factory.
 
 Maps provider names (from .env) to concrete implementations.
-To add a new vendor: create a class implementing ProbeDataProvider or
-WeatherDataProvider, import it here, and add a branch.
+Supports per-farm credentials: if a Farm record has myirrigation_* fields set,
+those override the global .env credentials so two farms can use different accounts.
 """
 
 from app.adapters.base import ProbeDataProvider, WeatherDataProvider
@@ -10,9 +10,10 @@ from app.adapters.mock_probe import MockProbeProvider
 from app.adapters.mock_weather import MockWeatherProvider
 from app.config import Settings
 
-# Adapters are lazily imported to avoid hard dependency on httpx at startup
+# Cache adapters by (username, weather_device_id) so the same account reuses one
+# adapter (and its cached JWT token) across calls.
 _irriwatch_instance: "IrriWatchAdapter | None" = None  # type: ignore[name-defined]
-_myirrigation_instance: "MyIrrigationAdapter | None" = None  # type: ignore[name-defined]
+_myirrigation_cache: "dict[tuple, MyIrrigationAdapter]" = {}  # type: ignore[name-defined]
 
 
 def _get_irriwatch(config: Settings):
@@ -34,35 +35,64 @@ def _get_irriwatch(config: Settings):
     return _irriwatch_instance
 
 
-def _get_myirrigation(config: Settings):
-    """Return a singleton MyIrrigationAdapter (shared for probe + weather)."""
-    global _myirrigation_instance
-    if _myirrigation_instance is None:
-        from app.adapters.myirrigation import MyIrrigationAdapter
-        if not config.MYIRRIGATION_USERNAME or not config.MYIRRIGATION_PASSWORD:
-            raise ValueError(
-                "MYIRRIGATION_USERNAME and MYIRRIGATION_PASSWORD must be set in .env "
-                "when PROBE_PROVIDER=myirrigation or WEATHER_PROVIDER=myirrigation."
-            )
-        _myirrigation_instance = MyIrrigationAdapter(
-            base_url=config.MYIRRIGATION_BASE_URL,
-            username=config.MYIRRIGATION_USERNAME,
-            password=config.MYIRRIGATION_PASSWORD,
-            client_id=config.MYIRRIGATION_CLIENT_ID,
-            client_secret=config.MYIRRIGATION_CLIENT_SECRET,
-            project_id=config.MYIRRIGATION_PROJECT_ID,
-            weather_device_id=config.MYIRRIGATION_WEATHER_DEVICE_ID,
+def _get_myirrigation(
+    config: Settings,
+    username: str | None = None,
+    password: str | None = None,
+    client_id: str | None = None,
+    client_secret: str | None = None,
+    project_id: str | None = None,
+    weather_device_id: str | None = None,
+):
+    """Return a MyIrrigationAdapter, reusing a cached instance for the same credentials.
+
+    Farm-level credentials override global config when provided.
+    """
+    from app.adapters.myirrigation import MyIrrigationAdapter
+
+    resolved_username = username or config.MYIRRIGATION_USERNAME
+    resolved_password = password or config.MYIRRIGATION_PASSWORD
+    resolved_client_id = client_id or config.MYIRRIGATION_CLIENT_ID
+    resolved_client_secret = client_secret or config.MYIRRIGATION_CLIENT_SECRET
+    resolved_project_id = project_id or config.MYIRRIGATION_PROJECT_ID
+    resolved_device_id = weather_device_id or config.MYIRRIGATION_WEATHER_DEVICE_ID
+
+    if not resolved_username or not resolved_password:
+        raise ValueError(
+            "MyIrrigation credentials not configured. Set MYIRRIGATION_USERNAME and "
+            "MYIRRIGATION_PASSWORD in .env or on the Farm record."
         )
-    return _myirrigation_instance
+
+    cache_key = (resolved_username, resolved_device_id)
+    if cache_key not in _myirrigation_cache:
+        _myirrigation_cache[cache_key] = MyIrrigationAdapter(
+            base_url=config.MYIRRIGATION_BASE_URL,
+            username=resolved_username,
+            password=resolved_password,
+            client_id=resolved_client_id,
+            client_secret=resolved_client_secret,
+            project_id=resolved_project_id,
+            weather_device_id=resolved_device_id,
+        )
+    return _myirrigation_cache[cache_key]
 
 
-def get_probe_provider(config: Settings) -> ProbeDataProvider:
+def get_probe_provider(config: Settings, farm=None) -> ProbeDataProvider:
+    """Return a probe provider for the given farm (or global config if farm is None)."""
     match config.PROBE_PROVIDER:
         case "mock":
             return MockProbeProvider()
         case "irriwatch":
             return _get_irriwatch(config)
         case "myirrigation":
+            if farm is not None:
+                return _get_myirrigation(
+                    config,
+                    username=farm.myirrigation_username,
+                    password=farm.myirrigation_password,
+                    client_id=farm.myirrigation_client_id,
+                    client_secret=farm.myirrigation_client_secret,
+                )
             return _get_myirrigation(config)
         case _:
             raise ValueError(
@@ -71,13 +101,23 @@ def get_probe_provider(config: Settings) -> ProbeDataProvider:
             )
 
 
-def get_weather_provider(config: Settings) -> WeatherDataProvider:
+def get_weather_provider(config: Settings, farm=None) -> WeatherDataProvider:
+    """Return a weather provider for the given farm (or global config if farm is None)."""
     match config.WEATHER_PROVIDER:
         case "mock":
             return MockWeatherProvider(latitude=38.57)
         case "irriwatch":
             return _get_irriwatch(config)
         case "myirrigation":
+            if farm is not None:
+                return _get_myirrigation(
+                    config,
+                    username=farm.myirrigation_username,
+                    password=farm.myirrigation_password,
+                    client_id=farm.myirrigation_client_id,
+                    client_secret=farm.myirrigation_client_secret,
+                    weather_device_id=farm.myirrigation_weather_device_id,
+                )
             return _get_myirrigation(config)
         case _:
             raise ValueError(

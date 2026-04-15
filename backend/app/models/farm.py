@@ -17,6 +17,13 @@ class Farm(Base, TimestampMixin):
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="Europe/Lisbon")
     owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("user.id"), nullable=False)
 
+    # Per-farm MyIrrigation API credentials (override global .env values when set)
+    myirrigation_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    myirrigation_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    myirrigation_client_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    myirrigation_client_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    myirrigation_weather_device_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     # Relationships
     owner: Mapped["User"] = relationship("User", back_populates="farms")  # noqa: F821
     plots: Mapped[list["Plot"]] = relationship("Plot", back_populates="farm", cascade="all, delete-orphan")  # noqa: F821

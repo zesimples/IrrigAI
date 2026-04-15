@@ -318,8 +318,8 @@ async def ingest_farm(farm_id: str, db: AsyncSession) -> dict:
     if farm is None:
         return {}
 
-    probe_provider = get_probe_provider(settings)
-    weather_provider = get_weather_provider(settings)
+    probe_provider = get_probe_provider(settings, farm=farm)
+    weather_provider = get_weather_provider(settings, farm=farm)
     now = datetime.now(UTC)
     since = now - timedelta(hours=2)
 
