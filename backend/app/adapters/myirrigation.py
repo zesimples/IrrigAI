@@ -535,6 +535,16 @@ def _parse_weather_observations(
     wind_sid = first_sensor("wind speed")
     et0_sid = first_sensor("et0")
 
+    # Detect solar radiation units — iMetos reports in W/m² (irradiance).
+    # Penman-Monteith needs MJ/m²/day so we convert: mean W/m² × 0.0864 = MJ/m²/day.
+    solar_units = ""
+    if solar_sid:
+        for s in sensors:
+            if s.get("id") == solar_sid:
+                solar_units = s.get("units", "").lower().strip()
+                break
+    _solar_is_wm2 = solar_units in ("w/m2", "w/m²", "wm2", "wm²", "") or "w" in solar_units
+
     # Build daily buckets
     daily: dict[date, dict] = defaultdict(lambda: {
         "temps": [], "rain": 0.0, "solar": [], "rh": [], "wind": [], "et0": None
@@ -579,6 +589,11 @@ def _parse_weather_observations(
         rhs = bucket["rh"]
         winds = bucket["wind"]
 
+        solar_mean = sum(solars) / len(solars) if solars else None
+        if solar_mean is not None and _solar_is_wm2:
+            # iMetos reports instantaneous W/m²; convert mean to daily MJ/m²/day
+            solar_mean = solar_mean * 0.0864
+
         obs = WeatherObservationDTO(
             timestamp=ts,
             temperature_max_c=max(temps) if temps else None,
@@ -586,7 +601,7 @@ def _parse_weather_observations(
             temperature_mean_c=sum(temps) / len(temps) if temps else None,
             humidity_pct=sum(rhs) / len(rhs) if rhs else None,
             wind_speed_ms=sum(winds) / len(winds) if winds else None,
-            solar_radiation_mjm2=sum(solars) / len(solars) if solars else None,
+            solar_radiation_mjm2=solar_mean,
             rainfall_mm=bucket["rain"] or 0.0,
             et0_mm=bucket["et0"],
         )
