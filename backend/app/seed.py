@@ -1043,17 +1043,21 @@ def seed(engine) -> None:
 
         _DRIP_CONQ_ALMOND = {
             "system_type": "drip",
-            "emitter_flow_lh": 2.3,
+            "emitter_flow_lph": 2.3,
             "emitter_spacing_m": 0.5,
-            "lateral_spacing_m": 6.0,
+            "lines_per_row": 1,
+            "efficiency": 0.90,
             "distribution_uniformity": 0.88,
+            "max_runtime_hours": 8.0,
         }
         _DRIP_CONQ_OLIVE = {
             "system_type": "drip",
-            "emitter_flow_lh": 2.3,
+            "emitter_flow_lph": 2.3,
             "emitter_spacing_m": 0.5,
-            "lateral_spacing_m": 7.0,
+            "lines_per_row": 1,
+            "efficiency": 0.90,
             "distribution_uniformity": 0.88,
+            "max_runtime_hours": 8.0,
         }
 
         plot_amendoal = Plot(
