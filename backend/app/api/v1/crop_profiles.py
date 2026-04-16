@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import CropProfileTemplate, SoilPreset
+from app.models.plot import Plot
+from app.models.sector import Sector
 from app.models.sector_crop_profile import SectorCropProfile
 from app.schemas.crop_profile import (
     CropProfileTemplateOut,
@@ -68,9 +70,23 @@ async def update_sector_crop_profile(
     if not profile:
         raise HTTPException(404, detail="Crop profile not found for this sector")
 
-    for k, v in body.model_dump(exclude_none=True).items():
+    updates = body.model_dump(exclude_none=True)
+    for k, v in updates.items():
         setattr(profile, k, v)
     profile.is_customized = True
+
+    # Propagate soil changes to the Plot so the probe chart reference lines update
+    if "field_capacity" in updates or "wilting_point" in updates or "soil_preset_id" in updates:
+        sector = await db.get(Sector, sector_id)
+        if sector:
+            plot = await db.get(Plot, sector.plot_id)
+            if plot:
+                if "field_capacity" in updates:
+                    plot.field_capacity = updates["field_capacity"]
+                if "wilting_point" in updates:
+                    plot.wilting_point = updates["wilting_point"]
+                if "soil_preset_id" in updates:
+                    plot.soil_preset_id = updates["soil_preset_id"]
 
     await db.commit()
     await db.refresh(profile)
