@@ -207,8 +207,18 @@ class AssistantContextBuilder:
             defaults_used=eng_ctx.defaults_used,
             missing_config=eng_ctx.missing_config,
             recommendation_action=rec.action if rec else None,
-            irrigation_depth_mm=rec.irrigation_depth_mm if rec else None,
-            runtime_minutes=rec.irrigation_runtime_min if rec else None,
+            # Only expose depth/runtime when action is actually "irrigate" —
+            # a non-zero depth on a "no_irrigation" decision confuses the LLM.
+            irrigation_depth_mm=(
+                rec.irrigation_depth_mm
+                if rec and rec.action == "irrigate"
+                else None
+            ),
+            runtime_minutes=(
+                rec.irrigation_runtime_min
+                if rec and rec.action == "irrigate"
+                else None
+            ),
             confidence_score=rec.confidence_score if rec else None,
             confidence_level=rec.confidence_level if rec else None,
             reasons=reasons,
