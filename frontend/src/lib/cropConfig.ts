@@ -46,6 +46,67 @@ export const STAGE_LABELS: Record<string, string> = {
   almond_post_harvest: "Pós-colheita",
 };
 
+/**
+ * Maps each crop type to a month index (0 = Jan … 11 = Dec) → stage key.
+ * Used to auto-suggest the current phenological stage based on the calendar.
+ * When a month overlaps two stages the more advanced one is preferred.
+ */
+const STAGE_BY_MONTH: Record<string, Record<number, string>> = {
+  olive: {
+    0:  "olive_dormancy",
+    1:  "olive_dormancy",
+    2:  "olive_bud_break",
+    3:  "olive_flowering",
+    4:  "olive_flowering",
+    5:  "olive_fruit_set",
+    6:  "olive_pit_hardening",
+    7:  "olive_oil_accumulation",
+    8:  "olive_oil_accumulation",
+    9:  "olive_veraison",
+    10: "olive_harvest",
+    11: "olive_post_harvest",
+  },
+  vineyard: {
+    0:  "vine_dormancy",
+    1:  "vine_bleeding",
+    2:  "vine_budbreak",
+    3:  "vine_budbreak",
+    4:  "vine_shoot_growth",
+    5:  "vine_flowering",
+    6:  "vine_berry_growth",
+    7:  "vine_veraison",
+    8:  "vine_ripening",
+    9:  "vine_harvest",
+    10: "vine_post_harvest",
+    11: "vine_dormancy",
+  },
+  almond: {
+    0:  "almond_dormancy",
+    1:  "almond_bloom",
+    2:  "almond_bloom",
+    3:  "almond_fruit_set",
+    4:  "almond_shell_expansion",
+    5:  "almond_shell_expansion",
+    6:  "almond_kernel_fill",
+    7:  "almond_kernel_fill",
+    8:  "almond_hull_split",
+    9:  "almond_post_harvest",
+    10: "almond_post_harvest",
+    11: "almond_dormancy",
+  },
+};
+
+/**
+ * Returns the most likely phenological stage for a given crop and month.
+ * Falls back to the first stage in CROP_STAGES if the crop isn't mapped.
+ */
+export function getSuggestedStage(cropType: string, month: number): string {
+  const map = STAGE_BY_MONTH[cropType];
+  if (map) return map[month] ?? map[0];
+  const stages = CROP_STAGES[cropType] ?? CROP_STAGES["olive"];
+  return stages[0]?.value ?? "";
+}
+
 /** Per-crop stage options for the phenological stage selector. */
 export const CROP_STAGES: Record<string, { value: string; label: string }[]> = {
   olive: [

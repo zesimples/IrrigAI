@@ -5,7 +5,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { chatApi, sectorsApi, catalogApi } from "@/lib/api";
-import { CROP_STAGES } from "@/lib/cropConfig";
+import { CROP_STAGES, getSuggestedStage } from "@/lib/cropConfig";
 import type { SoilPreset } from "@/types";
 
 const SOIL_CONDITION_OPTIONS = [
@@ -30,7 +30,10 @@ interface Props {
 export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPresetId, currentRainfallEffectiveness, onSaved }: Props) {
   const stageOptions = CROP_STAGES[cropType] ?? CROP_STAGES["olive"];
 
-  const [stage, setStage] = useState(currentStage ?? "");
+  const suggestedStage = getSuggestedStage(cropType, new Date().getMonth());
+  const [stage, setStage] = useState(currentStage || suggestedStage);
+  // true when the stage shown is the calendar suggestion (not yet saved by the user)
+  const [stageIsAutoSuggested, setStageIsAutoSuggested] = useState(!currentStage);
   const [soilCondition, setSoilCondition] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
@@ -51,7 +54,16 @@ export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPr
   const [savingRainfall, setSavingRainfall] = useState(false);
   const [rainfallSaved, setRainfallSaved] = useState(false);
 
-  useEffect(() => { setStage(currentStage ?? ""); }, [currentStage]);
+  useEffect(() => {
+    if (currentStage) {
+      setStage(currentStage);
+      setStageIsAutoSuggested(false);
+    } else {
+      setStage(suggestedStage);
+      setStageIsAutoSuggested(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStage]);
   useEffect(() => { setSelectedSoilId(currentSoilPresetId ?? ""); }, [currentSoilPresetId]);
   useEffect(() => {
     setRainfallEff(currentRainfallEffectiveness != null ? String(currentRainfallEffectiveness) : "1.0");
@@ -94,6 +106,7 @@ export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPr
     setUpdatingStage(true);
     try {
       await sectorsApi.update(sectorId, { current_phenological_stage: stage });
+      setStageIsAutoSuggested(false);
       await onSaved?.();
     } finally {
       setUpdatingStage(false);
@@ -136,7 +149,7 @@ export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPr
     }
   }
 
-  const stageChanged = stage !== (currentStage ?? "");
+  const stageChanged = stage !== (currentStage ?? "") || stageIsAutoSuggested;
 
   return (
     <Card>
@@ -193,10 +206,14 @@ export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPr
               <Select
                 label="Fase fenológica actual"
                 value={stage}
-                onChange={(e) => setStage(e.target.value)}
+                onChange={(e) => { setStage(e.target.value); setStageIsAutoSuggested(false); }}
                 options={stageOptions}
                 placeholder="Seleccione a fase…"
-                hint="Actualize apenas se a fase real no campo tiver mudado."
+                hint={
+                  stageIsAutoSuggested
+                    ? "Fase sugerida automaticamente com base no mês actual. Guarda para confirmar."
+                    : "Actualize apenas se a fase real no campo tiver mudado."
+                }
               />
             </div>
             {stageChanged && (
