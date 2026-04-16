@@ -123,12 +123,15 @@ def score(
 
     conf = round(max(0.10, conf), 3)
 
-    if conf >= 0.75:
-        level = "high"
-    elif conf >= 0.50:
-        level = "medium"
-    else:
+    # "low" is reserved exclusively for sectors with no probe readings at all.
+    # Every other combination of penalties stays within medium/high so the farmer
+    # is not alarmed by configuration gaps they may not control.
+    if not rz.has_data:
         level = "low"
+    elif conf >= 0.75:
+        level = "high"
+    else:
+        level = "medium"
 
     return ConfidenceResult(score=conf, level=level, penalties=penalties, warnings=warnings)
 
