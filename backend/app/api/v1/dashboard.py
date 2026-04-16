@@ -171,7 +171,12 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
             action=latest_rec.action if latest_rec else None,
             irrigation_depth_mm=latest_rec.irrigation_depth_mm if latest_rec else None,
             runtime_min=latest_rec.irrigation_runtime_min if latest_rec else None,
-            confidence_level=latest_rec.confidence_level if latest_rec else None,
+            # Upgrade stored "low" → "medium" when probes have readings.
+            confidence_level=(
+                "medium"
+                if latest_rec and latest_rec.confidence_level == "low" and probes
+                else (latest_rec.confidence_level if latest_rec else None)
+            ),
             confidence_score=latest_rec.confidence_score if latest_rec else None,
             rootzone_status=rootzone_status,
             active_alerts=crit + warn + info,

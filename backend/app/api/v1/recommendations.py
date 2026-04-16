@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Farm, Recommendation, RecommendationReason, Sector
+from app.models import Farm, Probe, Recommendation, RecommendationReason, Sector
 from app.models.sector_override import SectorOverride
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.recommendation import (
@@ -78,6 +78,17 @@ async def get_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)):
         )
     ).scalars().all()
     base = RecommendationOut.model_validate(rec).model_dump()
+
+    # Upgrade stored "low" → "medium" when the sector has probe readings.
+    # "low" is only valid when has_data=False (no readings at all).
+    if base.get("confidence_level") == "low":
+        probes = (
+            await db.execute(select(Probe).where(Probe.sector_id == rec.sector_id))
+        ).scalars().all()
+        has_probe_data = any(p.last_reading_at is not None for p in probes)
+        if has_probe_data:
+            base["confidence_level"] = "medium"
+
     return RecommendationDetail(
         **base,
         reasons=[ReasonOut.model_validate(r) for r in reasons],

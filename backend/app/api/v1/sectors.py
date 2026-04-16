@@ -172,7 +172,14 @@ async def get_sector_status(sector_id: str, db: AsyncSession = Depends(get_db)):
         latest_recommendation_id=latest_rec.id if latest_rec else None,
         latest_action=latest_rec.action if latest_rec else None,
         latest_confidence_score=latest_rec.confidence_score if latest_rec else None,
-        latest_confidence_level=latest_rec.confidence_level if latest_rec else None,
+        # "low" is only valid when there are no probe readings at all.
+        # Upgrade stored "low" to "medium" for sectors that have probe data
+        # (covers recommendations generated before this rule was introduced).
+        latest_confidence_level=(
+            "medium"
+            if latest_rec and latest_rec.confidence_level == "low" and freshness_hours is not None
+            else (latest_rec.confidence_level if latest_rec else None)
+        ),
         latest_irrigation_depth_mm=latest_rec.irrigation_depth_mm if latest_rec else None,
         latest_runtime_min=latest_rec.irrigation_runtime_min if latest_rec else None,
         recommendation_generated_at=latest_rec.generated_at if latest_rec else None,
