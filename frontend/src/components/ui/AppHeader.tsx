@@ -17,7 +17,7 @@ interface AppHeaderProps {
 /**
  * Two modes:
  * - Dashboard (crumbs.length === 1, no href): shows farm name in Fraunces + date
- * - Inner pages (crumbs.length > 1 or with href): shows slim nav with back link
+ * - Inner pages (crumbs.length > 1 or with href): shows slim nav with full breadcrumb trail
  */
 export function AppHeader({ crumbs, right, farmDate }: AppHeaderProps) {
   const isFarmHeader =
@@ -48,9 +48,11 @@ export function AppHeader({ crumbs, right, farmDate }: AppHeaderProps) {
     );
   }
 
-  // Slim nav for inner pages
-  const parent = crumbs?.find((c) => c.href);
-  const current = crumbs?.[crumbs.length - 1];
+  // Slim nav — find the back destination (first crumb with href) then render
+  // all remaining crumbs as a breadcrumb trail.
+  const parentIdx = crumbs ? crumbs.findIndex((c) => c.href) : -1;
+  const parent = parentIdx >= 0 ? crumbs![parentIdx] : null;
+  const trail = crumbs ? crumbs.slice(parentIdx + 1) : [];
 
   return (
     <header className="sticky top-0 z-20 border-b border-black/[0.07] bg-white/95 backdrop-blur-sm">
@@ -74,14 +76,30 @@ export function AppHeader({ crumbs, right, farmDate }: AppHeaderProps) {
               <Logo size={24} />
             </Link>
           )}
-          {current && !current.href && (
-            <>
-              <span className="mx-1.5 text-black/20">/</span>
-              <span className="truncate text-[13px] font-medium text-irrigai-text max-w-[200px]">
-                {current.label}
+          {trail.map((crumb, i) => {
+            const isLast = i === trail.length - 1;
+            return (
+              <span key={i} className="flex items-center gap-1 min-w-0">
+                <span className="mx-0.5 text-black/20">/</span>
+                {crumb.href ? (
+                  <Link
+                    href={crumb.href}
+                    className="text-[13px] text-irrigai-text-muted hover:text-irrigai-text transition-colors shrink-0"
+                  >
+                    {crumb.label}
+                  </Link>
+                ) : isLast ? (
+                  <span className="truncate text-[13px] font-medium text-irrigai-text max-w-[160px]">
+                    {crumb.label}
+                  </span>
+                ) : (
+                  <span className="text-[13px] text-irrigai-text-muted shrink-0">
+                    {crumb.label}
+                  </span>
+                )}
               </span>
-            </>
-          )}
+            );
+          })}
         </div>
         {right && (
           <div className="flex shrink-0 items-center gap-2">{right}</div>

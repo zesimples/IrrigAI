@@ -3,10 +3,12 @@
 import { useMemo, useState } from "react";
 import { subHours } from "date-fns";
 import { useProbeReadings } from "@/hooks/useProbeReadings";
+import { useSectorStatus } from "@/hooks/useSectorDetail";
 import { ProbeChart } from "@/components/probes/ProbeChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { CROP_LABELS } from "@/lib/cropConfig";
 
 interface Props {
   params: { farmId: string; sectorId: string; probeId: string };
@@ -25,12 +27,17 @@ export default function ProbeDetailPage({ params }: Props) {
     interval: interval || undefined,
   });
 
+  const { data: sectorStatus } = useSectorStatus(sectorId);
+  const cropLabel = CROP_LABELS[sectorStatus?.crop_type ?? ""] ?? sectorStatus?.crop_type ?? "…";
+  const sectorLabel = sectorStatus?.sector_name ?? "…";
+
   return (
     <div className="min-h-screen">
       <AppHeader
         crumbs={[
-          { label: "Dashboard", href: `/farms/${farmId}` },
-          { label: "Sector", href: `/farms/${farmId}/sectors/${sectorId}` },
+          { label: "Exploração", href: `/farms/${farmId}` },
+          { label: cropLabel },
+          { label: sectorLabel, href: `/farms/${farmId}/sectors/${sectorId}` },
           { label: probeId },
         ]}
       />
