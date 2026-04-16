@@ -36,7 +36,7 @@ export default function ProbeDetailPage({ params }: Props) {
       <AppHeader
         crumbs={[
           { label: "Exploração", href: `/farms/${farmId}` },
-          { label: cropLabel },
+          { label: cropLabel, href: `/farms/${farmId}?crop=${sectorStatus?.crop_type ?? ""}` },
           { label: sectorLabel, href: `/farms/${farmId}/sectors/${sectorId}` },
           { label: probeId },
         ]}

@@ -67,7 +67,7 @@ export default function SectorDetailPage({ params }: Props) {
   if (loading) {
     return (
       <div className="min-h-screen bg-white">
-        <AppHeader crumbs={[{ label: "Exploração", href: `/farms/${farmId}` }, { label: "…" }, { label: "…" }]} />
+        <AppHeader crumbs={[{ label: "Exploração", href: `/farms/${farmId}` }, { label: "…" }]} />
         <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6 space-y-4 animate-pulse">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[...Array(4)].map((_, i) => (
@@ -117,7 +117,7 @@ export default function SectorDetailPage({ params }: Props) {
       <AppHeader
         crumbs={[
           { label: "Exploração", href: `/farms/${farmId}` },
-          { label: cropLabel },
+          { label: cropLabel, href: `/farms/${farmId}?crop=${status.crop_type}` },
           { label: status.sector_name },
         ]}
         right={

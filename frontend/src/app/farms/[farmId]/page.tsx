@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useFarmDashboard } from "@/hooks/useFarmDashboard";
 import { SectorCard } from "@/components/dashboard/SectorCard";
 import { WeatherWidget } from "@/components/dashboard/WeatherWidget";
@@ -29,8 +29,11 @@ export default function FarmDashboardPage({ params }: Props) {
   const { farmId } = params;
   const { data, loading, error, refetch } = useFarmDashboard(farmId);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [generating, setGenerating] = useState(false);
-  const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string | null>(
+    searchParams.get("crop")
+  );
 
   const cropTabs = useMemo(() => {
     if (!data) return [];
