@@ -146,16 +146,16 @@ export function SectorCard({ sector, farmId }: SectorCardProps) {
 
       {/* ── Footer meta ── */}
       <div className="flex items-center gap-3.5 pt-2.5 border-t border-black/[0.06] text-[11px] text-irrigai-text-muted">
-        {/* No-probe indicator */}
-        {sector.probe_health === "no_probes" && (
-          <span className="flex items-center gap-1 text-irrigai-text-hint" title="Sem sonda associada">
+        {/* No-probe / no-readings indicator */}
+        {(sector.probe_health === "no_probes" || sector.probe_health === "no_readings") && (
+          <span className="flex items-center gap-1 text-irrigai-text-hint" title="Sem leituras de sonda">
             <WifiOff className="h-3 w-3" />
             <span>Sem sonda</span>
           </span>
         )}
 
         {/* Confidence */}
-        {sector.confidence_level && sector.probe_health !== "no_probes" && (
+        {sector.confidence_level && sector.probe_health !== "no_probes" && sector.probe_health !== "no_readings" && (
           <span className="flex items-center gap-1.5">
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${CONF_DOT[sector.confidence_level]}`}

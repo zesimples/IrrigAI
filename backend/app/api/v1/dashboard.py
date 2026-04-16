@@ -160,8 +160,12 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
             await db.execute(select(Probe).where(Probe.sector_id == sid))
         ).scalars().all()
 
+        has_probe_readings = any(p.last_reading_at is not None for p in probes)
+
         if not probes:
             probe_health = "no_probes"
+        elif not has_probe_readings:
+            probe_health = "no_readings"
         elif any(p.health_status in ("error", "offline") for p in probes):
             probe_health = "error"
         elif any(p.health_status == "warning" for p in probes):
@@ -194,10 +198,10 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
             action=latest_rec.action if latest_rec else None,
             irrigation_depth_mm=latest_rec.irrigation_depth_mm if latest_rec else None,
             runtime_min=latest_rec.irrigation_runtime_min if latest_rec else None,
-            # Upgrade stored "low" → "medium" when probes have readings.
+            # Upgrade stored "low" → "medium" only when probes have actual readings.
             confidence_level=(
                 "medium"
-                if latest_rec and latest_rec.confidence_level == "low" and probes
+                if latest_rec and latest_rec.confidence_level == "low" and has_probe_readings
                 else (latest_rec.confidence_level if latest_rec else None)
             ),
             confidence_score=latest_rec.confidence_score if latest_rec else None,
