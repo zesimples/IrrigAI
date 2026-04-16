@@ -264,16 +264,20 @@ CROP_TEMPLATES = [
 ]
 
 SOIL_PRESETS = [
-    {"name_pt": "Argila", "name_en": "Clay",
-     "texture": "clay", "field_capacity": 0.36, "wilting_point": 0.20, "taw_mm_per_m": 160.0},
-    {"name_pt": "Franco-argiloso", "name_en": "Clay-loam",
-     "texture": "clay_loam", "field_capacity": 0.28, "wilting_point": 0.14, "taw_mm_per_m": 140.0},
-    {"name_pt": "Franco", "name_en": "Loam",
-     "texture": "loam", "field_capacity": 0.24, "wilting_point": 0.10, "taw_mm_per_m": 140.0},
-    {"name_pt": "Franco-arenoso", "name_en": "Sandy-loam",
-     "texture": "sandy_loam", "field_capacity": 0.18, "wilting_point": 0.08, "taw_mm_per_m": 100.0},
-    {"name_pt": "Arenoso", "name_en": "Sand",
-     "texture": "sand", "field_capacity": 0.12, "wilting_point": 0.05, "taw_mm_per_m": 70.0},
+    # Calibrated for Alentejo region (values in m³/m³ = % vol / 100)
+    {"name_pt": "Areia",                "name_en": "Sand",              "texture": "sand",              "field_capacity": 0.07, "wilting_point": 0.03, "taw_mm_per_m":  40.0},
+    {"name_pt": "Areia-franca",         "name_en": "Loamy Sand",        "texture": "loamy_sand",        "field_capacity": 0.10, "wilting_point": 0.04, "taw_mm_per_m":  60.0},
+    {"name_pt": "Franco-arenoso",       "name_en": "Sandy Loam",        "texture": "sandy_loam",        "field_capacity": 0.16, "wilting_point": 0.07, "taw_mm_per_m":  90.0},
+    {"name_pt": "Franco",               "name_en": "Loam",              "texture": "loam",              "field_capacity": 0.25, "wilting_point": 0.12, "taw_mm_per_m": 130.0},
+    {"name_pt": "Franco-limoso",        "name_en": "Silty Loam",        "texture": "silty_loam",        "field_capacity": 0.31, "wilting_point": 0.13, "taw_mm_per_m": 180.0},
+    {"name_pt": "Limo",                 "name_en": "Silt",              "texture": "silt",              "field_capacity": 0.30, "wilting_point": 0.05, "taw_mm_per_m": 250.0},
+    {"name_pt": "Franco-argilo-arenoso","name_en": "Sandy Clay Loam",   "texture": "sandy_clay_loam",   "field_capacity": 0.27, "wilting_point": 0.17, "taw_mm_per_m": 100.0},
+    # clay_loam kept for backward compatibility with existing farm data
+    {"name_pt": "Franco-argiloso",      "name_en": "Clay Loam",         "texture": "clay_loam",         "field_capacity": 0.30, "wilting_point": 0.15, "taw_mm_per_m": 150.0},
+    {"name_pt": "Franco-argilo-limoso", "name_en": "Silty Clay Loam",   "texture": "silty_clay_loam",   "field_capacity": 0.37, "wilting_point": 0.21, "taw_mm_per_m": 160.0},
+    {"name_pt": "Argilo-limoso",        "name_en": "Silty Clay",        "texture": "silty_clay",        "field_capacity": 0.42, "wilting_point": 0.28, "taw_mm_per_m": 140.0},
+    {"name_pt": "Argila",               "name_en": "Clay",              "texture": "clay",              "field_capacity": 0.42, "wilting_point": 0.30, "taw_mm_per_m": 120.0},
+    {"name_pt": "Argilo-arenoso",       "name_en": "Sandy Clay",        "texture": "sandy_clay",        "field_capacity": 0.36, "wilting_point": 0.26, "taw_mm_per_m": 100.0},
 ]
 
 
@@ -485,9 +489,9 @@ def seed(engine) -> None:
         session.add(farm)
         session.flush()
 
-        # Soil preset — clay loam for Alentejo olive groves
+        # Soil preset — sandy clay loam for Alentejo olive groves
         clay_loam = session.execute(
-            select(SoilPreset).where(SoilPreset.texture == "clay_loam")
+            select(SoilPreset).where(SoilPreset.texture == "sandy_clay_loam")
         ).scalar_one()
 
         # Olive crop template
@@ -1015,14 +1019,11 @@ def seed(engine) -> None:
             )
         ).scalar_one()
 
-        # Sandy-clay-loam soil for Conqueiros
-        sandy_clay_loam = session.execute(
+        # Sandy-clay-loam soil for Conqueiros (typical Alentejo soil)
+        soil = session.execute(
             select(SoilPreset).where(SoilPreset.texture == "sandy_clay_loam")
-        ).scalar_one_or_none()
-        clay_loam = session.execute(
-            select(SoilPreset).where(SoilPreset.texture == "clay_loam")
         ).scalar_one()
-        soil = sandy_clay_loam or clay_loam
+        clay_loam = soil  # alias kept for plot_olival below
 
         farm_conq = Farm(
             id=str(uuid.uuid4()),
