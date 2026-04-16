@@ -11,6 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.engine.et0 import compute_et0
+from app.engine.types import DailyWeather
 from app.models import (
     Alert,
     Farm,
@@ -63,12 +65,33 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
     rain_48h = sum((f.rainfall_mm or 0.0) for f in forecasts[:2])
     rain_prob = forecasts[0].rainfall_probability_pct if forecasts else None
 
-    # ET₀: prefer today's observed value from the weather station; fall back to
-    # today's forecast (referenceevapotranspiration_fao) when the station hasn't
-    # yet computed end-of-day ET₀ (observations arrive with a time lag).
+    # ET₀ resolution order:
+    # 1. Today's observed value from the weather station (end-of-day aggregate)
+    # 2. Today's forecast value (referenceevapotranspiration_fao)
+    # 3. Any near-future forecast value (API may not include today)
+    # 4. Computed from observed Tmax/Tmin via Hargreaves (needs only temperature)
     et0_today = latest_obs.et0_mm if latest_obs else None
-    if et0_today is None and forecasts and forecasts[0].forecast_date == today:
-        et0_today = forecasts[0].et0_mm
+
+    if et0_today is None and forecasts:
+        # Try any forecast within the next 2 days that has ET₀
+        for fc in forecasts[:2]:
+            if fc.et0_mm is not None:
+                et0_today = fc.et0_mm
+                break
+
+    if et0_today is None and latest_obs and latest_obs.temperature_max_c and latest_obs.temperature_min_c:
+        # Last resort: Hargreaves estimate from today's observed temperatures
+        dw = DailyWeather(
+            date=today,
+            t_max=latest_obs.temperature_max_c,
+            t_min=latest_obs.temperature_min_c,
+            t_mean=latest_obs.temperature_mean_c,
+            humidity_pct=latest_obs.humidity_pct,
+            wind_ms=latest_obs.wind_speed_ms,
+            solar_mjm2=latest_obs.solar_radiation_mjm2,
+        )
+        lat = farm.location_lat or 38.5  # Alentejo default
+        et0_today, _ = compute_et0(dw, lat)
 
     weather_today = WeatherToday(
         et0_mm=et0_today,
