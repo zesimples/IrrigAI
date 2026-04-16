@@ -63,8 +63,15 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
     rain_48h = sum((f.rainfall_mm or 0.0) for f in forecasts[:2])
     rain_prob = forecasts[0].rainfall_probability_pct if forecasts else None
 
+    # ET₀: prefer today's observed value from the weather station; fall back to
+    # today's forecast (referenceevapotranspiration_fao) when the station hasn't
+    # yet computed end-of-day ET₀ (observations arrive with a time lag).
+    et0_today = latest_obs.et0_mm if latest_obs else None
+    if et0_today is None and forecasts and forecasts[0].forecast_date == today:
+        et0_today = forecasts[0].et0_mm
+
     weather_today = WeatherToday(
-        et0_mm=latest_obs.et0_mm if latest_obs else None,
+        et0_mm=et0_today,
         temperature_max_c=latest_obs.temperature_max_c if latest_obs else None,
         temperature_min_c=latest_obs.temperature_min_c if latest_obs else None,
         rainfall_mm=latest_obs.rainfall_mm if latest_obs else None,
