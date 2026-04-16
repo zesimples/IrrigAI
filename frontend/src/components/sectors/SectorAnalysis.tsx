@@ -23,10 +23,11 @@ interface Props {
   currentStage: string | null;
   currentSoilPresetId?: string | null;
   currentRainfallEffectiveness?: number | null;
-  onStageUpdated?: () => void;
+  /** Called after any successful save — parent should re-fetch data and regenerate the recommendation. */
+  onSaved?: () => void | Promise<void>;
 }
 
-export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPresetId, currentRainfallEffectiveness, onStageUpdated }: Props) {
+export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPresetId, currentRainfallEffectiveness, onSaved }: Props) {
   const stageOptions = CROP_STAGES[cropType] ?? CROP_STAGES["olive"];
 
   const [stage, setStage] = useState(currentStage ?? "");
@@ -82,6 +83,7 @@ export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPr
       });
       setSoilSaved(true);
       setTimeout(() => setSoilSaved(false), 2500);
+      await onSaved?.();
     } finally {
       setSavingSoil(false);
     }
@@ -92,7 +94,7 @@ export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPr
     setUpdatingStage(true);
     try {
       await sectorsApi.update(sectorId, { current_phenological_stage: stage });
-      onStageUpdated?.();
+      await onSaved?.();
     } finally {
       setUpdatingStage(false);
     }
@@ -107,6 +109,7 @@ export function SectorAnalysis({ sectorId, cropType, currentStage, currentSoilPr
       await sectorsApi.update(sectorId, { rainfall_effectiveness: val });
       setRainfallSaved(true);
       setTimeout(() => setRainfallSaved(false), 2500);
+      await onSaved?.();
     } finally {
       setSavingRainfall(false);
     }

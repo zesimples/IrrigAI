@@ -247,10 +247,15 @@ export default function SectorDetailPage({ params }: Props) {
           currentStage={status.current_stage ?? null}
           currentSoilPresetId={cropProfile?.soil_preset_id}
           currentRainfallEffectiveness={sectorDetail?.rainfall_effectiveness ?? null}
-          onStageUpdated={() => {
-            refetch();
-            sectorsApi.cropProfile(sectorId).then(setCropProfile).catch(() => {});
-            sectorsApi.get(sectorId).then(setSectorDetail).catch(() => {});
+          onSaved={async () => {
+            // Re-fetch sector data so saved values reflect in the UI immediately
+            await Promise.all([
+              refetch(),
+              sectorsApi.cropProfile(sectorId).then(setCropProfile).catch(() => {}),
+              sectorsApi.get(sectorId).then(setSectorDetail).catch(() => {}),
+            ]);
+            // Auto-generate recommendation with the updated parameters
+            await generate();
           }}
         />
 
