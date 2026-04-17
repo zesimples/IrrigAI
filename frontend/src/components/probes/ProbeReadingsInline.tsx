@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { subHours } from "date-fns";
-import { ExternalLink } from "lucide-react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 import { useProbeReadings } from "@/hooks/useProbeReadings";
 import { ProbeChart } from "@/components/probes/ProbeChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
@@ -24,6 +24,7 @@ export function ProbeReadingsInline({
   lastReadingAt,
   href,
 }: ProbeReadingsInlineProps) {
+  const [collapsed, setCollapsed] = useState(false);
   const [sinceHours, setSinceHours] = useState(72);
   const [interval, setInterval] = useState("");
 
@@ -46,7 +47,10 @@ export function ProbeReadingsInline({
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            className="flex items-center gap-2 min-w-0 flex-1 text-left"
+          >
             <span className={`shrink-0 inline-block h-1.5 w-1.5 rounded-full ${healthDot}`} />
             <CardTitle className="font-mono">{externalId}</CardTitle>
             {lastReadingAt && (
@@ -59,7 +63,10 @@ export function ProbeReadingsInline({
                 })}
               </span>
             )}
-          </div>
+            <ChevronDown
+              className={`shrink-0 h-3.5 w-3.5 text-irrigai-text-hint transition-transform duration-200 ${collapsed ? "-rotate-90" : ""}`}
+            />
+          </button>
           <Link
             href={href}
             className="shrink-0 flex items-center gap-1 text-[11px] text-irrigai-text-muted hover:text-irrigai-text transition-colors"
@@ -70,7 +77,7 @@ export function ProbeReadingsInline({
         </div>
       </CardHeader>
 
-      <CardBody className="space-y-4">
+      {!collapsed && <CardBody className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <p className="text-[12px] font-medium text-irrigai-text-hint uppercase tracking-[0.05em]">
             Humidade do solo (VWC)
@@ -146,7 +153,7 @@ export function ProbeReadingsInline({
             </p>
           </div>
         )}
-      </CardBody>
+      </CardBody>}
     </Card>
   );
 }
