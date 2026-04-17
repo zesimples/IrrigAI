@@ -8,6 +8,9 @@ import { useProbeReadings } from "@/hooks/useProbeReadings";
 import { ProbeChart } from "@/components/probes/ProbeChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { sectorsApi } from "@/lib/api";
+import type { ReferenceLines } from "@/types";
 
 interface ProbeReadingsInlineProps {
   probeId: string;
@@ -15,6 +18,7 @@ interface ProbeReadingsInlineProps {
   healthStatus?: string | null;
   lastReadingAt?: string | null;
   href: string;
+  sectorId: string;
 }
 
 export function ProbeReadingsInline({
@@ -23,10 +27,21 @@ export function ProbeReadingsInline({
   healthStatus,
   lastReadingAt,
   href,
+  sectorId,
 }: ProbeReadingsInlineProps) {
   const [collapsed, setCollapsed] = useState(true);
   const [sinceHours, setSinceHours] = useState(72);
   const [interval, setInterval] = useState("");
+
+  // Local override of reference lines so chart updates immediately on save
+  const [refLines, setRefLines] = useState<ReferenceLines | null>(null);
+
+  // CC/PMP edit state
+  const [editing, setEditing] = useState(false);
+  const [ccInput, setCcInput] = useState("");
+  const [pmpInput, setPmpInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   const since = useMemo(() => subHours(new Date(), sinceHours).toISOString(), [sinceHours]);
 
@@ -35,6 +50,34 @@ export function ProbeReadingsInline({
     since,
     interval: interval || undefined,
   });
+
+  const activeRefLines = refLines ?? data?.reference_lines ?? { field_capacity: null, wilting_point: null };
+
+  function startEdit() {
+    setCcInput(activeRefLines.field_capacity != null ? (activeRefLines.field_capacity * 100).toFixed(1) : "");
+    setPmpInput(activeRefLines.wilting_point != null ? (activeRefLines.wilting_point * 100).toFixed(1) : "");
+    setSaved(false);
+    setEditing(true);
+  }
+
+  async function handleSave() {
+    const cc = parseFloat(ccInput);
+    const pmp = parseFloat(pmpInput);
+    if (isNaN(cc) || isNaN(pmp) || cc <= 0 || pmp <= 0 || pmp >= cc) return;
+    setSaving(true);
+    try {
+      await sectorsApi.updateCropProfile(sectorId, {
+        field_capacity: cc / 100,
+        wilting_point: pmp / 100,
+      });
+      setRefLines({ field_capacity: cc / 100, wilting_point: pmp / 100 });
+      setSaved(true);
+      setEditing(false);
+      setTimeout(() => setSaved(false), 2500);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const healthDot =
     healthStatus === "ok"
@@ -100,9 +143,69 @@ export function ProbeReadingsInline({
           <>
             <ProbeChart
               depths={data.depths}
-              referenceLines={data.reference_lines}
+              referenceLines={activeRefLines}
               interval={interval}
             />
+
+            {/* CC / PMP row */}
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-black/[0.07] bg-irrigai-surface px-4 py-3">
+              {editing ? (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[11px] font-medium text-[#16a34a] min-w-[28px]">CC</label>
+                    <input
+                      type="number"
+                      value={ccInput}
+                      onChange={(e) => setCcInput(e.target.value)}
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      className="w-20 rounded-lg border border-black/[0.1] bg-white px-2.5 py-1.5 text-[13px] tabular-nums focus:border-irrigai-green focus:outline-none focus:ring-1 focus:ring-irrigai-green/30"
+                    />
+                    <span className="text-[11px] text-irrigai-text-muted">%</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[11px] font-medium text-[#dc2626] min-w-[36px]">PMP</label>
+                    <input
+                      type="number"
+                      value={pmpInput}
+                      onChange={(e) => setPmpInput(e.target.value)}
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      className="w-20 rounded-lg border border-black/[0.1] bg-white px-2.5 py-1.5 text-[13px] tabular-nums focus:border-irrigai-green focus:outline-none focus:ring-1 focus:ring-irrigai-green/30"
+                    />
+                    <span className="text-[11px] text-irrigai-text-muted">%</span>
+                  </div>
+                  <div className="flex items-center gap-2 ml-auto">
+                    <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>
+                      Cancelar
+                    </Button>
+                    <Button size="sm" variant="brand" onClick={handleSave} loading={saving}>
+                      Guardar
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="text-[11px] font-medium text-[#16a34a]">
+                    CC {activeRefLines.field_capacity != null ? `${(activeRefLines.field_capacity * 100).toFixed(1)}%` : "—"}
+                  </span>
+                  <span className="text-[11px] font-medium text-[#dc2626]">
+                    PMP {activeRefLines.wilting_point != null ? `${(activeRefLines.wilting_point * 100).toFixed(1)}%` : "—"}
+                  </span>
+                  {saved && (
+                    <span className="text-[11px] font-medium text-irrigai-green">Guardado ✓</span>
+                  )}
+                  <button
+                    onClick={startEdit}
+                    className="ml-auto text-[11px] text-irrigai-text-muted hover:text-irrigai-text transition-colors"
+                  >
+                    Editar
+                  </button>
+                </>
+              )}
+            </div>
 
             {/* Depth summary */}
             <div className="overflow-x-auto rounded-xl border border-black/[0.07]">

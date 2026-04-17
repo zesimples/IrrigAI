@@ -245,6 +245,7 @@ export default function SectorDetailPage({ params }: Props) {
             healthStatus={p.health_status}
             lastReadingAt={p.last_reading_at}
             href={`/farms/${farmId}/sectors/${sectorId}/probes/${p.probe_id}`}
+            sectorId={sectorId}
           />
         ))}
 
