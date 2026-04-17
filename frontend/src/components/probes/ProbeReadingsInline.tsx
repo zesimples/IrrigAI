@@ -24,7 +24,7 @@ export function ProbeReadingsInline({
   lastReadingAt,
   href,
 }: ProbeReadingsInlineProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [sinceHours, setSinceHours] = useState(72);
   const [interval, setInterval] = useState("");
 
