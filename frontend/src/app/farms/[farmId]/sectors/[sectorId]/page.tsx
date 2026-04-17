@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSectorStatus } from "@/hooks/useSectorDetail";
-import { RecommendationDetail } from "@/components/sectors/RecommendationDetail";
+import { RecommendationDetail, RecHeader, ACTION_CONFIG } from "@/components/sectors/RecommendationDetail";
 import { ProbeReadingsInline } from "@/components/probes/ProbeReadingsInline";
 import { Button } from "@/components/ui/button";
 import { AppHeader } from "@/components/ui/AppHeader";
@@ -220,6 +220,17 @@ export default function SectorDetailPage({ params }: Props) {
         {/* Active overrides */}
         <ActiveOverrides sectorId={sectorId} />
 
+        {/* Recommendation header — shown above probes */}
+        {rec && (
+          <div className="rounded-xl border border-black/[0.08] bg-white overflow-hidden">
+            <RecHeader
+              rec={rec}
+              action={ACTION_CONFIG[rec.action]}
+              confPct={Math.round(rec.confidence_score * 100)}
+            />
+          </div>
+        )}
+
         {/* Probe charts */}
         {status.probes.map((p) => (
           <ProbeReadingsInline
@@ -232,11 +243,11 @@ export default function SectorDetailPage({ params }: Props) {
           />
         ))}
 
-        {/* Recommendation */}
+        {/* Recommendation body */}
         {recLoading ? (
           <div className="h-48 animate-pulse rounded-xl bg-irrigai-surface" />
         ) : rec ? (
-          <RecommendationDetail rec={rec} onUpdate={refetch} />
+          <RecommendationDetail rec={rec} onUpdate={refetch} hideHeader />
         ) : (
           <div className="rounded-xl border border-dashed border-black/[0.1] px-6 py-10 text-center">
             <p className="text-[13px] font-medium text-irrigai-text-muted mb-1">

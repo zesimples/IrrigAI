@@ -12,7 +12,7 @@ import type {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const ACTION_CONFIG: Record<
+export const ACTION_CONFIG: Record<
   RecommendationAction,
   { label: string; badge: string }
 > = {
@@ -61,14 +61,80 @@ function reasonCat(category: string | undefined | null): ReasonCat {
   return "soil";
 }
 
+// ── Header sub-component (also used standalone on sector page) ────────────────
+
+interface RecHeaderProps {
+  rec: Rec;
+  action: { label: string; badge: string };
+  confPct: number;
+}
+
+export function RecHeader({ rec, action, confPct }: RecHeaderProps) {
+  return (
+    <div className="px-4 pt-4 pb-3 border-b border-black/[0.06]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className={`rounded-full px-3.5 py-1 text-[15px] font-medium ${action.badge}`}>
+            {action.label}
+          </span>
+          {rec.irrigation_depth_mm != null && (
+            <span className="text-[12px] text-irrigai-text-muted">
+              <span className="font-display font-[500] text-[16px] text-irrigai-text">
+                {rec.irrigation_depth_mm.toFixed(1)}
+              </span>
+              {" mm"}
+              {rec.irrigation_runtime_min != null && (
+                <>
+                  {" · "}
+                  <span className="font-display font-[500] text-[16px] text-irrigai-text">
+                    {Math.round(rec.irrigation_runtime_min)}
+                  </span>
+                  {" min"}
+                </>
+              )}
+            </span>
+          )}
+        </div>
+        <span className="text-[12px] font-medium text-irrigai-text tabular-nums">{confPct}%</span>
+      </div>
+
+      {/* Confidence bar */}
+      <div className="flex items-center gap-3 mt-3">
+        <span className="text-[11px] text-irrigai-text-muted min-w-[54px]">Confiança</span>
+        <div className="flex-1 h-1.5 rounded-full bg-black/[0.06] overflow-hidden">
+          <div
+            className={`h-full rounded-full ${CONF_FILL[rec.confidence_level]}`}
+            style={{ width: `${confPct}%` }}
+          />
+        </div>
+        <span className="text-[11px] font-medium">
+          <span className={`inline-block h-1.5 w-1.5 rounded-full mr-1 align-middle ${CONF_COLOR[rec.confidence_level]}`} />
+          {CONF_LABEL[rec.confidence_level]}
+        </span>
+      </div>
+
+      <p className="mt-2 text-[11px] text-irrigai-text-hint">
+        Gerada em{" "}
+        {new Date(rec.generated_at).toLocaleString("pt-PT", {
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}
+      </p>
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface RecommendationDetailProps {
   rec: Rec;
   onUpdate?: () => void;
+  hideHeader?: boolean;
 }
 
-export function RecommendationDetail({ rec, onUpdate }: RecommendationDetailProps) {
+export function RecommendationDetail({ rec, onUpdate, hideHeader }: RecommendationDetailProps) {
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState<"accept" | "reject" | null>(null);
   const [showOverrideModal, setShowOverrideModal] = useState(false);
@@ -99,58 +165,9 @@ export function RecommendationDetail({ rec, onUpdate }: RecommendationDetailProp
   return (
     <div className="rounded-xl border border-black/[0.08] bg-white overflow-hidden">
       {/* ── Header ── */}
-      <div className="px-4 pt-4 pb-3 border-b border-black/[0.06]">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className={`rounded-full px-3 py-[4px] text-[13px] font-medium ${action.badge}`}>
-              {action.label}
-            </span>
-            {rec.irrigation_depth_mm != null && (
-              <span className="text-[12px] text-irrigai-text-muted">
-                <span className="font-display font-[500] text-[16px] text-irrigai-text">
-                  {rec.irrigation_depth_mm.toFixed(1)}
-                </span>
-                {" mm"}
-                {rec.irrigation_runtime_min != null && (
-                  <>
-                    {" · "}
-                    <span className="font-display font-[500] text-[16px] text-irrigai-text">
-                      {Math.round(rec.irrigation_runtime_min)}
-                    </span>
-                    {" min"}
-                  </>
-                )}
-              </span>
-            )}
-          </div>
-          <span className="text-[12px] font-medium text-irrigai-text tabular-nums">{confPct}%</span>
-        </div>
-
-        {/* Confidence bar */}
-        <div className="flex items-center gap-3 mt-3">
-          <span className="text-[11px] text-irrigai-text-muted min-w-[54px]">Confiança</span>
-          <div className="flex-1 h-1.5 rounded-full bg-black/[0.06] overflow-hidden">
-            <div
-              className={`h-full rounded-full ${CONF_FILL[rec.confidence_level]}`}
-              style={{ width: `${confPct}%` }}
-            />
-          </div>
-          <span className={`text-[11px] font-medium`}>
-            <span className={`inline-block h-1.5 w-1.5 rounded-full mr-1 align-middle ${CONF_COLOR[rec.confidence_level]}`} />
-            {CONF_LABEL[rec.confidence_level]}
-          </span>
-        </div>
-
-        <p className="mt-2 text-[11px] text-irrigai-text-hint">
-          Gerada em{" "}
-          {new Date(rec.generated_at).toLocaleString("pt-PT", {
-            day: "numeric",
-            month: "short",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </p>
-      </div>
+      {!hideHeader && (
+        <RecHeader rec={rec} action={action} confPct={confPct} />
+      )}
 
       <div className="px-4 py-4 space-y-5">
         {/* ── Input data grid ── */}
