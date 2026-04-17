@@ -8,8 +8,8 @@ import { CROP_LABELS, STAGE_LABELS } from "@/lib/cropConfig";
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const ACTION_LABELS: Record<RecommendationAction, string> = {
-  irrigate: "Irrigar",
-  skip: "Não irrigar",
+  irrigate: "Regar",
+  skip: "Não Regar",
   reduce: "Reduzir",
   increase: "Aumentar",
   defer: "Adiar",

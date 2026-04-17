@@ -16,8 +16,8 @@ export const ACTION_CONFIG: Record<
   RecommendationAction,
   { label: string; badge: string }
 > = {
-  irrigate: { label: "Irrigar",         badge: "bg-irrigai-green-bg text-irrigai-green-dark" },
-  skip:     { label: "Não irrigar",     badge: "bg-irrigai-gray-bg text-irrigai-text-muted" },
+  irrigate: { label: "Regar",         badge: "bg-irrigai-green-bg text-irrigai-green-dark" },
+  skip:     { label: "Não Regar",     badge: "bg-irrigai-gray-bg text-irrigai-text-muted" },
   reduce:   { label: "Reduzir rega",    badge: "bg-irrigai-amber-bg text-irrigai-amber-dark" },
   increase: { label: "Aumentar rega",   badge: "bg-irrigai-amber-bg text-irrigai-amber-dark" },
   defer:    { label: "Adiar decisão",   badge: "bg-irrigai-amber-bg text-irrigai-amber-dark" },
