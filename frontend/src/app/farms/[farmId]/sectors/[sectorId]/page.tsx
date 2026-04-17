@@ -246,6 +246,13 @@ export default function SectorDetailPage({ params }: Props) {
             lastReadingAt={p.last_reading_at}
             href={`/farms/${farmId}/sectors/${sectorId}/probes/${p.probe_id}`}
             sectorId={sectorId}
+            onSaved={async () => {
+              await Promise.all([
+                refetch(),
+                sectorsApi.cropProfile(sectorId).then(setCropProfile).catch(() => {}),
+              ]);
+              await generate();
+            }}
           />
         ))}
 

@@ -19,6 +19,7 @@ interface ProbeReadingsInlineProps {
   lastReadingAt?: string | null;
   href: string;
   sectorId: string;
+  onSaved?: () => void | Promise<void>;
 }
 
 export function ProbeReadingsInline({
@@ -28,6 +29,7 @@ export function ProbeReadingsInline({
   lastReadingAt,
   href,
   sectorId,
+  onSaved,
 }: ProbeReadingsInlineProps) {
   const [collapsed, setCollapsed] = useState(true);
   const [sinceHours, setSinceHours] = useState(72);
@@ -74,6 +76,7 @@ export function ProbeReadingsInline({
       setSaved(true);
       setEditing(false);
       setTimeout(() => setSaved(false), 2500);
+      await onSaved?.();
     } finally {
       setSaving(false);
     }
