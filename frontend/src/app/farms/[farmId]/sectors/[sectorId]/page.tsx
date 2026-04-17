@@ -2,18 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { useSectorStatus } from "@/hooks/useSectorDetail";
 import { RecommendationDetail } from "@/components/sectors/RecommendationDetail";
+import { ProbeReadingsInline } from "@/components/probes/ProbeReadingsInline";
 import { Button } from "@/components/ui/button";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { BottomNav } from "@/components/ui/BottomNav";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { recommendationsApi, sectorsApi } from "@/lib/api";
 import { ChatButton } from "@/components/chat/ChatButton";
 import { ActiveOverrides } from "@/components/overrides/ActiveOverrides";
 import { SectorAnalysis } from "@/components/sectors/SectorAnalysis";
-import { RefreshCw, Zap, ChevronRight } from "lucide-react";
+import { RefreshCw, Zap } from "lucide-react";
 import type { RecommendationDetail as Rec, SectorCropProfile } from "@/types";
 import { CROP_LABELS, STAGE_LABELS } from "@/lib/cropConfig";
 
@@ -221,6 +220,18 @@ export default function SectorDetailPage({ params }: Props) {
         {/* Active overrides */}
         <ActiveOverrides sectorId={sectorId} />
 
+        {/* Probe charts */}
+        {status.probes.map((p) => (
+          <ProbeReadingsInline
+            key={p.probe_id}
+            probeId={p.probe_id}
+            externalId={p.external_id}
+            healthStatus={p.health_status}
+            lastReadingAt={p.last_reading_at}
+            href={`/farms/${farmId}/sectors/${sectorId}/probes/${p.probe_id}`}
+          />
+        ))}
+
         {/* Recommendation */}
         {recLoading ? (
           <div className="h-48 animate-pulse rounded-xl bg-irrigai-surface" />
@@ -260,62 +271,6 @@ export default function SectorDetailPage({ params }: Props) {
           }}
         />
 
-        {/* Probes */}
-        {status.probes.length > 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Sondas ({status.probes.length})</CardTitle>
-            </CardHeader>
-            <CardBody className="p-0">
-              {status.probes.map((p) => (
-                <Link
-                  key={p.probe_id}
-                  href={`/farms/${farmId}/sectors/${sectorId}/probes/${p.probe_id}`}
-                  className="group flex items-center justify-between gap-3 px-4 py-3.5 border-b border-black/[0.05] last:border-0 hover:bg-irrigai-surface transition-colors"
-                >
-                  <div>
-                    <p className="font-mono text-[13px] font-medium text-irrigai-text">
-                      {p.external_id}
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-irrigai-text-muted">
-                      {p.last_reading_at
-                        ? `Última leitura: ${new Date(p.last_reading_at).toLocaleString("pt-PT", {
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}`
-                        : "Sem leituras ainda"}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`inline-block h-1.5 w-1.5 rounded-full ${
-                        p.health_status === "ok"
-                          ? "bg-irrigai-green"
-                          : p.health_status === "degraded"
-                            ? "bg-irrigai-amber"
-                            : "bg-irrigai-red"
-                      }`}
-                    />
-                    <span className="text-[11px] text-irrigai-text-muted">
-                      {p.health_status === "ok" ? "OK" : p.health_status}
-                    </span>
-                    <ChevronRight className="h-4 w-4 text-irrigai-text-hint group-hover:text-irrigai-text transition-colors" />
-                  </div>
-                </Link>
-              ))}
-            </CardBody>
-          </Card>
-        ) : (
-          <Card>
-            <CardBody className="py-8 text-center">
-              <p className="text-[13px] text-irrigai-text-muted">
-                Este sector ainda não tem sondas associadas.
-              </p>
-            </CardBody>
-          </Card>
-        )}
       </main>
 
       <BottomNav farmId={farmId} />
