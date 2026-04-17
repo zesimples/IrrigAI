@@ -232,6 +232,11 @@ export default function SectorDetailPage({ params }: Props) {
         )}
 
         {/* Probe charts */}
+        {status.probes.length > 0 && (
+          <p className="text-[11px] font-medium uppercase tracking-[0.05em] text-irrigai-text-hint -mb-2">
+            Informação da Sonda
+          </p>
+        )}
         {status.probes.map((p) => (
           <ProbeReadingsInline
             key={p.probe_id}
