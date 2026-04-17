@@ -88,6 +88,28 @@ async def resolve_alert(alert_id: str, db: AsyncSession = Depends(get_db)):
     return AlertOut.model_validate(alert)
 
 
+@router.post("/farms/{farm_id}/alerts/resolve-all")
+async def resolve_all_alerts(farm_id: str, db: AsyncSession = Depends(get_db)):
+    """Resolve all active alerts for a farm in one call."""
+    farm = await db.get(Farm, farm_id)
+    if not farm:
+        raise HTTPException(404, detail="Farm not found")
+
+    active_alerts = (
+        await db.execute(
+            select(Alert).where(Alert.farm_id == farm_id, Alert.is_active.is_(True))
+        )
+    ).scalars().all()
+
+    for alert in active_alerts:
+        alert.is_active = False
+        await audit.log(ALERT_RESOLVED, "alert", alert.id, db,
+                        before_data={"is_active": True}, after_data={"is_active": False})
+
+    await db.commit()
+    return {"resolved": len(active_alerts), "farm_id": farm_id}
+
+
 @router.post("/farms/{farm_id}/alerts/detect")
 async def trigger_anomaly_detection(farm_id: str, db: AsyncSession = Depends(get_db)):
     from app.services.anomaly_service import run_for_farm

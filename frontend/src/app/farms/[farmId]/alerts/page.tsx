@@ -49,6 +49,7 @@ export default function AlertsPage({ params }: Props) {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState<string | null>(null);
+  const [resolvingAll, setResolvingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -77,7 +78,15 @@ export default function AlertsPage({ params }: Props) {
     }
   }
 
-  const criticalCount = alerts.filter((a) => a.severity === "critical").length;
+  async function resolveAll() {
+    setResolvingAll(true);
+    try {
+      await alertsApi.resolveAll(farmId);
+      setAlerts([]);
+    } finally {
+      setResolvingAll(false);
+    }
+  }
 
   return (
     <div className="min-h-screen">
@@ -147,18 +156,15 @@ export default function AlertsPage({ params }: Props) {
         {/* Alert list */}
         {!loading && !error && alerts.length > 0 && (
           <div className="space-y-3">
-            {criticalCount > 1 && (
+            {alerts.length > 1 && (
               <div className="flex justify-end">
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() =>
-                    alerts
-                      .filter((a) => a.severity === "critical")
-                      .forEach((a) => resolve(a.id))
-                  }
+                  loading={resolvingAll}
+                  onClick={resolveAll}
                 >
-                  Resolver todos os críticos ({criticalCount})
+                  Resolver todos ({alerts.length})
                 </Button>
               </div>
             )}

@@ -176,6 +176,8 @@ export const alertsApi = {
   listFarm: (farmId: string) =>
     get<PaginatedResponse<Alert>>(`/farms/${farmId}/alerts`),
   resolve: (id: string) => post<Alert>(`/alerts/${id}/resolve`),
+  resolveAll: (farmId: string) =>
+    post<{ resolved: number; farm_id: string }>(`/farms/${farmId}/alerts/resolve-all`),
 };
 
 // ── Irrigation ────────────────────────────────────────────────────────────────
