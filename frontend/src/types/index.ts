@@ -141,6 +141,7 @@ export interface SectorStatus {
   last_applied_mm: number | null;
   probes: ProbeHealthSummary[];
   data_freshness_hours: number | null;
+  stress_projection: StressProjection | null;
 }
 
 // ── Irrigation System ─────────────────────────────────────────────────────────
@@ -240,6 +241,7 @@ export interface RecommendationDetail extends Recommendation {
     kc?: number;
     [key: string]: unknown;
   };
+  stress_projection: StressProjection | null;
 }
 
 export interface RecommendationReason {
@@ -432,4 +434,90 @@ export interface PaginatedResponse<T> {
   total: number;
   page: number;
   page_size: number;
+}
+
+// ── Stress Projection ──────────────────────────────────────────────────────────
+
+export interface DayProjection {
+  date: string;
+  projected_etc_mm: number;
+  projected_rain_mm: number;
+  projected_depletion_mm: number;
+  projected_depletion_pct: number;
+  stress_triggered: boolean;
+}
+
+export type StressUrgency = "none" | "low" | "medium" | "high";
+
+export interface StressProjection {
+  current_depletion_pct: number;
+  hours_to_stress: number | null;
+  stress_date: string | null;
+  urgency: StressUrgency;
+  message_pt: string;
+  message_en: string;
+  projections: DayProjection[];
+}
+
+// ── Auto-Calibration ──────────────────────────────────────────────────────────
+
+export interface SoilPresetMatch {
+  preset_id: string;
+  preset_name_pt: string;
+  preset_name_en: string;
+  preset_fc_pct: number;
+  preset_wp_pct: number;
+  distance: number;
+}
+
+export interface ObservedSoilPoints {
+  observed_fc_pct: number;
+  observed_refill_pct: number;
+  num_cycles: number;
+  consistency: number;
+  analysis_depths_cm: number[];
+}
+
+export type CalibrationStatus = "validated" | "better_match_found" | "no_good_match";
+
+export interface SoilMatchResult {
+  current_preset: SoilPresetMatch | null;
+  best_match: SoilPresetMatch;
+  all_matches: SoilPresetMatch[];
+  status: CalibrationStatus;
+}
+
+export interface AutoCalibrationResult {
+  sector_id: string;
+  sector_name: string;
+  observed: ObservedSoilPoints;
+  match: SoilMatchResult;
+  suggestion_pt: string;
+  suggestion_en: string;
+  generated_at: string;
+  dismissed: boolean;
+}
+
+// ── GDD Status ────────────────────────────────────────────────────────────────
+
+export interface GDDStatus {
+  sector_id: string;
+  sector_name: string;
+  crop_type: string;
+  reference_date: string;
+  accumulated_gdd: number;
+  tbase_c: number;
+  current_stage: string | null;
+  suggested_stage: string | null;
+  suggested_stage_name_pt: string | null;
+  suggested_stage_name_en: string | null;
+  stage_changed: boolean;
+  days_in_current_stage: number | null;
+  next_stage: string | null;
+  next_stage_name_pt: string | null;
+  gdd_to_next_stage: number | null;
+  confidence: "high" | "low";
+  missing_weather_days: number;
+  suggestion_pt: string | null;
+  suggestion_en: string | null;
 }

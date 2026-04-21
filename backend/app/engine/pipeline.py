@@ -22,6 +22,7 @@ from app.engine import (
     water_balance,
 )
 from app.engine.rainfall_effectiveness import compute_effective_rainfall
+from app.engine.stress_projection import StressProjector
 from app.engine.types import (
     ConfidenceResult,
     DailyWeather,
@@ -337,6 +338,9 @@ async def build_irrigation_context(sector_id: str, db: AsyncSession) -> RecentIr
 # Main pipeline
 # ---------------------------------------------------------------------------
 
+_stress_projector = StressProjector()
+
+
 class RecommendationPipeline:
     """Runs the full agronomic recommendation for one sector."""
 
@@ -374,6 +378,25 @@ class RecommendationPipeline:
             sector = await db.get(Sector, sector_id)
             plot = await db.get(Plot, sector.plot_id)
             farm_id = plot.farm_id if plot else None
+
+        # Step 2.5: GDD-based Kc fallback (when phenological stage is not set)
+        if ctx.phenological_stage is None and farm_id:
+            try:
+                from app.engine.gdd_tracker import GDDTracker
+                gdd_status = await GDDTracker().compute_accumulated_gdd(sector_id, db)
+                if gdd_status and gdd_status.suggested_stage and gdd_status.suggested_kc is not None:
+                    # Use GDD-estimated stage as Kc source (avoids -0.10 "stage not set" penalty,
+                    # gets -0.05 via defaults_used instead)
+                    ctx.kc = gdd_status.suggested_kc
+                    ctx.phenological_stage = gdd_status.suggested_stage
+                    ctx.kc_source = (
+                        f"GDD-estimated stage ({gdd_status.suggested_stage}, "
+                        f"{gdd_status.accumulated_gdd:.0f} GDD)"
+                    )
+                    ctx.defaults_used.append(ctx.kc_source)
+                    log.append(f"GDD fallback: stage={gdd_status.suggested_stage} Kc={ctx.kc:.2f}")
+            except Exception as exc:
+                logger.debug("GDD fallback skipped for sector %s: %s", sector_id, exc)
 
         # Step 3: Load weather
         weather: WeatherContext | None = None
@@ -444,6 +467,46 @@ class RecommendationPipeline:
         conf: ConfidenceResult = confidence.score(ctx, probes, weather, probes.anomalies_detected)
         log.append(f"Confidence: {conf.score:.2f} ({conf.level})")
 
+        # Step 11.5: 48-72h stress projection
+        stress_proj_dict: dict | None = None
+        try:
+            stress = _stress_projector.project(
+                current_depletion_mm=wb.depletion_mm,
+                taw_mm=wb.taw_mm,
+                mad=ctx.mad,
+                forecast_et0=[w.et0_mm for w in weather.forecast[:3]],
+                kc=ctx.kc,
+                forecast_rain=[
+                    (w.rainfall_mm or 0.0, w.rainfall_probability_pct or 0.0)
+                    for w in weather.forecast[:3]
+                ],
+                rainfall_effectiveness=ctx.rainfall_effectiveness,
+                sector_id=sector_id,
+                today=target_date,
+            )
+            stress_proj_dict = {
+                "current_depletion_pct": stress.current_depletion_pct,
+                "hours_to_stress": stress.hours_to_stress,
+                "stress_date": stress.stress_date.isoformat() if stress.stress_date else None,
+                "urgency": stress.urgency,
+                "message_pt": stress.message_pt,
+                "message_en": stress.message_en,
+                "projections": [
+                    {
+                        "date": p.date.isoformat(),
+                        "projected_etc_mm": p.projected_etc_mm,
+                        "projected_rain_mm": p.projected_rain_mm,
+                        "projected_depletion_mm": p.projected_depletion_mm,
+                        "projected_depletion_pct": p.projected_depletion_pct,
+                        "stress_triggered": p.stress_triggered,
+                    }
+                    for p in stress.projections
+                ],
+            }
+            log.append(f"Stress projection: urgency={stress.urgency}, hours_to_stress={stress.hours_to_stress}")
+        except Exception as exc:
+            logger.debug("Stress projection failed for sector %s: %s", sector_id, exc)
+
         # Step 12: Build reasons list
         reasons = _build_reasons(ctx, wb, et0_val, etc_val, trigger_reason, fc_impact, conf, dose)
 
@@ -472,6 +535,7 @@ class RecommendationPipeline:
             forecast_rain_next_48h=fc_impact["rain_next_48h_mm"],
             defaults_used=ctx.defaults_used,
             missing_config=ctx.missing_config,
+            stress_projection=stress_proj_dict,
             computation_log={
                 "log": log,
                 "kc_source": ctx.kc_source,

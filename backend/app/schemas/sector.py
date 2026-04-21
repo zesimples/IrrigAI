@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from pydantic import BaseModel
+from app.schemas.recommendation import StressProjectionOut
 
 
 class SectorBase(BaseModel):
@@ -118,3 +119,6 @@ class SectorStatus(BaseModel):
     # Probe health
     probes: list[ProbeHealthSummary] = []
     data_freshness_hours: float | None = None
+
+    # 48-72h stress projection (from latest recommendation inputs_snapshot)
+    stress_projection: StressProjectionOut | None = None

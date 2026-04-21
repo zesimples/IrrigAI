@@ -19,7 +19,7 @@ _pipeline = RecommendationPipeline()
 
 
 def _make_inputs_snapshot(eng: EngineRecommendation, target_date: date) -> dict:
-    return {
+    snap = {
         "sector_id": eng.sector_id,
         "target_date": target_date.isoformat(),
         "et0_mm": eng.et0_mm,
@@ -33,6 +33,9 @@ def _make_inputs_snapshot(eng: EngineRecommendation, target_date: date) -> dict:
         "defaults_used": eng.defaults_used,
         "missing_config": eng.missing_config,
     }
+    if eng.stress_projection is not None:
+        snap["stress_projection"] = eng.stress_projection
+    return snap
 
 
 def _persist_rec(eng: EngineRecommendation, target_date: date) -> Recommendation:

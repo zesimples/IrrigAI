@@ -1,6 +1,6 @@
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import Date, Float, ForeignKey, Integer, String
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +26,12 @@ class Sector(Base, TimestampMixin):
     tree_spacing_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     row_spacing_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     trees_per_ha: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Auto-calibration state
+    auto_calibration_dismissed_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="If set, auto-calibration suggestions are suppressed until this datetime"
+    )
 
     # Agronomic management
     current_phenological_stage: Mapped[str | None] = mapped_column(

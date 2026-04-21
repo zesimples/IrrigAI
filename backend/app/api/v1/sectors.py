@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Alert, IrrigationEvent, IrrigationSystem, Plot, Probe, Recommendation, Sector
 from app.schemas.common import PaginatedResponse
+from app.schemas.recommendation import StressProjectionOut
 from app.schemas.sector import (
     IrrigationSystemCreate,
     IrrigationSystemOut,
@@ -96,6 +97,7 @@ async def get_sector_status(sector_id: str, db: AsyncSession = Depends(get_db)):
     swc_current = None
     swc_source = None
     depletion_pct = None
+    stress_proj_out: StressProjectionOut | None = None
     if latest_rec and latest_rec.inputs_snapshot:
         snap = latest_rec.inputs_snapshot
         swc_current = snap.get("swc_current")
@@ -103,6 +105,11 @@ async def get_sector_status(sector_id: str, db: AsyncSession = Depends(get_db)):
         depletion_mm = snap.get("depletion_mm")
         if taw_mm and depletion_mm is not None and taw_mm > 0:
             depletion_pct = round(depletion_mm / taw_mm * 100, 1)
+        if "stress_projection" in snap:
+            try:
+                stress_proj_out = StressProjectionOut.model_validate(snap["stress_projection"])
+            except Exception:
+                pass
 
     # Active alerts
     alerts = (
@@ -190,6 +197,7 @@ async def get_sector_status(sector_id: str, db: AsyncSession = Depends(get_db)):
         last_applied_mm=last_event.applied_mm if last_event else None,
         probes=probe_summaries,
         data_freshness_hours=freshness_hours,
+        stress_projection=stress_proj_out,
     )
 
 

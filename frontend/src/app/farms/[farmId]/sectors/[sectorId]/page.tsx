@@ -12,6 +12,9 @@ import { recommendationsApi, sectorsApi } from "@/lib/api";
 import { ChatButton } from "@/components/chat/ChatButton";
 import { ActiveOverrides } from "@/components/overrides/ActiveOverrides";
 import { SectorAnalysis } from "@/components/sectors/SectorAnalysis";
+import { StressProjectionCard } from "@/components/sectors/StressProjectionCard";
+import { AutoCalibrationCard } from "@/components/sectors/AutoCalibrationCard";
+import { GDDStatusCard } from "@/components/sectors/GDDStatusCard";
 import { RefreshCw, Zap } from "lucide-react";
 import type { RecommendationDetail as Rec, SectorCropProfile } from "@/types";
 import { CROP_LABELS, STAGE_LABELS } from "@/lib/cropConfig";
@@ -34,6 +37,7 @@ export default function SectorDetailPage({ params }: Props) {
   const [generating, setGenerating] = useState(false);
   const [cropProfile, setCropProfile] = useState<SectorCropProfile | null>(null);
   const [sectorDetail, setSectorDetail] = useState<import("@/types").SectorDetail | null>(null);
+  const [activeTab, setActiveTab] = useState<"monit" | "fenologia">("monit");
 
   useEffect(() => {
     sectorsApi.cropProfile(sectorId).then(setCropProfile).catch(() => {});
@@ -127,9 +131,9 @@ export default function SectorDetailPage({ params }: Props) {
         }
       />
 
-      <main className="mx-auto max-w-3xl space-y-4 px-4 py-5 sm:px-6 animate-fade-in-up">
+      <main className="mx-auto max-w-3xl px-4 py-5 sm:px-6 animate-fade-in-up">
         {/* Page title */}
-        <div>
+        <div className="mb-4">
           <h1 className="font-display text-[20px] font-[500] text-irrigai-text tracking-[-0.02em]">
             {status.sector_name}
           </h1>
@@ -137,6 +141,29 @@ export default function SectorDetailPage({ params }: Props) {
             {cropLabel} · {stageName}
           </p>
         </div>
+
+        {/* Tab switcher */}
+        <div className="flex gap-0 border-b border-black/[0.08] -mx-4 px-4 sm:-mx-6 sm:px-6 mb-4">
+          {([
+            { id: "monit", label: "Monitorização" },
+            { id: "fenologia", label: "Fenologia" },
+          ] as const).map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-3 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
+                activeTab === tab.id
+                  ? "border-irrigai-green text-irrigai-green"
+                  : "border-transparent text-irrigai-text-muted hover:text-irrigai-text"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Monitorização tab ──────────────────────────────────────────────── */}
+        {activeTab === "monit" && <div className="space-y-4">
 
         {/* Status cards */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -256,6 +283,19 @@ export default function SectorDetailPage({ params }: Props) {
           />
         ))}
 
+        {/* 48-72h stress projection */}
+        {status.stress_projection && (
+          <StressProjectionCard
+            projection={status.stress_projection}
+            onAcceptRecommendation={rec ? async () => {
+              if (rec) {
+                await recommendationsApi.accept(rec.id);
+                await refetch();
+              }
+            } : undefined}
+          />
+        )}
+
         {/* Recommendation body */}
         {recLoading ? (
           <div className="h-48 animate-pulse rounded-xl bg-irrigai-surface" />
@@ -276,6 +316,15 @@ export default function SectorDetailPage({ params }: Props) {
           </div>
         )}
 
+        {/* Auto-calibration soil validation */}
+        <AutoCalibrationCard
+          sectorId={sectorId}
+          onAccepted={async () => {
+            await refetch();
+            await generate();
+          }}
+        />
+
         {/* AI Analysis */}
         <SectorAnalysis
           sectorId={sectorId}
@@ -284,16 +333,37 @@ export default function SectorDetailPage({ params }: Props) {
           currentSoilPresetId={cropProfile?.soil_preset_id}
           currentRainfallEffectiveness={sectorDetail?.rainfall_effectiveness ?? null}
           onSaved={async () => {
-            // Re-fetch sector data so saved values reflect in the UI immediately
             await Promise.all([
               refetch(),
               sectorsApi.cropProfile(sectorId).then(setCropProfile).catch(() => {}),
               sectorsApi.get(sectorId).then(setSectorDetail).catch(() => {}),
             ]);
-            // Auto-generate recommendation with the updated parameters
             await generate();
           }}
         />
+
+        </div>}
+
+        {/* ── Fenologia tab ─────────────────────────────────────────────────── */}
+        {activeTab === "fenologia" && (
+          <GDDStatusCard
+            sectorId={sectorId}
+            cropType={status.crop_type ?? "olive"}
+            sowingDate={sectorDetail?.sowing_date ?? null}
+            currentStage={status.current_stage ?? null}
+            onStageConfirmed={async () => {
+              await refetch();
+              await generate();
+            }}
+            onSetupSaved={async () => {
+              await Promise.all([
+                refetch(),
+                sectorsApi.get(sectorId).then(setSectorDetail).catch(() => {}),
+              ]);
+              await generate();
+            }}
+          />
+        )}
 
       </main>
 

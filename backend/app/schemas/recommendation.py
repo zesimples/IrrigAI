@@ -1,6 +1,26 @@
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel
+
+
+class DayProjectionOut(BaseModel):
+    date: str
+    projected_etc_mm: float
+    projected_rain_mm: float
+    projected_depletion_mm: float
+    projected_depletion_pct: float
+    stress_triggered: bool
+
+
+class StressProjectionOut(BaseModel):
+    current_depletion_pct: float
+    hours_to_stress: float | None = None
+    stress_date: str | None = None
+    urgency: str
+    message_pt: str
+    message_en: str
+    projections: list[DayProjectionOut] = []
 
 
 class ReasonOut(BaseModel):
@@ -38,6 +58,7 @@ class RecommendationDetail(RecommendationOut):
     reasons: list[ReasonOut] = []
     inputs_snapshot: dict = {}
     computation_log: dict = {}
+    stress_projection: StressProjectionOut | None = None
 
 
 class AcceptRequest(BaseModel):

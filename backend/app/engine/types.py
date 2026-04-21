@@ -184,3 +184,6 @@ class EngineRecommendation:
 
     # Full computation log (stored as JSONB)
     computation_log: dict = field(default_factory=dict)
+
+    # 48-72h stress projection (optional, stored in inputs_snapshot)
+    stress_projection: dict | None = None

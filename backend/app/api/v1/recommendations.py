@@ -15,6 +15,7 @@ from app.schemas.recommendation import (
     RecommendationDetail,
     RecommendationOut,
     RejectRequest,
+    StressProjectionOut,
 )
 from app.services.audit_service import audit
 from app.services.audit_service import (
@@ -89,11 +90,21 @@ async def get_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)):
         if has_probe_data:
             base["confidence_level"] = "medium"
 
+    # Extract stress projection from inputs_snapshot if present
+    snap = rec.inputs_snapshot or {}
+    stress_proj_out: StressProjectionOut | None = None
+    if "stress_projection" in snap:
+        try:
+            stress_proj_out = StressProjectionOut.model_validate(snap["stress_projection"])
+        except Exception:
+            pass
+
     return RecommendationDetail(
         **base,
         reasons=[ReasonOut.model_validate(r) for r in reasons],
-        inputs_snapshot=rec.inputs_snapshot or {},
+        inputs_snapshot=snap,
         computation_log=rec.computation_log or {},
+        stress_projection=stress_proj_out,
     )
 
 

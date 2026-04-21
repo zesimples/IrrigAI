@@ -1,10 +1,12 @@
 import type {
   Alert,
   AuditLog,
+  AutoCalibrationResult,
   CropProfileTemplate,
   DashboardResponse,
   Farm,
   FarmCreate,
+  GDDStatus,
   IrrigationEvent,
   IrrigationSystemCreate,
   PaginatedResponse,
@@ -242,6 +244,23 @@ export const chatApi = {
     post<{ questions: string[] }>(`/farms/${farmId}/questions`),
   explainAlert: (alertId: string) =>
     post<{ explanation: string }>(`/alerts/${alertId}/explain`),
+};
+
+// ── Auto-Calibration ──────────────────────────────────────────────────────────
+
+export const calibrationApi = {
+  get: (sectorId: string) => get<AutoCalibrationResult>(`/sectors/${sectorId}/auto-calibration`),
+  accept: (sectorId: string) => post<{ accepted: boolean; preset_name_pt: string; preset_name_en: string }>(`/sectors/${sectorId}/auto-calibration/accept`),
+  dismiss: (sectorId: string) => post<{ dismissed: boolean; dismissed_until: string }>(`/sectors/${sectorId}/auto-calibration/dismiss`),
+};
+
+// ── GDD Phenology ─────────────────────────────────────────────────────────────
+
+export const gddApi = {
+  getSector: (sectorId: string) => get<GDDStatus>(`/sectors/${sectorId}/gdd-status`),
+  getFarm: (farmId: string) => get<GDDStatus[]>(`/farms/${farmId}/gdd-status`),
+  confirm: (sectorId: string, stage?: string) =>
+    post<{ confirmed: boolean; stage: string }>(`/sectors/${sectorId}/gdd-status/confirm`, { stage: stage ?? null }),
 };
 
 export { ApiError };

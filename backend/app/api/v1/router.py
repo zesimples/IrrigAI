@@ -3,10 +3,12 @@ from fastapi import APIRouter
 from app.api.v1 import (
     alerts,
     audit_log,
+    auto_calibration,
     chat,
     crop_profiles,
     dashboard,
     farms,
+    gdd,
     irrigation,
     overrides,
     plots,
@@ -31,3 +33,5 @@ router.include_router(crop_profiles.router)
 router.include_router(chat.router)
 router.include_router(overrides.router)
 router.include_router(audit_log.router)
+router.include_router(auto_calibration.router)
+router.include_router(gdd.router)
