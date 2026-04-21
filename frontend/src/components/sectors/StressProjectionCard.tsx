@@ -60,21 +60,19 @@ export function StressProjectionCard({ projection, onAcceptRecommendation }: Pro
       {/* Mini 3-day depletion bars */}
       {projection.projections.length > 0 && (
         <div className="flex gap-2 mb-3">
-          {projection.projections.map((p, i) => {
+          {projection.projections.map((p) => {
             const pct = Math.min(100, p.projected_depletion_pct);
             const barColor = p.stress_triggered
               ? "bg-irrigai-red"
               : pct > 60
               ? "bg-irrigai-amber"
               : "bg-irrigai-green";
-            const d = new Date();
-            d.setDate(d.getDate() + i + 1);
-            const dateLabel = d.toLocaleDateString("pt-PT", {
+            const dateLabel = new Date(p.date).toLocaleDateString("pt-PT", {
               weekday: "short",
               day: "numeric",
             });
             return (
-              <div key={i} className="flex-1 flex flex-col items-center gap-1">
+              <div key={p.date} className="flex-1 flex flex-col items-center gap-1">
                 <div className="w-full h-10 rounded bg-black/[0.05] relative overflow-hidden">
                   <div
                     className={`absolute bottom-0 left-0 right-0 rounded ${barColor} transition-all`}

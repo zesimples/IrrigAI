@@ -24,6 +24,7 @@ import type {
   SectorOverrideCreate,
   SectorStatus,
   SoilPreset,
+  StressProjection,
 } from "@/types";
 
 // In production (Docker) this is a relative path — Next.js rewrites proxy it
@@ -121,6 +122,7 @@ export const sectorsApi = {
     ),
   listAlerts: (id: string) =>
     get<PaginatedResponse<Alert>>(`/sectors/${id}/alerts`),
+  stressProjection: (id: string) => get<StressProjection>(`/sectors/${id}/stress-projection`),
   cropProfile: (id: string) => get<SectorCropProfile>(`/sectors/${id}/crop-profile`),
   updateCropProfile: (id: string, body: Partial<SectorCropProfile>) =>
     put<SectorCropProfile>(`/sectors/${id}/crop-profile`, body),

@@ -236,6 +236,65 @@ async def create_or_replace_irrigation_system(
     return IrrigationSystemOut.model_validate(irrig)
 
 
+@router.get("/sectors/{sector_id}/stress-projection", response_model=StressProjectionOut)
+async def get_live_stress_projection(sector_id: str, db: AsyncSession = Depends(get_db)):
+    """Compute a fresh stress projection for a sector using current sensor + forecast data."""
+    from datetime import date as _date
+    from app.engine.pipeline import build_sector_context, build_weather_context
+    from app.engine import et0 as et0_mod, probe_interpreter, water_balance
+    from app.engine.stress_projection import StressProjector
+
+    sector = await db.get(Sector, sector_id)
+    if not sector:
+        raise HTTPException(404, detail="Sector not found")
+
+    plot = await db.get(Plot, sector.plot_id)
+    if not plot:
+        raise HTTPException(404, detail="Plot not found")
+
+    ctx = await build_sector_context(sector_id, db)
+    weather = await build_weather_context(plot.farm_id, db)
+
+    et0_val, _ = et0_mod.compute_et0(weather.today, weather.lat or 38.57)
+    probes = await probe_interpreter.interpret_probes(ctx, db)
+    wb = water_balance.build_water_balance(ctx, probes.rootzone.swc_current)
+
+    stress = StressProjector().project(
+        current_depletion_mm=wb.depletion_mm,
+        taw_mm=wb.taw_mm,
+        mad=ctx.mad,
+        forecast_et0=[w.et0_mm for w in weather.forecast[:3]],
+        kc=ctx.kc,
+        forecast_rain=[
+            (w.rainfall_mm or 0.0, w.rainfall_probability_pct or 0.0)
+            for w in weather.forecast[:3]
+        ],
+        rainfall_effectiveness=ctx.rainfall_effectiveness,
+        sector_id=sector_id,
+        today=_date.today(),
+    )
+
+    return StressProjectionOut(
+        current_depletion_pct=stress.current_depletion_pct,
+        hours_to_stress=stress.hours_to_stress,
+        stress_date=stress.stress_date.isoformat() if stress.stress_date else None,
+        urgency=stress.urgency,
+        message_pt=stress.message_pt,
+        message_en=stress.message_en,
+        projections=[
+            {
+                "date": p.date.isoformat(),
+                "projected_etc_mm": p.projected_etc_mm,
+                "projected_rain_mm": p.projected_rain_mm,
+                "projected_depletion_mm": p.projected_depletion_mm,
+                "projected_depletion_pct": p.projected_depletion_pct,
+                "stress_triggered": p.stress_triggered,
+            }
+            for p in stress.projections
+        ],
+    )
+
+
 @router.put("/sectors/{sector_id}", response_model=SectorOut)
 async def update_sector(sector_id: str, body: SectorUpdate, db: AsyncSession = Depends(get_db)):
     sector = await db.get(Sector, sector_id)

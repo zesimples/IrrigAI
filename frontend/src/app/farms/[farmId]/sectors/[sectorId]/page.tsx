@@ -16,7 +16,7 @@ import { StressProjectionCard } from "@/components/sectors/StressProjectionCard"
 import { AutoCalibrationCard } from "@/components/sectors/AutoCalibrationCard";
 import { GDDStatusCard } from "@/components/sectors/GDDStatusCard";
 import { RefreshCw, Zap } from "lucide-react";
-import type { RecommendationDetail as Rec, SectorCropProfile } from "@/types";
+import type { RecommendationDetail as Rec, SectorCropProfile, StressProjection } from "@/types";
 import { CROP_LABELS, STAGE_LABELS } from "@/lib/cropConfig";
 
 interface Props {
@@ -38,10 +38,12 @@ export default function SectorDetailPage({ params }: Props) {
   const [cropProfile, setCropProfile] = useState<SectorCropProfile | null>(null);
   const [sectorDetail, setSectorDetail] = useState<import("@/types").SectorDetail | null>(null);
   const [activeTab, setActiveTab] = useState<"monit" | "fenologia">("monit");
+  const [liveStress, setLiveStress] = useState<StressProjection | null>(null);
 
   useEffect(() => {
     sectorsApi.cropProfile(sectorId).then(setCropProfile).catch(() => {});
     sectorsApi.get(sectorId).then(setSectorDetail).catch(() => {});
+    sectorsApi.stressProjection(sectorId).then(setLiveStress).catch(() => {});
   }, [sectorId]);
 
   useEffect(() => {
@@ -61,6 +63,7 @@ export default function SectorDetailPage({ params }: Props) {
       const detail = await recommendationsApi.get(r.id);
       setRec(detail);
       await refetch();
+      sectorsApi.stressProjection(sectorId).then(setLiveStress).catch(() => {});
     } finally {
       setGenerating(false);
     }
@@ -284,9 +287,9 @@ export default function SectorDetailPage({ params }: Props) {
         ))}
 
         {/* 48-72h stress projection */}
-        {status.stress_projection && (
+        {liveStress && (
           <StressProjectionCard
-            projection={status.stress_projection}
+            projection={liveStress}
             onAcceptRecommendation={rec ? async () => {
               if (rec) {
                 await recommendationsApi.accept(rec.id);
