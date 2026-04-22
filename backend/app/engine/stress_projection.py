@@ -1,8 +1,11 @@
 """48-72h stress projection engine.
 
 Projects rootzone depletion forward 3 days to predict when a sector will
-reach the irrigation trigger (MAD threshold).  Pure deterministic calculation —
-no DB access needed.
+reach the irrigation trigger (MAD threshold).
+
+Applies the FAO-56 water stress coefficient Ks when depletion already
+exceeds RAW — a stressed crop transpires less, so the projection is not
+as pessimistic as assuming full ETc throughout.
 """
 
 from dataclasses import dataclass, field
@@ -29,6 +32,24 @@ class StressProjection:
     urgency: str                        # "none", "low" (48-72h), "medium" (24-48h), "high" (<24h)
     message_pt: str
     message_en: str
+
+
+def _compute_ks(depletion_mm: float, taw_mm: float, mad: float) -> float:
+    """FAO-56 water stress coefficient Ks.
+
+    Ks = 1.0 when depletion ≤ RAW (no stress — crop transpires at full rate).
+    Ks = (TAW − Dr) / ((1 − p) × TAW) when depletion > RAW.
+
+    This reflects that a water-stressed crop reduces stomatal conductance
+    and transpires at a lower rate, slowing further depletion.
+    """
+    raw = mad * taw_mm
+    if depletion_mm <= raw or taw_mm <= 0:
+        return 1.0
+    non_stressed_fraction = (1.0 - mad) * taw_mm
+    if non_stressed_fraction <= 0:
+        return 0.0
+    return max(0.0, min(1.0, (taw_mm - depletion_mm) / non_stressed_fraction))
 
 
 class StressProjector:
@@ -58,14 +79,21 @@ class StressProjector:
         hours_to_stress: float | None = None
         stress_date: date | None = None
 
-        # Use today's ET0 as fallback for days with missing forecast ET0
+        # Use the first available forecast ET0 as fallback for missing days
         fallback_et0 = next((e for e in forecast_et0 if e is not None), 4.0)
 
         for day_idx in range(3):
             proj_date = today + timedelta(days=day_idx + 1)
 
-            et0 = forecast_et0[day_idx] if day_idx < len(forecast_et0) and forecast_et0[day_idx] is not None else fallback_et0
-            etc = round(et0 * kc, 2)
+            et0 = (
+                forecast_et0[day_idx]
+                if day_idx < len(forecast_et0) and forecast_et0[day_idx] is not None
+                else fallback_et0
+            )
+
+            # Apply Ks: stressed crop transpires less, slowing depletion
+            ks = _compute_ks(depletion, taw_mm, mad)
+            etc = round(et0 * kc * ks, 2)
 
             rain_mm = 0.0
             if day_idx < len(forecast_rain):
@@ -90,14 +118,14 @@ class StressProjector:
 
             if stress and hours_to_stress is None:
                 stress_date = proj_date
-                # Estimate hours: interpolate within the day
-                prev_depletion = projections[day_idx - 1].projected_depletion_mm if day_idx > 0 else current_depletion_mm
+                prev_depletion = (
+                    projections[day_idx - 1].projected_depletion_mm
+                    if day_idx > 0
+                    else current_depletion_mm
+                )
                 delta = depletion - prev_depletion
                 gap = stress_threshold_mm - prev_depletion
-                if delta > 0:
-                    fraction = gap / delta
-                else:
-                    fraction = 1.0
+                fraction = gap / delta if delta > 0 else 1.0
                 hours_to_stress = round((day_idx + fraction) * 24, 1)
 
         urgency = _classify_urgency(hours_to_stress)

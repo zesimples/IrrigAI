@@ -13,6 +13,7 @@ class Farm(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     location_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     location_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    elevation_m: Mapped[float | None] = mapped_column(Float, nullable=True, comment="metres above sea level for ET0 correction")
     region: Mapped[str | None] = mapped_column(String(255), nullable=True)
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="Europe/Lisbon")
     owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("user.id"), nullable=False)

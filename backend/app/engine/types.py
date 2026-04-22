@@ -111,6 +111,7 @@ class WeatherContext:
     farm_id: str
     lat: float | None
     lon: float | None
+    elevation_m: float                   # metres above sea level (default 0)
     today: DailyWeather
     forecast: list[DailyWeather]         # next N days
     hours_since_observation: float | None

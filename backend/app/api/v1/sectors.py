@@ -255,7 +255,7 @@ async def get_live_stress_projection(sector_id: str, db: AsyncSession = Depends(
     ctx = await build_sector_context(sector_id, db)
     weather = await build_weather_context(plot.farm_id, db)
 
-    et0_val, _ = et0_mod.compute_et0(weather.today, weather.lat or 38.57)
+    et0_val, _ = et0_mod.compute_et0(weather.today, weather.lat or 38.57, weather.elevation_m)
     probes = await probe_interpreter.interpret_probes(ctx, db)
     wb = water_balance.build_water_balance(ctx, probes.rootzone.swc_current)
 

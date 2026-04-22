@@ -230,6 +230,7 @@ async def build_weather_context(farm_id: str, db: AsyncSession) -> WeatherContex
     farm = await db.get(Farm, farm_id)
     lat = farm.location_lat if farm else None
     lon = farm.location_lon if farm else None
+    elevation_m = (farm.elevation_m or 0.0) if farm else 0.0
 
     # Latest observation
     obs_result = await db.execute(
@@ -287,6 +288,7 @@ async def build_weather_context(farm_id: str, db: AsyncSession) -> WeatherContex
         farm_id=farm_id,
         lat=lat,
         lon=lon,
+        elevation_m=elevation_m,
         today=today_weather,
         forecast=forecast_days,
         hours_since_observation=hours_since_obs,
@@ -409,6 +411,7 @@ class RecommendationPipeline:
                 farm_id="",
                 lat=None,
                 lon=None,
+                elevation_m=0.0,
                 today=DailyWeather(date=target_date),
                 forecast=[],
                 hours_since_observation=None,
@@ -416,7 +419,7 @@ class RecommendationPipeline:
             )
 
         # Step 4: ET0
-        et0_val, et0_method = et0.compute_et0(weather.today, weather.lat or 38.57)
+        et0_val, et0_method = et0.compute_et0(weather.today, weather.lat or 38.57, weather.elevation_m)
         log.append(f"ET0={et0_val} mm/day ({et0_method})")
 
         # Step 5: ETc = ET0 × Kc
