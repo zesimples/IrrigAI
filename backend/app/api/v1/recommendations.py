@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.limiter import limiter
 
 from app.database import get_db
 from app.models import Farm, Probe, Recommendation, RecommendationReason, Sector
@@ -109,7 +111,8 @@ async def get_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/sectors/{sector_id}/recommendations/generate", response_model=RecommendationOut, status_code=201)
-async def generate_sector_recommendation(sector_id: str, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def generate_sector_recommendation(request: Request, sector_id: str, db: AsyncSession = Depends(get_db)):
     sector = await db.get(Sector, sector_id)
     if not sector:
         raise HTTPException(404, detail="Sector not found")
@@ -121,7 +124,8 @@ async def generate_sector_recommendation(sector_id: str, db: AsyncSession = Depe
 
 
 @router.post("/farms/{farm_id}/recommendations/generate", response_model=list[RecommendationOut], status_code=201)
-async def generate_farm_recommendations(farm_id: str, db: AsyncSession = Depends(get_db)):
+@limiter.limit("3/minute")
+async def generate_farm_recommendations(request: Request, farm_id: str, db: AsyncSession = Depends(get_db)):
     farm = await db.get(Farm, farm_id)
     if not farm:
         raise HTTPException(404, detail="Farm not found")

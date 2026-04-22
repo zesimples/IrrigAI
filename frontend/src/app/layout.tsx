@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { DM_Sans, Fraunces } from "next/font/google";
 import "@/styles/globals.css";
+import { ToastProvider } from "@/hooks/useToast";
+import { Toaster } from "@/components/ui/Toaster";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -23,7 +26,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt">
       <body className={`${dmSans.variable} ${fraunces.variable} font-sans`}>
-        {children}
+        <ErrorBoundary>
+          <ToastProvider>
+            {children}
+            <Toaster />
+          </ToastProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );

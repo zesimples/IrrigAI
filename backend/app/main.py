@@ -7,10 +7,13 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 from sqlalchemy import text
 
 from app.config import get_settings
 from app.database import engine
+from app.limiter import limiter
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -44,9 +47,13 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
     )
+
+    # Rate limiting
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     # Request ID + request logging — pure ASGI middleware (avoids BaseHTTPMiddleware
     # event-loop conflicts with asyncpg when running under pytest)
@@ -87,6 +94,7 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["ops"])
     async def health():
         checks: dict[str, str] = {}
+        meta: dict = {"version": "0.1.0"}
 
         # DB check
         try:
@@ -107,12 +115,23 @@ def create_app() -> FastAPI:
             logger.error("Redis health check failed: %s", exc)
             checks["redis"] = "error"
 
+        # Last data ingestion
+        try:
+            async with engine.connect() as conn:
+                result = await conn.execute(
+                    text("SELECT MAX(timestamp) FROM probe_reading")
+                )
+                ts = result.scalar()
+                meta["last_ingestion_at"] = ts.isoformat() if ts else None
+        except Exception:
+            meta["last_ingestion_at"] = None
+
         all_ok = all(v == "ok" for v in checks.values())
         status_code = 200 if all_ok else 503
 
         return JSONResponse(
             status_code=status_code,
-            content={"status": "ok" if all_ok else "degraded", "checks": checks},
+            content={"status": "ok" if all_ok else "degraded", "checks": checks, **meta},
         )
 
     # API v1

@@ -61,6 +61,32 @@ services:
       - backend
     restart: unless-stopped
 
+  db-backup:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER:-irrigai}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-irrigai_dev}
+      PGDATABASE: ${POSTGRES_DB:-irrigai}
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    entrypoint: >
+      /bin/sh -c '
+        mkdir -p /backups &&
+        while true; do
+          FILENAME="/backups/irrigai_$$(date +%Y%m%d_%H%M%S).sql.gz" &&
+          pg_dump | gzip > "$$FILENAME" &&
+          echo "Backup written: $$FILENAME" &&
+          find /backups -name "irrigai_*.sql.gz" -mtime +7 -delete &&
+          sleep 86400;
+        done
+      '
+
 volumes:
   postgres_data:
   redis_data:

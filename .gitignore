@@ -47,3 +47,4 @@ alembic/versions/*.pyc
 # Misc
 *.log
 .codex
+backups/*.sql.gz
