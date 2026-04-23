@@ -5,6 +5,7 @@ from app.models.crop_profile_template import CropProfileTemplate
 from app.models.soil_preset import SoilPreset
 from app.models.user import User
 from app.models.farm import Farm
+from app.models.farm_credentials import FarmCredentials
 from app.models.plot import Plot
 from app.models.sector import Sector
 from app.models.sector_crop_profile import SectorCropProfile
@@ -26,6 +27,7 @@ __all__ = [
     "SoilPreset",
     "User",
     "Farm",
+    "FarmCredentials",
     "Plot",
     "Sector",
     "SectorCropProfile",

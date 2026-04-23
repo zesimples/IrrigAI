@@ -1,8 +1,12 @@
 """Adapter factory.
 
 Maps provider names (from .env) to concrete implementations.
-Supports per-farm credentials: if a Farm record has myirrigation_* fields set,
+Supports per-farm credentials: if a Farm record has a FarmCredentials row,
 those override the global .env credentials so two farms can use different accounts.
+
+Per-farm credentials are stored encrypted in the farm_credentials table and
+must be eagerly loaded (via selectinload(Farm.credentials)) before passing
+the farm object here — lazy loading in async context raises MissingGreenlet.
 """
 
 from app.adapters.base import ProbeDataProvider, WeatherDataProvider
@@ -60,7 +64,7 @@ def _get_myirrigation(
     if not resolved_username or not resolved_password:
         raise ValueError(
             "MyIrrigation credentials not configured. Set MYIRRIGATION_USERNAME and "
-            "MYIRRIGATION_PASSWORD in .env or on the Farm record."
+            "MYIRRIGATION_PASSWORD in .env or via FarmCredentials for the farm."
         )
 
     cache_key = (resolved_username, resolved_device_id)
@@ -78,22 +82,24 @@ def _get_myirrigation(
 
 
 def get_probe_provider(config: Settings, farm=None) -> ProbeDataProvider:
-    """Return a probe provider for the given farm (or global config if farm is None)."""
+    """Return a probe provider for the given farm (or global config if farm is None).
+
+    farm.credentials must be eagerly loaded before calling this function.
+    """
     match config.PROBE_PROVIDER:
         case "mock":
             return MockProbeProvider()
         case "irriwatch":
             return _get_irriwatch(config)
         case "myirrigation":
-            if farm is not None:
-                return _get_myirrigation(
-                    config,
-                    username=farm.myirrigation_username,
-                    password=farm.myirrigation_password,
-                    client_id=farm.myirrigation_client_id,
-                    client_secret=farm.myirrigation_client_secret,
-                )
-            return _get_myirrigation(config)
+            creds = farm.credentials if farm is not None else None
+            return _get_myirrigation(
+                config,
+                username=creds.username if creds else None,
+                password=creds.password if creds else None,
+                client_id=creds.client_id if creds else None,
+                client_secret=creds.client_secret if creds else None,
+            )
         case _:
             raise ValueError(
                 f"Unknown probe provider: '{config.PROBE_PROVIDER}'. "
@@ -102,23 +108,25 @@ def get_probe_provider(config: Settings, farm=None) -> ProbeDataProvider:
 
 
 def get_weather_provider(config: Settings, farm=None) -> WeatherDataProvider:
-    """Return a weather provider for the given farm (or global config if farm is None)."""
+    """Return a weather provider for the given farm (or global config if farm is None).
+
+    farm.credentials must be eagerly loaded before calling this function.
+    """
     match config.WEATHER_PROVIDER:
         case "mock":
             return MockWeatherProvider(latitude=38.57)
         case "irriwatch":
             return _get_irriwatch(config)
         case "myirrigation":
-            if farm is not None:
-                return _get_myirrigation(
-                    config,
-                    username=farm.myirrigation_username,
-                    password=farm.myirrigation_password,
-                    client_id=farm.myirrigation_client_id,
-                    client_secret=farm.myirrigation_client_secret,
-                    weather_device_id=farm.myirrigation_weather_device_id,
-                )
-            return _get_myirrigation(config)
+            creds = farm.credentials if farm is not None else None
+            return _get_myirrigation(
+                config,
+                username=creds.username if creds else None,
+                password=creds.password if creds else None,
+                client_id=creds.client_id if creds else None,
+                client_secret=creds.client_secret if creds else None,
+                weather_device_id=creds.weather_device_id if creds else None,
+            )
         case _:
             raise ValueError(
                 f"Unknown weather provider: '{config.WEATHER_PROVIDER}'. "

@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
     SECRET_KEY: str = "change-me-in-production"
+    ENCRYPTION_KEY: str = ""  # For DB field encryption; derived from SECRET_KEY if blank
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"

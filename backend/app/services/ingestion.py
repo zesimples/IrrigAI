@@ -313,10 +313,14 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
     from datetime import timedelta
     from app.adapters.factory import get_probe_provider, get_weather_provider
     from app.config import get_settings
-    from app.models import Farm, Plot, Probe, Sector
+    from app.models import Farm, FarmCredentials, Plot, Probe, Sector
+    from sqlalchemy.orm import selectinload
 
     settings = get_settings()
-    farm = await db.get(Farm, farm_id)
+    farm_result = await db.execute(
+        select(Farm).where(Farm.id == farm_id).options(selectinload(Farm.credentials))
+    )
+    farm = farm_result.scalar_one_or_none()
     if farm is None:
         return {}
 

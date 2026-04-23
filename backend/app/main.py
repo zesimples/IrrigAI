@@ -24,10 +24,7 @@ logging.basicConfig(level=settings.LOG_LEVEL.upper())
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("IrrigAI backend starting up...")
-    from app.services.scheduler import start_scheduler, stop_scheduler
-    start_scheduler()
     yield
-    stop_scheduler()
     logger.info("IrrigAI backend shutting down...")
     await engine.dispose()
 

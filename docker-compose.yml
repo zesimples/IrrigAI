@@ -47,6 +47,26 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Dedicated scheduler worker — the only process that runs APScheduler.
+  # Single replica enforces exactly-one execution; Redis job locks protect
+  # against concurrent runs during restarts.
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: python -m app.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-irrigai}:${POSTGRES_PASSWORD:-irrigai_dev}@db:5432/${POSTGRES_DB:-irrigai}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-irrigai}:${POSTGRES_PASSWORD:-irrigai_dev}@db:5432/${POSTGRES_DB:-irrigai}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend
@@ -82,8 +102,20 @@ services:
           FILENAME="/backups/irrigai_$$(date +%Y%m%d_%H%M%S).sql.gz" &&
           pg_dump | gzip > "$$FILENAME" &&
           echo "Backup written: $$FILENAME" &&
+
+          echo "Verifying backup: $$FILENAME" &&
+          VERIFY_DB="irrigai_verify_$$(date +%s)" &&
+          createdb "$$VERIFY_DB" &&
+          if gunzip -c "$$FILENAME" | psql -q "$$VERIFY_DB" > /dev/null 2>&1; then
+            FARM_COUNT=$$(psql -t -A -c "SELECT COUNT(*) FROM farm;" "$$VERIFY_DB" 2>/dev/null || echo "err") &&
+            echo "Backup verify OK: farm_count=$$FARM_COUNT file=$$FILENAME" ;
+          else
+            echo "ERROR: Backup restore FAILED for $$FILENAME" ;
+          fi &&
+          dropdb --if-exists "$$VERIFY_DB" &&
+
           find /backups -name "irrigai_*.sql.gz" -mtime +7 -delete &&
-          sleep 86400;
+          sleep 86400 ;
         done
       '
 
