@@ -15,6 +15,7 @@ import os
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import UUID
 
 revision = "i9j0k1l2m3n4"
 down_revision = "h8i9j0k1l2m3"
@@ -38,8 +39,8 @@ def _enc(fernet, value: str | None) -> str | None:
 def upgrade() -> None:
     op.create_table(
         "farm_credentials",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("farm_id", sa.String(36), sa.ForeignKey("farm.id", ondelete="CASCADE"), unique=True, nullable=False),
+        sa.Column("id", UUID(as_uuid=False), primary_key=True),
+        sa.Column("farm_id", UUID(as_uuid=False), sa.ForeignKey("farm.id", ondelete="CASCADE"), unique=True, nullable=False),
         sa.Column("username_enc", sa.Text, nullable=True),
         sa.Column("password_enc", sa.Text, nullable=True),
         sa.Column("client_id_enc", sa.Text, nullable=True),
