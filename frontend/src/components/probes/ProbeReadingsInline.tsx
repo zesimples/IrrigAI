@@ -3,13 +3,13 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { subHours } from "date-fns";
-import { ChevronDown, ExternalLink } from "lucide-react";
+import { ChevronDown, ExternalLink, ScanLine, RefreshCw } from "lucide-react";
 import { useProbeReadings } from "@/hooks/useProbeReadings";
 import { ProbeChart } from "@/components/probes/ProbeChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { sectorsApi } from "@/lib/api";
+import { sectorsApi, probesApi } from "@/lib/api";
 import type { ReferenceLines } from "@/types";
 
 interface ProbeReadingsInlineProps {
@@ -34,6 +34,9 @@ export function ProbeReadingsInline({
   const [collapsed, setCollapsed] = useState(true);
   const [sinceHours, setSinceHours] = useState(72);
   const [interval, setInterval] = useState("");
+  const [interpretation, setInterpretation] = useState<string | null>(null);
+  const [interpreting, setInterpreting] = useState(false);
+  const [interpretError, setInterpretError] = useState<string | null>(null);
 
   // Local override of reference lines so chart updates immediately on save
   const [refLines, setRefLines] = useState<ReferenceLines | null>(null);
@@ -79,6 +82,19 @@ export function ProbeReadingsInline({
       await onSaved?.();
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function runInterpretation() {
+    setInterpreting(true);
+    setInterpretError(null);
+    try {
+      const res = await probesApi.interpret(probeId);
+      setInterpretation(res.interpretation);
+    } catch (e) {
+      setInterpretError(e instanceof Error ? e.message : "Erro ao interpretar sonda.");
+    } finally {
+      setInterpreting(false);
     }
   }
 
@@ -259,7 +275,89 @@ export function ProbeReadingsInline({
             </p>
           </div>
         )}
+
+        {/* ── AI Pattern Interpretation ───────────────────────────────────── */}
+        {data && data.depths.length > 0 && (
+          <div className="rounded-xl border border-black/[0.07] overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-irrigai-surface">
+              <div className="flex items-center gap-2">
+                <ScanLine className="h-3.5 w-3.5 text-irrigai-text-hint" />
+                <span className="text-[11px] font-medium uppercase tracking-[0.05em] text-irrigai-text-hint">
+                  Interpretação de padrões
+                </span>
+              </div>
+              <Button size="sm" variant="ghost" onClick={runInterpretation} loading={interpreting}>
+                {interpretation ? (
+                  <><RefreshCw className="h-3 w-3" /> Reanalisar</>
+                ) : (
+                  "Analisar sonda"
+                )}
+              </Button>
+            </div>
+
+            {interpreting && (
+              <div className="space-y-2 px-4 py-3">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className={`h-3 animate-pulse rounded bg-irrigai-surface ${i === 2 ? "w-3/5" : "w-full"}`} />
+                ))}
+              </div>
+            )}
+
+            {interpretError && (
+              <p className="px-4 py-3 text-[13px] text-irrigai-red">{interpretError}</p>
+            )}
+
+            {interpretation && !interpreting && (
+              <InterpretationBody text={interpretation} />
+            )}
+
+            {!interpretation && !interpreting && !interpretError && (
+              <p className="px-4 py-3 text-[12px] text-irrigai-text-muted">
+                A IA identifica padrões no sinal: flatline, resposta fraca, drenagem rápida, profundidade não atingida.
+              </p>
+            )}
+          </div>
+        )}
       </CardBody>}
     </Card>
+  );
+}
+
+function InterpretationBody({ text }: { text: string }) {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  return (
+    <ul className="divide-y divide-black/[0.04]">
+      {lines.map((line, i) => {
+        const clean = line.replace(/^[•\-]\s*/, "");
+        const colonIdx = clean.indexOf(":");
+        const label = colonIdx > -1 ? clean.slice(0, colonIdx).trim() : null;
+        const rest = colonIdx > -1 ? clean.slice(colonIdx + 1).trim() : clean;
+        const parts = rest.split(/\s*→\s*/);
+
+        return (
+          <li key={i} className="px-4 py-2.5 text-[12px] leading-relaxed">
+            {label && (
+              <span className="font-medium text-irrigai-text">{label}: </span>
+            )}
+            {parts.map((part, j) => (
+              <span key={j}>
+                {j > 0 && <span className="mx-1 text-irrigai-text-hint">→</span>}
+                <span className={
+                  j === parts.length - 1 && parts.length > 1
+                    ? "font-medium text-irrigai-amber"
+                    : "text-irrigai-text-muted"
+                }>
+                  {part}
+                </span>
+              </span>
+            ))}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

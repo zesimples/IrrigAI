@@ -3,6 +3,9 @@
 Uses NullPool so each request creates a fresh asyncpg connection bound to the
 current event loop — avoids the "Future attached to different loop" error when
 pytest-asyncio gives each test function its own event loop.
+
+The `db` fixture yields a direct AsyncSession for seeding data; committed rows
+are visible to subsequent client requests (postgres MVCC).
 """
 
 import pytest
@@ -18,6 +21,16 @@ from app.main import app
 @pytest.fixture(scope="session")
 def settings():
     return get_settings()
+
+
+@pytest.fixture
+async def db(settings):
+    """Direct DB session for seeding test data before API calls."""
+    engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        yield session
+    await engine.dispose()
 
 
 @pytest.fixture

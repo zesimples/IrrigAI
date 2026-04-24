@@ -137,16 +137,25 @@ interface RecommendationDetailProps {
 export function RecommendationDetail({ rec, onUpdate, hideHeader }: RecommendationDetailProps) {
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState<"accept" | "reject" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [optimisticAccepted, setOptimisticAccepted] = useState<boolean | null>(null);
   const [showOverrideModal, setShowOverrideModal] = useState(false);
 
   const action = ACTION_CONFIG[rec.action];
   const confPct = Math.round(rec.confidence_score * 100);
+  // Use optimistic state while the API call is in flight; fall back to server truth
+  const displayAccepted = optimisticAccepted !== null ? optimisticAccepted : rec.is_accepted;
 
   async function handleAccept() {
     setLoading("accept");
+    setActionError(null);
+    setOptimisticAccepted(true);
     try {
       await recommendationsApi.accept(rec.id, notes || undefined);
       onUpdate?.();
+    } catch (e) {
+      setOptimisticAccepted(null); // revert
+      setActionError(e instanceof Error ? e.message : "Erro ao aceitar. Tente novamente.");
     } finally {
       setLoading(null);
     }
@@ -154,9 +163,14 @@ export function RecommendationDetail({ rec, onUpdate, hideHeader }: Recommendati
 
   async function handleReject() {
     setLoading("reject");
+    setActionError(null);
+    setOptimisticAccepted(false);
     try {
       await recommendationsApi.reject(rec.id, notes || undefined);
       onUpdate?.();
+    } catch (e) {
+      setOptimisticAccepted(null); // revert
+      setActionError(e instanceof Error ? e.message : "Erro ao rejeitar. Tente novamente.");
     } finally {
       setLoading(null);
     }
@@ -225,7 +239,7 @@ export function RecommendationDetail({ rec, onUpdate, hideHeader }: Recommendati
         )}
 
         {/* ── Decision ── */}
-        {rec.is_accepted === null ? (
+        {displayAccepted === null ? (
           <div className="space-y-3 rounded-xl border border-black/[0.07] bg-irrigai-surface p-4">
             <div>
               <p className="text-[13px] font-medium text-irrigai-text">A sua decisão</p>
@@ -242,6 +256,9 @@ export function RecommendationDetail({ rec, onUpdate, hideHeader }: Recommendati
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
+            {actionError && (
+              <p className="text-[12px] font-medium text-irrigai-red">{actionError}</p>
+            )}
             <div className="flex gap-2">
               <Button
                 size="md"
@@ -273,12 +290,12 @@ export function RecommendationDetail({ rec, onUpdate, hideHeader }: Recommendati
           <div className="flex items-center gap-3 rounded-xl border border-black/[0.07] bg-irrigai-surface px-4 py-3">
             <span
               className={`inline-block h-2 w-2 rounded-full ${
-                rec.is_accepted ? "bg-irrigai-green" : "bg-irrigai-gray"
+                displayAccepted ? "bg-irrigai-green" : "bg-irrigai-gray"
               }`}
             />
             <div>
               <p className="text-[13px] font-medium text-irrigai-text">
-                {rec.is_accepted ? "Recomendação aceite" : "Recomendação rejeitada"}
+                {displayAccepted ? "Recomendação aceite" : "Recomendação rejeitada"}
               </p>
               {rec.accepted_at && (
                 <p className="text-[11px] text-irrigai-text-muted mt-0.5">

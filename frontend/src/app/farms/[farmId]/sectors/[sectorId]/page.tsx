@@ -15,6 +15,7 @@ import { SectorAnalysis } from "@/components/sectors/SectorAnalysis";
 import { StressProjectionCard } from "@/components/sectors/StressProjectionCard";
 import { AutoCalibrationCard } from "@/components/sectors/AutoCalibrationCard";
 import { GDDStatusCard } from "@/components/sectors/GDDStatusCard";
+import { IrrigationSystemForm } from "@/components/sectors/IrrigationSystemForm";
 import { RefreshCw, Zap } from "lucide-react";
 import type { RecommendationDetail as Rec, SectorCropProfile, StressProjection } from "@/types";
 import { CROP_LABELS, STAGE_LABELS } from "@/lib/cropConfig";
@@ -37,7 +38,7 @@ export default function SectorDetailPage({ params }: Props) {
   const [generating, setGenerating] = useState(false);
   const [cropProfile, setCropProfile] = useState<SectorCropProfile | null>(null);
   const [sectorDetail, setSectorDetail] = useState<import("@/types").SectorDetail | null>(null);
-  const [activeTab, setActiveTab] = useState<"monit" | "fenologia">("monit");
+  const [activeTab, setActiveTab] = useState<"monit" | "rega" | "fenologia">("monit");
   const [liveStress, setLiveStress] = useState<StressProjection | null>(null);
 
   useEffect(() => {
@@ -149,6 +150,7 @@ export default function SectorDetailPage({ params }: Props) {
         <div className="flex gap-0 border-b border-black/[0.08] -mx-4 px-4 sm:-mx-6 sm:px-6 mb-4">
           {([
             { id: "monit", label: "Monitorização" },
+            { id: "rega", label: "Sistema de rega" },
             { id: "fenologia", label: "Fenologia" },
           ] as const).map((tab) => (
             <button
@@ -346,6 +348,23 @@ export default function SectorDetailPage({ params }: Props) {
         />
 
         </div>}
+
+        {/* ── Sistema de rega tab ───────────────────────────────────────────── */}
+        {activeTab === "rega" && (
+          <div className="space-y-2">
+            <p className="text-[12px] text-irrigai-text-muted leading-relaxed">
+              Estas definições afectam directamente a dose bruta e a duração calculada nas recomendações.
+              Depois de guardar, gere uma nova recomendação para ver o impacto.
+            </p>
+            <IrrigationSystemForm
+              sectorId={sectorId}
+              current={sectorDetail?.irrigation_system ?? null}
+              onSaved={async () => {
+                await sectorsApi.get(sectorId).then(setSectorDetail).catch(() => {});
+              }}
+            />
+          </div>
+        )}
 
         {/* ── Fenologia tab ─────────────────────────────────────────────────── */}
         {activeTab === "fenologia" && (

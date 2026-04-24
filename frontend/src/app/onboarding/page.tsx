@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Logo } from "@/components/ui/Logo";
 import { farmsApi, plotsApi, sectorsApi } from "@/lib/api";
-import type { CropProfileTemplate, CropStage, Farm, Plot, SoilPreset } from "@/types";
+import type { CropProfileTemplate, CropStage, Farm, Plot, Sector, SoilPreset } from "@/types";
 
 const TIMEZONES = [
   { value: "Europe/Lisbon", label: "Lisboa (UTC+0/+1)" },
@@ -59,6 +59,7 @@ export default function OnboardingPage() {
   // Created entities (used across steps)
   const [createdFarm, setCreatedFarm] = useState<Farm | null>(null);
   const [createdPlot, setCreatedPlot] = useState<Plot | null>(null);
+  const [createdSector, setCreatedSector] = useState<Sector | null>(null);
 
   function nextStep() {
     setError(null);
@@ -125,6 +126,7 @@ export default function OnboardingPage() {
       });
       // Apply crop profile from template
       await sectorsApi.resetCropProfile(sector.id, cropTemplate.id);
+      setCreatedSector(sector);
       nextStep();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao criar sector");
@@ -134,25 +136,42 @@ export default function OnboardingPage() {
   }
 
   async function saveIrrigationAndFinish() {
-    if (!createdFarm) return;
-    // Get the sector we created (re-fetch from plots)
+    if (!createdFarm || !createdSector) return;
+
+    const effVal = parseFloat(efficiency);
+    const duVal = parseFloat(distributionUniformity);
+    if (isNaN(effVal) || effVal <= 0 || effVal > 1) {
+      setError("A eficiência deve ser um valor entre 0 e 1 (ex: 0.90).");
+      return;
+    }
+    if (isNaN(duVal) || duVal <= 0 || duVal > 1) {
+      setError("A uniformidade de distribuição deve ser um valor entre 0 e 1 (ex: 0.90).");
+      return;
+    }
+    if (emitterFlow) {
+      const v = parseFloat(emitterFlow);
+      if (isNaN(v) || v <= 0) {
+        setError("O caudal do gotejador deve ser um número positivo.");
+        return;
+      }
+    }
+    if (appRateMmH) {
+      const v = parseFloat(appRateMmH);
+      if (isNaN(v) || v <= 0) {
+        setError("A taxa de aplicação deve ser um número positivo.");
+        return;
+      }
+    }
+
     setSaving(true);
     try {
-      const plots = await plotsApi.list(createdFarm.id);
-      const plotId = plots.items[0]?.id;
-      if (plotId) {
-        const sectors = await sectorsApi.list(plotId);
-        const sectorId = sectors.items[0]?.id;
-        if (sectorId) {
-          await sectorsApi.createIrrigationSystem(sectorId, {
-            system_type: irrigationType as "drip" | "center_pivot" | "sprinkler" | "flood",
-            emitter_flow_lph: emitterFlow ? parseFloat(emitterFlow) : undefined,
-            application_rate_mm_h: appRateMmH ? parseFloat(appRateMmH) : undefined,
-            efficiency: parseFloat(efficiency) || 0.9,
-            distribution_uniformity: parseFloat(distributionUniformity) || 0.9,
-          });
-        }
-      }
+      await sectorsApi.createIrrigationSystem(createdSector.id, {
+        system_type: irrigationType as "drip" | "center_pivot" | "sprinkler" | "flood",
+        emitter_flow_lph: emitterFlow ? parseFloat(emitterFlow) : undefined,
+        application_rate_mm_h: appRateMmH ? parseFloat(appRateMmH) : undefined,
+        efficiency: effVal,
+        distribution_uniformity: duVal,
+      });
       router.push(`/farms/${createdFarm.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao guardar sistema de rega");

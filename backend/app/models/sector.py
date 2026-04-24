@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,6 +42,8 @@ class Sector(Base, TimestampMixin):
     irrigation_strategy: Mapped[str] = mapped_column(String(50), nullable=False, default="full_etc")
     deficit_factor: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     rainfall_effectiveness: Mapped[float] = mapped_column(Float, nullable=False, default=0.8)
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     plot: Mapped["Plot"] = relationship("Plot", back_populates="sectors")  # noqa: F821

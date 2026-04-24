@@ -4,9 +4,14 @@ Provides OpenAIChatClient (real API) and MockChatClient (testing without key).
 Use get_chat_client(settings) to obtain the right instance.
 """
 
+import logging
+
 import openai
 
 from app.config import Settings
+from app.metrics import ai_requests_total, ai_tokens_input_total, ai_tokens_output_total
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIChatClient:
@@ -21,17 +26,30 @@ class OpenAIChatClient:
         max_tokens: int = 1000,
         temperature: float = 0.3,
     ) -> str:
-        """Call OpenAI ChatGPT API. Low temperature for factual explanations."""
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        return response.choices[0].message.content or ""
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            usage = response.usage
+            if usage:
+                ai_tokens_input_total.labels("openai", self.model).inc(usage.prompt_tokens)
+                ai_tokens_output_total.labels("openai", self.model).inc(usage.completion_tokens)
+                logger.debug(
+                    "openai_usage",
+                    extra={"model": self.model, "prompt_tokens": usage.prompt_tokens,
+                           "completion_tokens": usage.completion_tokens},
+                )
+            ai_requests_total.labels("openai", self.model, "success").inc()
+            return response.choices[0].message.content or ""
+        except Exception:
+            ai_requests_total.labels("openai", self.model, "failure").inc()
+            raise
 
 
 class MockChatClient:
@@ -67,6 +85,21 @@ class MockChatClient:
                 "1. Qual é o tipo de solo predominante no seu talhão?\n"
                 "2. Já instalou e configurou o sistema de rega neste sector?\n"
                 "3. Em que fase fenológica se encontra a cultura actualmente?"
+            )
+
+        if "diagnostica" in prompt_lower or "diagnos" in prompt_lower:
+            return (
+                "• Uniformidade DU não configurada: sem DU definida, a dose calculada pode subestimar as perdas por distribuição desigual.\n"
+                "• Evapotranspiração acima do esperado: com temperaturas acima de 30 °C e Kc de floração elevado, o consumo diário pode superar o limiar RAW em 2–3 dias.\n"
+                "• Intervalo de rega longo: a última rega foi há mais de 4 dias — para este tipo de solo e fase, o ideal seria regas mais frequentes.\n"
+                "• Configuração do sistema de rega em falta: sem taxa de aplicação definida, o motor usa padrão conservador que pode subestimar a dose necessária."
+            )
+
+        if "interpreta" in prompt_lower or "sonda" in prompt_lower or "padrão" in prompt_lower or "flatline" in prompt_lower:
+            return (
+                "• Sonda estável por solo saturado: variância < 0.001 m³/m³ com VWC próximo da CC → solo bem hidratado sem consumo radicular activo nem drenagem → normal após rega ou chuva abundante; reavaliar em 24-48h.\n"
+                "• Absorção apenas nas raízes superficiais: depleção concentrada nos 30 cm, 60 cm estável → raízes activas predominantemente na camada rasa → confirmar se solo compactado impede penetração.\n"
+                "• Rega atingiu 30 cm mas não 60 cm: +0.04 m³/m³ aos 30 cm, +0.002 m³/m³ aos 60 cm após rega → rega não atingiu a profundidade total → aumentar tempo de rega ou verificar DU."
             )
 
         return (

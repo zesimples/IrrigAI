@@ -42,8 +42,9 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
     try {
       const reply = await fetchFn();
       pushAssistant(reply);
-    } catch {
-      pushAssistant("Ocorreu um erro. Tente novamente.");
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : "Erro desconhecido";
+      pushAssistant(`Não foi possível completar esta acção: ${detail}. Tente novamente.`);
     } finally {
       setLoading(false);
     }
@@ -91,8 +92,9 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
     try {
       const r = await chatApi.chat(farmId, text, sectorId);
       pushAssistant(r.reply);
-    } catch {
-      pushAssistant("Ocorreu um erro ao contactar o assistente.");
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : "Erro desconhecido";
+      pushAssistant(`Erro ao contactar o assistente: ${detail}. Tente novamente.`);
     } finally {
       setLoading(false);
     }

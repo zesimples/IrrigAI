@@ -57,6 +57,8 @@ class IrrigationSystemOut(BaseModel):
 class SectorOut(SectorBase):
     id: str
     plot_id: str
+    is_archived: bool = False
+    archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

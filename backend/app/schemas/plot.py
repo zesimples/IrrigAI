@@ -31,6 +31,8 @@ class PlotOut(PlotBase):
     id: str
     farm_id: str
     soil_preset_id: str | None = None
+    is_archived: bool = False
+    archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

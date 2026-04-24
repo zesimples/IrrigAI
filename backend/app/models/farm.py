@@ -1,4 +1,6 @@
-from sqlalchemy import Float, ForeignKey, String
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +19,8 @@ class Farm(Base, TimestampMixin):
     region: Mapped[str | None] = mapped_column(String(255), nullable=True)
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="Europe/Lisbon")
     owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("user.id"), nullable=False)
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     owner: Mapped["User"] = relationship("User", back_populates="farms")  # noqa: F821

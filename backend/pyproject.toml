@@ -22,10 +22,12 @@ dependencies = [
     "python-multipart>=0.0.9",
     "python-jose[cryptography]>=3.3.0",
     "cryptography>=42.0.0",
-    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.0",
     "pytz>=2024.1",
     "slowapi>=0.1.9",
     "limits[redis]>=3.6.0",
+    "prometheus-client>=0.20.0",
+    "sentry-sdk[fastapi]>=2.0.0",
 ]
 
 [project.optional-dependencies]

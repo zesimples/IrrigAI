@@ -1,0 +1,77 @@
+groups:
+  - name: irrigai
+
+    rules:
+      # ── Stale probe data ────────────────────────────────────────────────────
+      # Fires when no new probe reading has been ingested for 3 hours.
+      # Requires that the data ingestion job increments irrigai_scheduler_job_runs_total
+      # at least once per interval. A missing label means the job has never run.
+      - alert: ProbeDataStale
+        expr: |
+          (time() - irrigai_scheduler_job_runs_total{job="data_ingestion", status="success"}) > 10800
+          or absent(irrigai_scheduler_job_runs_total{job="data_ingestion", status="success"})
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Probe data ingestion has not succeeded in 3h"
+          description: "The data_ingestion scheduler job has not recorded a success for over 3 hours."
+
+      # ── Failed scheduler jobs ───────────────────────────────────────────────
+      - alert: SchedulerJobFailing
+        expr: |
+          increase(irrigai_scheduler_job_runs_total{status="failure"}[30m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scheduler job {{ $labels.job }} is failing"
+          description: "Job {{ $labels.job }} recorded at least one failure in the last 30 minutes."
+
+      # ── Elevated 5xx rate ───────────────────────────────────────────────────
+      - alert: High5xxRate
+        expr: |
+          sum(rate(irrigai_http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(irrigai_http_requests_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "5xx error rate above 5%"
+          description: "More than 5% of HTTP responses are 5xx errors (current: {{ $value | humanizePercentage }})."
+
+      # ── High request latency ────────────────────────────────────────────────
+      - alert: HighP95Latency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(irrigai_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 request latency above 3 s"
+          description: "The 95th-percentile response time is {{ $value | humanizeDuration }}."
+
+      # ── AI / LLM failures ──────────────────────────────────────────────────
+      - alert: LLMFailureRate
+        expr: |
+          increase(irrigai_ai_requests_total{status="failure"}[15m]) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM API calls are failing"
+          description: "More than 3 LLM call failures in the last 15 minutes (model={{ $labels.model }})."
+
+      # ── Recommendation engine failures ─────────────────────────────────────
+      - alert: RecommendationEngineFailing
+        expr: |
+          increase(irrigai_recommendations_generated_total{status="failure"}[30m]) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Recommendation engine is producing failures"
+          description: "More than 5 recommendation failures in the last 30 minutes."

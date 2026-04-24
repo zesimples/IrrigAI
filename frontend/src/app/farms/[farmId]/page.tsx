@@ -31,6 +31,7 @@ export default function FarmDashboardPage({ params }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string | null>(
     searchParams.get("crop")
   );
@@ -66,9 +67,12 @@ export default function FarmDashboardPage({ params }: Props) {
 
   async function generateAll() {
     setGenerating(true);
+    setGenerateError(null);
     try {
       await farmsApi.generateRecommendations(farmId);
       await refetch();
+    } catch (e) {
+      setGenerateError(e instanceof Error ? e.message : "Erro ao gerar recomendações.");
     } finally {
       setGenerating(false);
     }
@@ -135,6 +139,23 @@ export default function FarmDashboardPage({ params }: Props) {
       />
 
       <main className="mx-auto max-w-3xl space-y-5 px-4 py-5 sm:px-6 animate-fade-in-up">
+        {/* Generate error */}
+        {generateError && (
+          <div
+            aria-live="polite"
+            className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 flex items-center justify-between gap-3"
+          >
+            <span>{generateError}</span>
+            <button
+              onClick={() => setGenerateError(null)}
+              className="shrink-0 text-red-400 hover:text-red-600 text-[18px] leading-none"
+              aria-label="Fechar"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Alerts */}
         <AlertsBanner counts={data.active_alerts_count} farmId={farmId} />
 
@@ -220,10 +241,16 @@ export default function FarmDashboardPage({ params }: Props) {
             </div>
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-black/[0.1] px-6 py-12 text-center">
+          <div className="rounded-xl border border-dashed border-black/[0.1] px-6 py-12 text-center space-y-3">
             <p className="text-[14px] font-medium text-irrigai-text-muted">
-              Sem sectores disponíveis.
+              Sem sectores configurados.
             </p>
+            <p className="text-[12px] text-irrigai-text-hint">
+              Configure um sector para começar a gerar recomendações de rega.
+            </p>
+            <Button variant="secondary" size="sm" onClick={() => router.push("/onboarding")}>
+              Configurar agora
+            </Button>
           </div>
         )}
       </main>

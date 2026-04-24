@@ -22,6 +22,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.job_lock import JobLock
+from app.metrics import scheduler_job_runs_total
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ _scheduler: AsyncIOScheduler | None = None
 async def _run_alert_check() -> None:
     async with JobLock("alert_check", ttl=7_200) as acquired:
         if not acquired:
+            scheduler_job_runs_total.labels("alert_check", "skipped").inc()
             return
 
         from app.alerts.engine import AlertEngine
@@ -41,22 +43,28 @@ async def _run_alert_check() -> None:
         logger.info("Scheduler: alert check at %s", datetime.now(UTC))
         alert_engine = AlertEngine()
 
-        async for db in get_db():
-            try:
-                farms = (await db.execute(select(Farm))).scalars().all()
-                for farm in farms:
-                    try:
-                        alerts = await alert_engine.run_farm_alerts(farm.id, db)
-                        logger.info("Alert check: farm=%s reconciled %d alerts", farm.id, len(alerts))
-                    except Exception:
-                        logger.exception("Alert check failed for farm %s", farm.id)
-            except Exception:
-                logger.exception("Alert check job failed")
+        try:
+            async for db in get_db():
+                try:
+                    farms = (await db.execute(select(Farm))).scalars().all()
+                    for farm in farms:
+                        try:
+                            alerts = await alert_engine.run_farm_alerts(farm.id, db)
+                            logger.info("Alert check: farm=%s reconciled %d alerts", farm.id, len(alerts))
+                        except Exception:
+                            logger.exception("Alert check failed for farm %s", farm.id)
+                except Exception:
+                    logger.exception("Alert check job failed")
+            scheduler_job_runs_total.labels("alert_check", "success").inc()
+        except Exception:
+            scheduler_job_runs_total.labels("alert_check", "failure").inc()
+            raise
 
 
 async def _run_recommendation_generation() -> None:
     async with JobLock("daily_recommendations", ttl=3_600) as acquired:
         if not acquired:
+            scheduler_job_runs_total.labels("daily_recommendations", "skipped").inc()
             return
 
         from app.database import get_db
@@ -66,22 +74,28 @@ async def _run_recommendation_generation() -> None:
 
         logger.info("Scheduler: daily recommendations at %s", datetime.now(UTC))
 
-        async for db in get_db():
-            try:
-                farms = (await db.execute(select(Farm))).scalars().all()
-                for farm in farms:
-                    try:
-                        results = await generate_for_farm(farm.id, db)
-                        logger.info("Recommendations: farm=%s generated %d", farm.id, len(results))
-                    except Exception:
-                        logger.exception("Recommendation generation failed for farm %s", farm.id)
-            except Exception:
-                logger.exception("Daily recommendation job failed")
+        try:
+            async for db in get_db():
+                try:
+                    farms = (await db.execute(select(Farm))).scalars().all()
+                    for farm in farms:
+                        try:
+                            results = await generate_for_farm(farm.id, db)
+                            logger.info("Recommendations: farm=%s generated %d", farm.id, len(results))
+                        except Exception:
+                            logger.exception("Recommendation generation failed for farm %s", farm.id)
+                except Exception:
+                    logger.exception("Daily recommendation job failed")
+            scheduler_job_runs_total.labels("daily_recommendations", "success").inc()
+        except Exception:
+            scheduler_job_runs_total.labels("daily_recommendations", "failure").inc()
+            raise
 
 
 async def _run_data_ingestion() -> None:
     async with JobLock("data_ingestion", ttl=900) as acquired:
         if not acquired:
+            scheduler_job_runs_total.labels("data_ingestion", "skipped").inc()
             return
 
         from app.database import get_db
@@ -91,16 +105,21 @@ async def _run_data_ingestion() -> None:
 
         logger.info("Scheduler: data ingestion at %s", datetime.now(UTC))
 
-        async for db in get_db():
-            try:
-                farms = (await db.execute(select(Farm))).scalars().all()
-                for farm in farms:
-                    try:
-                        await ingest_farm(farm.id, db, lookback_hours=4)
-                    except Exception:
-                        logger.exception("Data ingestion failed for farm %s", farm.id)
-            except Exception:
-                logger.exception("Data ingestion job failed")
+        try:
+            async for db in get_db():
+                try:
+                    farms = (await db.execute(select(Farm))).scalars().all()
+                    for farm in farms:
+                        try:
+                            await ingest_farm(farm.id, db, lookback_hours=4)
+                        except Exception:
+                            logger.exception("Data ingestion failed for farm %s", farm.id)
+                except Exception:
+                    logger.exception("Data ingestion job failed")
+            scheduler_job_runs_total.labels("data_ingestion", "success").inc()
+        except Exception:
+            scheduler_job_runs_total.labels("data_ingestion", "failure").inc()
+            raise
 
 
 def start_scheduler() -> AsyncIOScheduler:

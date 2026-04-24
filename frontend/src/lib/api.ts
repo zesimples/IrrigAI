@@ -32,6 +32,21 @@ import type {
 // in .env to http://localhost:8000/api/v1 to bypass the proxy.
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/v1";
 
+export const TOKEN_KEY = "irrigai_token";
+
+export function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -46,12 +61,23 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const token = getToken();
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...options.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
     ...options,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
+    if (res.status === 401) {
+      clearToken();
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+    }
     throw new ApiError(res.status, body.detail ?? res.statusText);
   }
   if (res.status === 204) return undefined as T;
@@ -87,6 +113,8 @@ export const farmsApi = {
   get: (id: string) => get<Farm>(`/farms/${id}`),
   create: (body: FarmCreate) => post<Farm>("/farms", body),
   update: (id: string, body: Partial<FarmCreate>) => put<Farm>(`/farms/${id}`, body),
+  archive: (id: string) => post<Farm>(`/farms/${id}/archive`),
+  unarchive: (id: string) => post<Farm>(`/farms/${id}/unarchive`),
   dashboard: (id: string) => get<DashboardResponse>(`/farms/${id}/dashboard`),
   generateRecommendations: (id: string) =>
     post<Recommendation[]>(`/farms/${id}/recommendations/generate`),
@@ -100,6 +128,8 @@ export const plotsApi = {
   get: (id: string) => get<Plot>(`/plots/${id}`),
   create: (farmId: string, body: PlotCreate) => post<Plot>(`/farms/${farmId}/plots`, body),
   update: (id: string, body: Partial<PlotCreate>) => put<Plot>(`/plots/${id}`, body),
+  archive: (id: string) => post<Plot>(`/plots/${id}/archive`),
+  unarchive: (id: string) => post<Plot>(`/plots/${id}/unarchive`),
 };
 
 // ── Sectors ───────────────────────────────────────────────────────────────────
@@ -112,6 +142,8 @@ export const sectorsApi = {
   create: (plotId: string, body: SectorCreate) =>
     post<Sector>(`/plots/${plotId}/sectors`, body),
   update: (id: string, body: Partial<SectorCreate>) => put<Sector>(`/sectors/${id}`, body),
+  archive: (id: string) => post<Sector>(`/sectors/${id}/archive`),
+  unarchive: (id: string) => post<Sector>(`/sectors/${id}/unarchive`),
   createIrrigationSystem: (id: string, body: IrrigationSystemCreate) =>
     post(`/sectors/${id}/irrigation-systems`, body),
   generateRecommendation: (id: string) =>
@@ -135,6 +167,7 @@ export const sectorsApi = {
 export const probesApi = {
   list: (sectorId: string) => get<Probe[]>(`/sectors/${sectorId}/probes`),
   get: (id: string) => get<Probe>(`/probes/${id}`),
+  interpret: (id: string) => post<{ interpretation: string }>(`/probes/${id}/interpret`),
   readings: (
     id: string,
     params: {
@@ -240,6 +273,8 @@ export const chatApi = {
     post<{ explanation: string }>(`/sectors/${sectorId}/explain`, {
       user_notes: userNotes ?? null,
     }),
+  diagnoseSector: (sectorId: string) =>
+    post<{ diagnosis: string }>(`/sectors/${sectorId}/diagnosis`),
   farmSummary: (farmId: string) =>
     post<{ summary: string }>(`/farms/${farmId}/summary`),
   missingDataQuestions: (farmId: string) =>

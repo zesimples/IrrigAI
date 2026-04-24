@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.pipeline import RecommendationPipeline
 from app.engine.types import EngineRecommendation
+from app.metrics import recommendations_generated_total
 from app.models import Recommendation, RecommendationReason
 
 logger = logging.getLogger(__name__)
@@ -68,36 +69,41 @@ async def generate_recommendation(
     if target_date is None:
         target_date = datetime.now(UTC).date()
 
-    eng: EngineRecommendation = await _pipeline.run(
-        sector_id=sector_id,
-        target_date=target_date,
-        db=db,
-        farm_id=farm_id,
-    )
+    try:
+        eng: EngineRecommendation = await _pipeline.run(
+            sector_id=sector_id,
+            target_date=target_date,
+            db=db,
+            farm_id=farm_id,
+        )
 
-    rec = _persist_rec(eng, target_date)
-    db.add(rec)
-    await db.flush()
+        rec = _persist_rec(eng, target_date)
+        db.add(rec)
+        await db.flush()
 
-    for entry in eng.reasons:
-        db.add(RecommendationReason(
-            recommendation_id=rec.id,
-            order=entry.order,
-            category=entry.category,
-            message_pt=entry.message_pt,
-            message_en=entry.message_en,
-            data_key=entry.data_key,
-            data_value=entry.data_value,
-        ))
+        for entry in eng.reasons:
+            db.add(RecommendationReason(
+                recommendation_id=rec.id,
+                order=entry.order,
+                category=entry.category,
+                message_pt=entry.message_pt,
+                message_en=entry.message_en,
+                data_key=entry.data_key,
+                data_value=entry.data_value,
+            ))
 
-    await db.commit()
-    await db.refresh(rec)
+        await db.commit()
+        await db.refresh(rec)
 
-    logger.info(
-        "Recommendation %s: sector=%s action=%s confidence=%.2f",
-        rec.id, sector_id, eng.action, eng.confidence.score,
-    )
-    return rec, eng
+        logger.info(
+            "Recommendation %s: sector=%s action=%s confidence=%.2f",
+            rec.id, sector_id, eng.action, eng.confidence.score,
+        )
+        recommendations_generated_total.labels(eng.action, "success").inc()
+        return rec, eng
+    except Exception:
+        recommendations_generated_total.labels("unknown", "failure").inc()
+        raise
 
 
 async def generate_for_farm(
@@ -135,6 +141,7 @@ async def generate_for_farm(
             logger.info("Saved recommendation %s for sector %s", rec.id, eng.sector_id)
         except Exception:
             logger.exception("Failed to persist recommendation for sector %s", eng.sector_id)
+            recommendations_generated_total.labels("unknown", "failure").inc()
             await db.rollback()
 
     return saved

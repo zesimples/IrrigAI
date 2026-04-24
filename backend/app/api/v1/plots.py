@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,11 +26,11 @@ async def list_plots(
     offset = (page - 1) * page_size
     total = (
         await db.execute(
-            select(func.count()).select_from(Plot).where(Plot.farm_id == farm_id)
+            select(func.count()).select_from(Plot).where(Plot.farm_id == farm_id, Plot.is_archived == False)  # noqa: E712
         )
     ).scalar_one()
     plots = (
-        await db.execute(select(Plot).where(Plot.farm_id == farm_id).offset(offset).limit(page_size))
+        await db.execute(select(Plot).where(Plot.farm_id == farm_id, Plot.is_archived == False).offset(offset).limit(page_size))  # noqa: E712
     ).scalars().all()
     return PaginatedResponse(
         items=[PlotOut.model_validate(p) for p in plots],
@@ -70,6 +72,30 @@ async def update_plot(plot_id: str, body: PlotUpdate, db: AsyncSession = Depends
         raise HTTPException(404, detail="Plot not found")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(plot, k, v)
+    await db.commit()
+    await db.refresh(plot)
+    return PlotOut.model_validate(plot)
+
+
+@router.post("/plots/{plot_id}/archive", response_model=PlotOut)
+async def archive_plot(plot_id: str, db: AsyncSession = Depends(get_db)):
+    plot = await db.get(Plot, plot_id)
+    if not plot:
+        raise HTTPException(404, detail="Plot not found")
+    plot.is_archived = True
+    plot.archived_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(plot)
+    return PlotOut.model_validate(plot)
+
+
+@router.post("/plots/{plot_id}/unarchive", response_model=PlotOut)
+async def unarchive_plot(plot_id: str, db: AsyncSession = Depends(get_db)):
+    plot = await db.get(Plot, plot_id)
+    if not plot:
+        raise HTTPException(404, detail="Plot not found")
+    plot.is_archived = False
+    plot.archived_at = None
     await db.commit()
     await db.refresh(plot)
     return PlotOut.model_validate(plot)

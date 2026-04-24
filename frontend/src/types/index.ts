@@ -33,6 +33,8 @@ export interface Farm {
   region: string | null;
   timezone: string;
   owner_id: string;
+  is_archived: boolean;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -56,6 +58,8 @@ export interface Plot {
   wilting_point: number | null;
   soil_texture: string | null;
   soil_preset_id: string | null;
+  is_archived: boolean;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -87,6 +91,8 @@ export interface Sector {
   irrigation_strategy: IrrigationStrategy;
   deficit_factor: number;
   rainfall_effectiveness: number;
+  is_archived: boolean;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }

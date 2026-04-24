@@ -13,11 +13,13 @@ import asyncio
 import logging
 import signal
 
+from app.config import get_settings
+from app.logging_config import setup_logging
+
+_settings = get_settings()
+setup_logging(_settings.LOG_LEVEL)
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level="INFO",
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
 
 
 async def main() -> None:

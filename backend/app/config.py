@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
 
+    # Observability
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "production"
+
     # Localization
     DEFAULT_LANGUAGE: str = "pt"
     DEFAULT_TIMEZONE: str = "Europe/Lisbon"

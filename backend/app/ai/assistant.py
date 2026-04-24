@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.context_builder import AssistantContextBuilder
 from app.ai.openai_client import MockChatClient, OpenAIChatClient
 from app.ai import prompt_templates
+from app.ai.probe_signal import compute_probe_signal_stats
 
 
 class IrrigationAssistant:
@@ -109,6 +110,35 @@ class IrrigationAssistant:
             if line and line[0].isdigit()
         ]
         return questions or [raw]
+
+    async def diagnose_sector(self, sector_id: str, db: AsyncSession) -> str:
+        """Root-cause diagnosis: WHY is this sector in its current hydric state."""
+        ctx = await self.context_builder.build_sector_context(sector_id, db)
+        context_json = self.context_builder.to_json(ctx)
+
+        system_prompt = prompt_templates.SECTOR_DIAGNOSIS_PT.format(
+            context_json=context_json
+        )
+        user_message = (
+            f"Diagnostica as causas prováveis do estado hídrico actual do sector '{ctx.sector_name}'."
+        )
+        return await self.client.complete(system_prompt, user_message, max_tokens=600)
+
+    async def interpret_probe_patterns(self, probe_id: str, db: AsyncSession) -> str:
+        """Interpret time-series probe signal patterns."""
+        stats = await compute_probe_signal_stats(probe_id, db)
+        if "error" in stats:
+            return "Sonda não encontrada ou sem dados suficientes para análise."
+
+        signal_json = json.dumps(stats, ensure_ascii=False, default=str, indent=2)
+        system_prompt = prompt_templates.PROBE_INTERPRETATION_PT.format(
+            signal_json=signal_json
+        )
+        user_message = (
+            f"Interpreta o comportamento da sonda '{stats.get('probe_external_id', probe_id)}' "
+            f"no sector '{stats.get('sector_name', '')}'."
+        )
+        return await self.client.complete(system_prompt, user_message, max_tokens=700)
 
     async def chat(
         self,

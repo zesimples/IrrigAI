@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     alerts,
     audit_log,
+    auth,
     auto_calibration,
     chat,
     crop_profiles,
@@ -20,6 +21,7 @@ from app.api.v1 import (
 
 router = APIRouter()
 
+router.include_router(auth.router)
 router.include_router(farms.router)
 router.include_router(plots.router)
 router.include_router(sectors.router)

@@ -1,0 +1,50 @@
+version: "3.9"
+
+# Overlay this on top of docker-compose.yml for local observability:
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: irrigai_prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    networks:
+      - irrigai
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: irrigai_grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - irrigai
+
+volumes:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  irrigai:
+    external: true
+    name: irrigai_default

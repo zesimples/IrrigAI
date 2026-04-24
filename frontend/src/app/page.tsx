@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { farmsApi } from "@/lib/api";
 import { Logo } from "@/components/ui/Logo";
+import { Plus } from "lucide-react";
 import type { Farm } from "@/types";
 
 export default function Home() {
@@ -54,6 +55,13 @@ export default function Home() {
                 )}
               </button>
             ))}
+            <button
+              onClick={() => router.push("/onboarding")}
+              className="w-full flex items-center gap-2.5 rounded-xl border border-dashed border-black/[0.12] px-4 py-3.5 text-left text-[14px] font-medium text-irrigai-text-muted transition-colors hover:border-black/[0.2] hover:text-irrigai-text"
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              Nova exploração
+            </button>
           </div>
         </div>
       </div>

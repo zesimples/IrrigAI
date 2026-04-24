@@ -36,12 +36,12 @@ async def list_sectors(
     offset = (page - 1) * page_size
     total = (
         await db.execute(
-            select(func.count()).select_from(Sector).where(Sector.plot_id == plot_id)
+            select(func.count()).select_from(Sector).where(Sector.plot_id == plot_id, Sector.is_archived == False)  # noqa: E712
         )
     ).scalar_one()
     sectors = (
         await db.execute(
-            select(Sector).where(Sector.plot_id == plot_id).offset(offset).limit(page_size)
+            select(Sector).where(Sector.plot_id == plot_id, Sector.is_archived == False).offset(offset).limit(page_size)  # noqa: E712
         )
     ).scalars().all()
     return PaginatedResponse(
@@ -302,6 +302,30 @@ async def update_sector(sector_id: str, body: SectorUpdate, db: AsyncSession = D
         raise HTTPException(404, detail="Sector not found")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(sector, k, v)
+    await db.commit()
+    await db.refresh(sector)
+    return SectorOut.model_validate(sector)
+
+
+@router.post("/sectors/{sector_id}/archive", response_model=SectorOut)
+async def archive_sector(sector_id: str, db: AsyncSession = Depends(get_db)):
+    sector = await db.get(Sector, sector_id)
+    if not sector:
+        raise HTTPException(404, detail="Sector not found")
+    sector.is_archived = True
+    sector.archived_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(sector)
+    return SectorOut.model_validate(sector)
+
+
+@router.post("/sectors/{sector_id}/unarchive", response_model=SectorOut)
+async def unarchive_sector(sector_id: str, db: AsyncSession = Depends(get_db)):
+    sector = await db.get(Sector, sector_id)
+    if not sector:
+        raise HTTPException(404, detail="Sector not found")
+    sector.is_archived = False
+    sector.archived_at = None
     await db.commit()
     await db.refresh(sector)
     return SectorOut.model_validate(sector)

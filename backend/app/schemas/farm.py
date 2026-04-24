@@ -26,6 +26,8 @@ class FarmUpdate(BaseModel):
 class FarmOut(FarmBase):
     id: str
     owner_id: str
+    is_archived: bool = False
+    archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

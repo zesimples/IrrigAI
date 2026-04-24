@@ -57,6 +57,14 @@ class QuestionsResponse(BaseModel):
     questions: list[str]
 
 
+class DiagnosisResponse(BaseModel):
+    diagnosis: str
+
+
+class InterpretationResponse(BaseModel):
+    interpretation: str
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -128,6 +136,34 @@ async def missing_data_questions(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return QuestionsResponse(questions=questions)
+
+
+@router.post("/sectors/{sector_id}/diagnosis", response_model=DiagnosisResponse)
+async def diagnose_sector(
+    sector_id: str,
+    db: AsyncSession = Depends(get_db),
+    assistant: IrrigationAssistant = Depends(get_assistant),
+):
+    """Root-cause diagnosis: explain WHY a sector is in its current hydric state."""
+    try:
+        diagnosis = await assistant.diagnose_sector(sector_id=sector_id, db=db)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return DiagnosisResponse(diagnosis=diagnosis)
+
+
+@router.post("/probes/{probe_id}/interpret", response_model=InterpretationResponse)
+async def interpret_probe(
+    probe_id: str,
+    db: AsyncSession = Depends(get_db),
+    assistant: IrrigationAssistant = Depends(get_assistant),
+):
+    """Interpret time-series probe signal patterns (flatline, drainage, etc.)."""
+    try:
+        interpretation = await assistant.interpret_probe_patterns(probe_id=probe_id, db=db)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return InterpretationResponse(interpretation=interpretation)
 
 
 @router.post("/alerts/{alert_id}/explain", response_model=ExplainResponse)
