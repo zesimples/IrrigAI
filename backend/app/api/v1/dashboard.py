@@ -100,6 +100,8 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
         rainfall_mm=latest_obs.rainfall_mm if latest_obs else None,
         forecast_rain_next_48h_mm=rain_48h,
         forecast_rain_probability=rain_prob,
+        humidity_pct=latest_obs.humidity_pct if latest_obs else None,
+        wind_speed_kmh=round(latest_obs.wind_speed_ms * 3.6, 1) if latest_obs and latest_obs.wind_speed_ms else None,
     )
 
     # --- Load all sectors for this farm ---
@@ -175,12 +177,14 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
 
         # Rootzone status from snapshot
         rootzone_status = "unknown"
+        depletion_pct: float | None = None
         if latest_rec and latest_rec.inputs_snapshot:
             snap = latest_rec.inputs_snapshot
             taw_mm = snap.get("taw_mm")
             depletion_mm = snap.get("depletion_mm")
             if taw_mm and depletion_mm is not None and taw_mm > 0:
                 pct = depletion_mm / taw_mm * 100
+                depletion_pct = round(pct, 1)
                 if pct < 20:
                     rootzone_status = "wet"
                 elif pct < 60:
@@ -206,6 +210,7 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
             ),
             confidence_score=latest_rec.confidence_score if latest_rec else None,
             rootzone_status=rootzone_status,
+            depletion_pct=depletion_pct,
             active_alerts=crit + warn + info,
             probe_health=probe_health,
             last_irrigated=last_event.start_time.date() if last_event else None,

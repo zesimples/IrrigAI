@@ -1,14 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { subHours } from "date-fns";
 import { ChevronDown, ExternalLink, ScanLine, RefreshCw } from "lucide-react";
 import { useProbeReadings } from "@/hooks/useProbeReadings";
 import { ProbeChart } from "@/components/probes/ProbeChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { sectorsApi, probesApi } from "@/lib/api";
 import type { ReferenceLines } from "@/types";
 
@@ -20,6 +18,8 @@ interface ProbeReadingsInlineProps {
   href: string;
   sectorId: string;
   onSaved?: () => void | Promise<void>;
+  /** Increment this value to force the card open from outside. */
+  openTrigger?: number;
 }
 
 export function ProbeReadingsInline({
@@ -30,18 +30,21 @@ export function ProbeReadingsInline({
   href,
   sectorId,
   onSaved,
+  openTrigger,
 }: ProbeReadingsInlineProps) {
   const [collapsed, setCollapsed] = useState(true);
+
+  useEffect(() => {
+    if (openTrigger && openTrigger > 0) setCollapsed(false);
+  }, [openTrigger]);
   const [sinceHours, setSinceHours] = useState(72);
   const [interval, setInterval] = useState("");
   const [interpretation, setInterpretation] = useState<string | null>(null);
   const [interpreting, setInterpreting] = useState(false);
   const [interpretError, setInterpretError] = useState<string | null>(null);
 
-  // Local override of reference lines so chart updates immediately on save
   const [refLines, setRefLines] = useState<ReferenceLines | null>(null);
 
-  // CC/PMP edit state
   const [editing, setEditing] = useState(false);
   const [ccInput, setCcInput] = useState("");
   const [pmpInput, setPmpInput] = useState("");
@@ -100,23 +103,27 @@ export function ProbeReadingsInline({
 
   const healthDot =
     healthStatus === "ok"
-      ? "bg-irrigai-green"
+      ? "bg-olive"
       : healthStatus === "degraded" || healthStatus === "warning"
-        ? "bg-irrigai-amber"
-        : "bg-irrigai-red";
+        ? "bg-[#c9a34a]"
+        : "bg-terra";
 
   return (
-    <Card>
-      <CardHeader>
+    <div className="border border-rule-soft rounded-lg overflow-hidden mb-5">
+      {/* Header row */}
+      <div className="bg-card border-b border-rule-soft px-5 pt-3 pb-3.5">
+        <p className="font-mono text-[9.5px] tracking-[0.14em] uppercase text-ink-3 mb-2">
+          Leituras da sonda
+        </p>
         <div className="flex items-center justify-between gap-3">
           <button
             onClick={() => setCollapsed((c) => !c)}
-            className="flex items-center gap-2 min-w-0 flex-1 text-left"
+            className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
           >
-            <span className={`shrink-0 inline-block h-1.5 w-1.5 rounded-full ${healthDot}`} />
-            <CardTitle className="font-mono">{externalId}</CardTitle>
+            <span className={`shrink-0 h-[7px] w-[7px] rounded-full ${healthDot}`} />
+            <span className="font-mono text-[13px] font-medium text-ink">{externalId}</span>
             {lastReadingAt && (
-              <span className="text-[11px] text-irrigai-text-muted truncate">
+              <span className="font-mono text-[11px] text-ink-3 truncate">
                 · {new Date(lastReadingAt).toLocaleString("pt-PT", {
                   day: "numeric",
                   month: "short",
@@ -126,200 +133,217 @@ export function ProbeReadingsInline({
               </span>
             )}
             <ChevronDown
-              className={`shrink-0 h-3.5 w-3.5 text-irrigai-text-hint transition-transform duration-200 ${collapsed ? "-rotate-90" : ""}`}
+              className={`shrink-0 h-3.5 w-3.5 text-ink-3 transition-transform duration-200 ml-0.5 ${collapsed ? "-rotate-90" : ""}`}
             />
           </button>
           <Link
             href={href}
-            className="shrink-0 flex items-center gap-1 text-[11px] text-irrigai-text-muted hover:text-irrigai-text transition-colors"
+            className="shrink-0 flex items-center gap-1.5 font-serif italic text-[11.5px] text-ink-2 hover:text-ink transition-colors"
           >
             <ExternalLink className="h-3 w-3" />
             <span className="hidden sm:inline">Ver histórico</span>
           </Link>
         </div>
-      </CardHeader>
+      </div>
 
-      {!collapsed && <CardBody className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <p className="text-[12px] font-medium text-irrigai-text-hint uppercase tracking-[0.05em]">
-            Humidade do solo (VWC)
-          </p>
-          <ReadingsControls
-            sinceHours={sinceHours}
-            interval={interval}
-            onSinceChange={setSinceHours}
-            onIntervalChange={setInterval}
-          />
-        </div>
-
-        {loading ? (
-          <div className="h-64 animate-pulse rounded-xl bg-irrigai-surface" />
-        ) : error ? (
-          <div className="rounded-xl border border-irrigai-red/20 bg-irrigai-red-bg px-4 py-4 text-center text-[13px] text-irrigai-red-dark">
-            {error}
-          </div>
-        ) : data && data.depths.length > 0 ? (
-          <>
-            <ProbeChart
-              depths={data.depths}
-              referenceLines={activeRefLines}
+      {!collapsed && (
+        <div className="px-5 py-4 space-y-4 bg-paper">
+          {/* Controls row */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+              Humidade do solo (VWC)
+            </span>
+            <ReadingsControls
+              sinceHours={sinceHours}
               interval={interval}
+              onSinceChange={setSinceHours}
+              onIntervalChange={setInterval}
             />
+          </div>
 
-            {/* CC / PMP row */}
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-black/[0.07] bg-irrigai-surface px-4 py-3">
-              {editing ? (
-                <>
-                  <div className="flex items-center gap-1.5">
-                    <label className="text-[11px] font-medium text-[#16a34a] min-w-[28px]">CC</label>
-                    <input
-                      type="number"
-                      value={ccInput}
-                      onChange={(e) => setCcInput(e.target.value)}
-                      step="0.1"
-                      min="0"
-                      max="100"
-                      className="w-20 rounded-lg border border-black/[0.1] bg-white px-2.5 py-1.5 text-[13px] tabular-nums focus:border-irrigai-green focus:outline-none focus:ring-1 focus:ring-irrigai-green/30"
-                    />
-                    <span className="text-[11px] text-irrigai-text-muted">%</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <label className="text-[11px] font-medium text-[#dc2626] min-w-[36px]">PMP</label>
-                    <input
-                      type="number"
-                      value={pmpInput}
-                      onChange={(e) => setPmpInput(e.target.value)}
-                      step="0.1"
-                      min="0"
-                      max="100"
-                      className="w-20 rounded-lg border border-black/[0.1] bg-white px-2.5 py-1.5 text-[13px] tabular-nums focus:border-irrigai-green focus:outline-none focus:ring-1 focus:ring-irrigai-green/30"
-                    />
-                    <span className="text-[11px] text-irrigai-text-muted">%</span>
-                  </div>
-                  <div className="flex items-center gap-2 ml-auto">
-                    <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>
-                      Cancelar
-                    </Button>
-                    <Button size="sm" variant="brand" onClick={handleSave} loading={saving}>
-                      Guardar
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <span className="text-[11px] font-medium text-[#16a34a]">
-                    CC {activeRefLines.field_capacity != null ? `${(activeRefLines.field_capacity * 100).toFixed(1)}%` : "—"}
+          {loading ? (
+            <div className="h-64 animate-pulse rounded-lg bg-card" />
+          ) : error ? (
+            <div className="rounded-lg border border-terra/20 bg-terra-bg px-4 py-4 text-center text-[13px] text-terra">
+              {error}
+            </div>
+          ) : data && data.depths.length > 0 ? (
+            <>
+              <ProbeChart
+                depths={data.depths}
+                referenceLines={activeRefLines}
+                interval={interval}
+              />
+
+              {/* CC / PMP row */}
+              <div className="flex flex-wrap items-center gap-3 rounded-md border border-rule-soft bg-card px-4 py-3">
+                {editing ? (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <label className="font-mono text-[11px] font-medium text-olive min-w-[28px]">CC</label>
+                      <input
+                        type="number"
+                        value={ccInput}
+                        onChange={(e) => setCcInput(e.target.value)}
+                        step="0.1"
+                        min="0"
+                        max="100"
+                        className="w-20 rounded-md border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink tabular-nums focus:outline-none focus:ring-1 focus:ring-olive/30"
+                      />
+                      <span className="font-mono text-[11px] text-ink-3">%</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <label className="font-mono text-[11px] font-medium text-terra min-w-[36px]">PMP</label>
+                      <input
+                        type="number"
+                        value={pmpInput}
+                        onChange={(e) => setPmpInput(e.target.value)}
+                        step="0.1"
+                        min="0"
+                        max="100"
+                        className="w-20 rounded-md border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink tabular-nums focus:outline-none focus:ring-1 focus:ring-terra/30"
+                      />
+                      <span className="font-mono text-[11px] text-ink-3">%</span>
+                    </div>
+                    <div className="flex items-center gap-2 ml-auto">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(false)}
+                        className="rounded-md border border-rule bg-paper px-3 py-1.5 text-[12px] text-ink-2 hover:bg-paper-in transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSave}
+                        disabled={saving}
+                        className="rounded-md bg-ink text-paper px-3 py-1.5 text-[12px] font-medium hover:opacity-85 disabled:opacity-40 transition-opacity"
+                      >
+                        {saving ? "A guardar…" : "Guardar"}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-mono text-[11.5px] font-medium text-olive">
+                      CC {activeRefLines.field_capacity != null ? `${(activeRefLines.field_capacity * 100).toFixed(1)}%` : "—"}
+                    </span>
+                    <span className="font-mono text-[11.5px] font-medium text-terra">
+                      PMP {activeRefLines.wilting_point != null ? `${(activeRefLines.wilting_point * 100).toFixed(1)}%` : "—"}
+                    </span>
+                    {saved && (
+                      <span className="font-mono text-[11px] text-olive">Guardado ✓</span>
+                    )}
+                    <button
+                      onClick={startEdit}
+                      className="ml-auto font-serif italic text-[11.5px] text-ink-2 hover:text-ink transition-colors"
+                    >
+                      Editar
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Depth summary table */}
+              <div className="overflow-x-auto rounded-md border border-rule-soft">
+                <table className="min-w-full">
+                  <thead>
+                    <tr className="border-b border-rule-soft bg-card">
+                      <th className="px-4 pb-2.5 pt-3 text-left font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+                        Profundidade
+                      </th>
+                      <th className="px-4 pb-2.5 pt-3 text-right font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+                        Última VWC
+                      </th>
+                      <th className="px-4 pb-2.5 pt-3 text-right font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+                        Mín / Máx
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-rule-soft">
+                    {data.depths.map((d) => {
+                      const vwcs = d.readings.map((r) => r.vwc);
+                      const last = vwcs[vwcs.length - 1];
+                      const min = Math.min(...vwcs);
+                      const max = Math.max(...vwcs);
+                      return (
+                        <tr key={d.depth_cm}>
+                          <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[13px] font-medium text-ink">
+                            {d.depth_cm} cm
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-[13px] text-ink">
+                            {last != null ? `${(last * 100).toFixed(1)}%` : "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-[13px] text-ink-2">
+                            {vwcs.length > 0 ? `${(min * 100).toFixed(1)}% / ${(max * 100).toFixed(1)}%` : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-rule px-4 py-8 text-center">
+              <p className="text-[13px] text-ink-3">
+                Sem leituras para o intervalo seleccionado.
+              </p>
+            </div>
+          )}
+
+          {/* AI Pattern Interpretation */}
+          {data && data.depths.length > 0 && (
+            <div className="rounded-md border border-rule-soft overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-card border-b border-rule-soft">
+                <div className="flex items-center gap-2">
+                  <ScanLine className="h-3.5 w-3.5 text-ink-3" />
+                  <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+                    Interpretação de padrões
                   </span>
-                  <span className="text-[11px] font-medium text-[#dc2626]">
-                    PMP {activeRefLines.wilting_point != null ? `${(activeRefLines.wilting_point * 100).toFixed(1)}%` : "—"}
-                  </span>
-                  {saved && (
-                    <span className="text-[11px] font-medium text-irrigai-green">Guardado ✓</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={runInterpretation}
+                  disabled={interpreting}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-paper px-3 py-1.5 text-[11.5px] text-ink-2 hover:bg-paper-in disabled:opacity-40 transition-colors"
+                >
+                  {interpreting ? (
+                    "A analisar…"
+                  ) : interpretation ? (
+                    <><RefreshCw className="h-3 w-3" /> Reanalisar</>
+                  ) : (
+                    "Analisar sonda"
                   )}
-                  <button
-                    onClick={startEdit}
-                    className="ml-auto text-[11px] text-irrigai-text-muted hover:text-irrigai-text transition-colors"
-                  >
-                    Editar
-                  </button>
-                </>
+                </button>
+              </div>
+
+              {interpreting && (
+                <div className="space-y-2 px-4 py-3">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className={`h-3 animate-pulse rounded bg-card ${i === 2 ? "w-3/5" : "w-full"}`} />
+                  ))}
+                </div>
+              )}
+
+              {interpretError && (
+                <p className="px-4 py-3 text-[13px] text-terra">{interpretError}</p>
+              )}
+
+              {interpretation && !interpreting && (
+                <InterpretationBody text={interpretation} />
+              )}
+
+              {!interpretation && !interpreting && !interpretError && (
+                <p className="px-4 py-3 text-[12px] text-ink-3">
+                  A IA identifica padrões no sinal: flatline, resposta fraca, drenagem rápida, profundidade não atingida.
+                </p>
               )}
             </div>
-
-            {/* Depth summary */}
-            <div className="overflow-x-auto rounded-xl border border-black/[0.07]">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b border-black/[0.06]">
-                    <th className="px-4 pb-2.5 pt-3 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-irrigai-text-hint">
-                      Profundidade
-                    </th>
-                    <th className="px-4 pb-2.5 pt-3 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-irrigai-text-hint">
-                      Última VWC
-                    </th>
-                    <th className="px-4 pb-2.5 pt-3 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-irrigai-text-hint">
-                      Mín / Máx
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-black/[0.04]">
-                  {data.depths.map((d) => {
-                    const vwcs = d.readings.map((r) => r.vwc);
-                    const last = vwcs[vwcs.length - 1];
-                    const min = Math.min(...vwcs);
-                    const max = Math.max(...vwcs);
-                    return (
-                      <tr key={d.depth_cm}>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-medium text-[13px] text-irrigai-text">
-                          {d.depth_cm} cm
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-[13px] text-irrigai-text">
-                          {last != null ? `${(last * 100).toFixed(1)}%` : "—"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-[13px] text-irrigai-text-muted">
-                          {vwcs.length > 0
-                            ? `${(min * 100).toFixed(1)}% / ${(max * 100).toFixed(1)}%`
-                            : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : (
-          <div className="rounded-xl border border-dashed border-black/[0.08] bg-irrigai-surface px-4 py-8 text-center">
-            <p className="text-[13px] text-irrigai-text-muted">
-              Sem leituras para o intervalo seleccionado.
-            </p>
-          </div>
-        )}
-
-        {/* ── AI Pattern Interpretation ───────────────────────────────────── */}
-        {data && data.depths.length > 0 && (
-          <div className="rounded-xl border border-black/[0.07] overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-irrigai-surface">
-              <div className="flex items-center gap-2">
-                <ScanLine className="h-3.5 w-3.5 text-irrigai-text-hint" />
-                <span className="text-[11px] font-medium uppercase tracking-[0.05em] text-irrigai-text-hint">
-                  Interpretação de padrões
-                </span>
-              </div>
-              <Button size="sm" variant="ghost" onClick={runInterpretation} loading={interpreting}>
-                {interpretation ? (
-                  <><RefreshCw className="h-3 w-3" /> Reanalisar</>
-                ) : (
-                  "Analisar sonda"
-                )}
-              </Button>
-            </div>
-
-            {interpreting && (
-              <div className="space-y-2 px-4 py-3">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className={`h-3 animate-pulse rounded bg-irrigai-surface ${i === 2 ? "w-3/5" : "w-full"}`} />
-                ))}
-              </div>
-            )}
-
-            {interpretError && (
-              <p className="px-4 py-3 text-[13px] text-irrigai-red">{interpretError}</p>
-            )}
-
-            {interpretation && !interpreting && (
-              <InterpretationBody text={interpretation} />
-            )}
-
-            {!interpretation && !interpreting && !interpretError && (
-              <p className="px-4 py-3 text-[12px] text-irrigai-text-muted">
-                A IA identifica padrões no sinal: flatline, resposta fraca, drenagem rápida, profundidade não atingida.
-              </p>
-            )}
-          </div>
-        )}
-      </CardBody>}
-    </Card>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -330,7 +354,7 @@ function InterpretationBody({ text }: { text: string }) {
     .filter(Boolean);
 
   return (
-    <ul className="divide-y divide-black/[0.04]">
+    <ul className="divide-y divide-rule-soft">
       {lines.map((line, i) => {
         const clean = line.replace(/^[•\-]\s*/, "");
         const colonIdx = clean.indexOf(":");
@@ -339,17 +363,17 @@ function InterpretationBody({ text }: { text: string }) {
         const parts = rest.split(/\s*→\s*/);
 
         return (
-          <li key={i} className="px-4 py-2.5 text-[12px] leading-relaxed">
+          <li key={i} className="px-4 py-2.5 text-[12.5px] leading-relaxed">
             {label && (
-              <span className="font-medium text-irrigai-text">{label}: </span>
+              <span className="font-serif font-semibold text-ink">{label}: </span>
             )}
             {parts.map((part, j) => (
               <span key={j}>
-                {j > 0 && <span className="mx-1 text-irrigai-text-hint">→</span>}
+                {j > 0 && <span className="mx-1 text-ink-3">→</span>}
                 <span className={
                   j === parts.length - 1 && parts.length > 1
-                    ? "font-medium text-irrigai-amber"
-                    : "text-irrigai-text-muted"
+                    ? "font-medium text-[#c9a34a]"
+                    : "text-ink-2"
                 }>
                   {part}
                 </span>

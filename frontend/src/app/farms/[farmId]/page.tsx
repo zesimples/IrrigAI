@@ -1,69 +1,41 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useFarmDashboard } from "@/hooks/useFarmDashboard";
-import { SectorCard } from "@/components/dashboard/SectorCard";
-import { WeatherWidget } from "@/components/dashboard/WeatherWidget";
-import { AlertsBanner } from "@/components/dashboard/AlertsBanner";
-import { Button } from "@/components/ui/button";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { ChatButton } from "@/components/chat/ChatButton";
+import { Button } from "@/components/ui/button";
 import { farmsApi } from "@/lib/api";
-import { useState, useMemo } from "react";
-import type { SectorSummary } from "@/types";
-import { RefreshCw, Zap } from "lucide-react";
-import { CROP_LABELS } from "@/lib/cropConfig";
+import { RefreshCw } from "lucide-react";
+import { Lede } from "@/components/dashboard/editorial/Lede";
+import { NumericStrip } from "@/components/dashboard/editorial/NumericStrip";
+import { SectorGrid } from "@/components/dashboard/editorial/SectorGrid";
 
 interface Props {
   params: { farmId: string };
 }
 
-// Variety label within a crop tab, e.g. "Cobrançosa" from "T01 - Cobrançosa"
-function varietyKey(s: SectorSummary): string {
-  const parts = s.sector_name.split(" - ");
-  return parts.length > 1 ? parts.slice(1).join(" - ") : "";
+function editionSubline(dateStr: string): string {
+  const d = new Date(dateStr);
+  const days = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+  const dayName = days[d.getDay()];
+  const month = months[d.getMonth()];
+  const year = d.getFullYear();
+  const roman = ["I", "II", "III", "IV", "V", "VI"][Math.max(0, year - 2024)] ?? String(year - 2023);
+  const startOfYear = new Date(year, 0, 0);
+  const issue = Math.floor((d.getTime() - startOfYear.getTime()) / 86_400_000);
+  return `Edição de ${dayName} · ${d.getDate()} ${month} · Ano ${roman}, N.º ${issue}`;
 }
 
 export default function FarmDashboardPage({ params }: Props) {
   const { farmId } = params;
   const { data, loading, error, refetch } = useFarmDashboard(farmId);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string | null>(
-    searchParams.get("crop")
-  );
-
-  const cropTabs = useMemo(() => {
-    if (!data) return [];
-    const seen = new Set<string>();
-    const order: string[] = [];
-    for (const s of data.sectors_summary) {
-      const ct = s.crop_type ?? "other";
-      if (!seen.has(ct)) { seen.add(ct); order.push(ct); }
-    }
-    return order;
-  }, [data]);
-
-  const currentTab = activeTab && cropTabs.includes(activeTab) ? activeTab : cropTabs[0] ?? null;
-
-  const tabSectors = useMemo(
-    () => data?.sectors_summary.filter((s) => (s.crop_type ?? "other") === currentTab) ?? [],
-    [data, currentTab],
-  );
-
-  const varietyGroups = useMemo(
-    () =>
-      tabSectors.reduce<Record<string, SectorSummary[]>>((acc, s) => {
-        const key = varietyKey(s) || (CROP_LABELS[s.crop_type ?? ""] ?? "Geral");
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(s);
-        return acc;
-      }, {}),
-    [tabSectors],
-  );
 
   async function generateAll() {
     setGenerating(true);
@@ -81,14 +53,18 @@ export default function FarmDashboardPage({ params }: Props) {
   // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="min-h-screen bg-white">
-        <div className="mx-auto max-w-3xl px-4 pt-6 sm:px-6 animate-pulse space-y-5">
-          <div className="h-8 w-56 rounded bg-irrigai-surface" />
-          <div className="h-3 w-32 rounded bg-irrigai-surface" />
-          <div className="h-12 w-full rounded-xl bg-irrigai-surface" />
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="min-h-screen bg-paper">
+        <AppHeader crumbs={[{ label: "…" }]} />
+        <div className="animate-pulse space-y-0">
+          <div className="h-48 border-b border-rule bg-paper-in" />
+          <div className="flex border-b border-rule-soft">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="flex-1 h-16 border-l border-rule-soft bg-paper-in first:border-l-0" />
+            ))}
+          </div>
+          <div className="grid grid-cols-3 border-t border-l border-rule mt-5 mx-4 sm:mx-8 lg:mx-11">
             {[...Array(6)].map((_, i) => (
-              <div key={i} className="h-32 rounded-xl bg-irrigai-surface" />
+              <div key={i} className="h-44 border-r border-b border-rule bg-card" />
             ))}
           </div>
         </div>
@@ -99,161 +75,82 @@ export default function FarmDashboardPage({ params }: Props) {
   // ── Error ────────────────────────────────────────────────────────────────────
   if (error || !data) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-4">
-        <p className="text-[14px] text-irrigai-text-muted">
-          {error ?? "Não foi possível carregar a exploração."}
-        </p>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            Recarregar
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => router.push("/")}>
-            ← Início
-          </Button>
+      <div className="flex min-h-screen flex-col bg-paper">
+        <AppHeader crumbs={[{ label: "Exploração" }]} />
+        <div className="flex flex-1 items-center justify-center gap-4 px-4">
+          <p className="text-[14px] text-ink-2">{error ?? "Não foi possível carregar a exploração."}</p>
+          <div className="flex gap-2">
+            <Button variant="secondary" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="h-3.5 w-3.5" /> Recarregar
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => router.push("/")}>← Início</Button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // ── Derived ──────────────────────────────────────────────────────────────────
-  const formattedDate = new Date(data.date).toLocaleDateString("pt-PT", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
-  const dateLabel = formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
+  const toIrrigate = data.sectors_summary.filter((s) => s.action === "irrigate").length;
+  const noAction = data.sectors_summary.filter((s) => s.action !== "irrigate").length;
 
-  // ── Render ───────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-white pb-20 sm:pb-8">
+    <div className="min-h-screen bg-paper pb-20 sm:pb-8">
       <AppHeader
         crumbs={[{ label: data.farm.name }]}
-        farmDate={`${dateLabel}${data.farm.region ? ` · ${data.farm.region}` : ""}`}
+        farmDate={editionSubline(data.date)}
         right={
-          <Button variant="brand" size="sm" onClick={generateAll} loading={generating}>
-            <Zap className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Gerar</span>
-          </Button>
+          <button
+            onClick={generateAll}
+            disabled={generating}
+            aria-busy={generating}
+            className="inline-flex items-center gap-2 rounded-full border border-rule bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:opacity-85 disabled:opacity-50 transition-opacity"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-terra" />
+            {generating ? "A gerar…" : "Gerar plano de rega"}
+          </button>
         }
       />
 
-      <main className="mx-auto max-w-3xl space-y-5 px-4 py-5 sm:px-6 animate-fade-in-up">
-        {/* Generate error */}
-        {generateError && (
-          <div
-            aria-live="polite"
-            className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 flex items-center justify-between gap-3"
+      {generateError && (
+        <div className="mx-4 mt-3 sm:mx-8 lg:mx-11 rounded-md border border-terra/30 bg-terra-bg px-4 py-3 text-[13px] text-terra flex items-center justify-between">
+          <span>{generateError}</span>
+          <button onClick={() => setGenerateError(null)} className="ml-3 text-terra/60 hover:text-terra">×</button>
+        </div>
+      )}
+
+      {/* Lede + Boletim + Numeric strip */}
+      <Lede
+        farmName={data.farm.name}
+        region={data.farm.region}
+        sectors={data.sectors_summary}
+        weather={data.weather_today}
+      />
+
+      {/* Numeric strip is inside Lede's wrapper padding area */}
+      <div className="px-4 sm:px-8 lg:px-11 border-b border-rule">
+        <NumericStrip
+          totalSectors={data.sectors_summary.length}
+          toIrrigate={toIrrigate}
+          noAction={noAction}
+          forecastRain48h={data.weather_today.forecast_rain_next_48h_mm}
+        />
+      </div>
+
+      {/* Sector grid with tabs */}
+      {data.sectors_summary.length > 0 ? (
+        <SectorGrid sectors={data.sectors_summary} farmId={farmId} />
+      ) : (
+        <div className="mx-4 mt-8 sm:mx-8 rounded-md border border-dashed border-rule px-6 py-12 text-center">
+          <p className="font-serif text-[18px] text-ink-2">Sem sectores configurados.</p>
+          <p className="mt-2 text-[13px] text-ink-3">Configure um sector para começar a gerar recomendações.</p>
+          <button
+            onClick={() => router.push("/onboarding")}
+            className="mt-5 rounded-full border border-rule px-5 py-2 text-[13px] text-ink-2 hover:bg-paper-in transition-colors"
           >
-            <span>{generateError}</span>
-            <button
-              onClick={() => setGenerateError(null)}
-              className="shrink-0 text-red-400 hover:text-red-600 text-[18px] leading-none"
-              aria-label="Fechar"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        {/* Alerts */}
-        <AlertsBanner counts={data.active_alerts_count} farmId={farmId} />
-
-        {/* Weather strip */}
-        <WeatherWidget weather={data.weather_today} />
-
-        {/* Missing data prompts */}
-        {data.missing_data_prompts.length > 0 && (
-          <div className="rounded-xl bg-irrigai-surface p-4">
-            <p className="mb-2 text-[12px] font-medium text-irrigai-text-muted">
-              Para melhorar as recomendações
-            </p>
-            <div className="space-y-1.5">
-              {data.missing_data_prompts.map((msg, i) => (
-                <div key={i} className="flex items-start gap-2 text-[12px] text-irrigai-text py-1">
-                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none" className="mt-0.5 shrink-0">
-                    <circle cx="6.5" cy="6.5" r="5.5" stroke="#EF9F27" strokeWidth="1" />
-                    <line x1="6.5" y1="3.5" x2="6.5" y2="7.5" stroke="#EF9F27" strokeWidth="1" />
-                    <circle cx="6.5" cy="9.5" r="0.5" fill="#EF9F27" />
-                  </svg>
-                  <span>{msg}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Sectors */}
-        {data.sectors_summary.length > 0 ? (
-          <div className="space-y-4">
-            {/* Tab bar — only render if more than one crop type */}
-            {cropTabs.length > 1 && (
-              <div className="flex gap-1 rounded-xl bg-irrigai-surface p-1">
-                {cropTabs.map((ct) => {
-                  const label = CROP_LABELS[ct] ?? ct;
-                  const count = data.sectors_summary.filter((s) => (s.crop_type ?? "other") === ct).length;
-                  const isActive = ct === currentTab;
-                  return (
-                    <button
-                      key={ct}
-                      onClick={() => setActiveTab(ct)}
-                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-all ${
-                        isActive
-                          ? "bg-white text-irrigai-text shadow-sm"
-                          : "text-irrigai-text-muted hover:text-irrigai-text"
-                      }`}
-                    >
-                      {label}
-                      <span
-                        className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
-                          isActive
-                            ? "bg-irrigai-surface text-irrigai-text-muted"
-                            : "bg-black/[0.06] text-irrigai-text-hint"
-                        }`}
-                      >
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Variety groups within the active tab */}
-            <div className="space-y-6">
-              {Object.entries(varietyGroups).map(([variety, sectors]) => (
-                <section key={variety}>
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-irrigai-text-hint">
-                      {variety}
-                    </p>
-                    <p className="text-[11px] text-irrigai-text-hint">
-                      {sectors.length} sector{sectors.length !== 1 ? "es" : ""}
-                    </p>
-                  </div>
-                  <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
-                    {sectors.map((s) => (
-                      <SectorCard key={s.sector_id} sector={s} farmId={farmId} />
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-black/[0.1] px-6 py-12 text-center space-y-3">
-            <p className="text-[14px] font-medium text-irrigai-text-muted">
-              Sem sectores configurados.
-            </p>
-            <p className="text-[12px] text-irrigai-text-hint">
-              Configure um sector para começar a gerar recomendações de rega.
-            </p>
-            <Button variant="secondary" size="sm" onClick={() => router.push("/onboarding")}>
-              Configurar agora
-            </Button>
-          </div>
-        )}
-      </main>
+            Configurar agora
+          </button>
+        </div>
+      )}
 
       <BottomNav farmId={farmId} />
       <ChatButton farmId={farmId} />

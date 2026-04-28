@@ -12,6 +12,9 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-dm-sans)", "system-ui", "sans-serif"],
         display: ["var(--font-fraunces)", "Georgia", "serif"],
+        serif: ["var(--font-fraunces)", "Georgia", "serif"],
+        instrument: ["var(--font-instrument)", "Georgia", "serif"],
+        mono: ["var(--font-jetbrains)", "ui-monospace", "monospace"],
       },
       colors: {
         irrigai: {
@@ -38,9 +41,33 @@ const config: Config = {
           bg: "#ffffff",
           surface: "#F5F4F0",
         },
+        // Editorial Alentejo palette
+        paper: "#f5f0e6",
+        "paper-in": "#ece5d5",
+        card: "#fbf8f1",
+        ink: "#2a2520",
+        "ink-2": "#5a5048",
+        "ink-3": "#8a7f74",
+        rule: "#dcd3c2",
+        "rule-soft": "#e8e0d0",
+        terra: "#b84a2a",
+        "terra-bg": "#fbf4ee",
+        olive: "#6b8f4e",
+        earth: "#7a5a3a",
+        sky: "#d4e1d6",
+        water: "#2a6f97",
       },
       borderColor: {
         DEFAULT: "rgba(0,0,0,0.08)",
+      },
+      keyframes: {
+        "fade-up": {
+          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "fade-up": "fade-up 0.35s ease-out both",
       },
     },
   },

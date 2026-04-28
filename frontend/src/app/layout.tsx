@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DM_Sans, Fraunces } from "next/font/google";
+import { DM_Sans, Fraunces, Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import "@/styles/globals.css";
 import { ToastProvider } from "@/hooks/useToast";
 import { Toaster } from "@/components/ui/Toaster";
@@ -13,8 +13,21 @@ const dmSans = DM_Sans({
 
 const fraunces = Fraunces({
   subsets: ["latin"],
-  weight: ["400", "500"],
+  weight: ["400", "500", "600"],
   variable: "--font-fraunces",
+});
+
+const instrumentSerif = Instrument_Serif({
+  subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
+  variable: "--font-instrument",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-jetbrains",
 });
 
 export const metadata: Metadata = {
@@ -25,7 +38,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt">
-      <body className={`${dmSans.variable} ${fraunces.variable} font-sans`}>
+      <body className={`${dmSans.variable} ${fraunces.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable} font-sans`}>
         <ErrorBoundary>
           <ToastProvider>
             {children}

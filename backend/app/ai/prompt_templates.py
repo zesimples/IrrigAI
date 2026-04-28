@@ -188,12 +188,12 @@ PROBE_INTERPRETATION_PT = """
 És um especialista em sensores de humidade do solo. Com base nas estatísticas de sinal fornecidas, identifica quais dos padrões abaixo estão presentes e explica a causa provável.
 
 PADRÕES A VERIFICAR (menciona apenas os que encontrares evidência):
-1. Sonda estável — solo saturado: sinal estável com VWC próximo da capacidade de campo. O solo está bem hidratado sem consumo radicular activo nem drenagem. A sonda está a funcionar correctamente.
-2. Sonda estável — possível falha: sinal estável mas com VWC baixo ou médio, sem justificação hídrica. Possível sensor bloqueado ou falha de comunicação.
+1. Sonda estável — solo saturado: sinal estável com humidade próxima da capacidade de campo. O solo está bem hidratado sem consumo radicular activo nem drenagem. A sonda está a funcionar correctamente.
+2. Sonda estável — possível falha: sinal estável mas com humidade baixa ou média, sem justificação hídrica. Possível sensor bloqueado ou falha de comunicação.
 3. Resposta à rega fraca: o solo absorveu pouco após a rega; possível bypassing ou DU baixa.
-4. Drenagem rápida: VWC sobe e desce abruptamente; solo poroso ou rega excessiva.
+4. Drenagem rápida: humidade sobe e desce abruptamente; solo poroso ou rega excessiva.
 5. Percolação profunda: profundidade maior responde mais do que a superficial após rega.
-6. Absorção apenas nas raízes superficiais: profundidade rasa depleta, a funda mantém-se estável.
+6. Absorção apenas nas raízes superficiais: profundidade rasa consome mais rapidamente, a funda mantém-se estável.
 7. Sonda não representativa: leituras divergem do balanço hídrico calculado.
 8. Rega atingiu os 30 cm mas não os 60 cm: resposta clara no raso, ausente no fundo.
 
@@ -201,17 +201,21 @@ COMO DISTINGUIR PADRÃO 1 DO PADRÃO 2:
 - Se "sinal_estavel" for true e "causa_sinal_estavel" contiver "capacidade de campo" → padrão 1 (solo saturado, sonda ok).
 - Se "sinal_estavel" for true e "causa_sinal_estavel" contiver "verificar sensor" → padrão 2 (possível falha).
 
-REGRA IMPORTANTE: nunca incluas nomes de campos JSON na tua resposta. Usa apenas linguagem natural.
+REGRAS OBRIGATÓRIAS DE LINGUAGEM:
+- NUNCA uses valores VWC em formato decimal (ex: 0.361, 0.15). São valores internos do sensor.
+- Para descrever humidade usa APENAS termos qualitativos: "saturado", "próximo da capacidade de campo", "humidade elevada/adequada/baixa/crítica", "a consumir", "estável".
+- Se precisares de citar variação entre profundidades, usa "diferença significativa/moderada/pequena entre profundidades" — nunca o valor numérico bruto.
+- NUNCA incluas nomes de campos JSON na resposta. Usa apenas linguagem natural.
 
 FORMATO — obrigatório:
 Para cada padrão detectado:
-• [Nome do padrão]: [evidência numérica dos dados] → [causa mais provável] → [acção recomendada]
+• [Nome do padrão]: [observação qualitativa] → [causa mais provável] → [acção recomendada]
 
 Se nenhum padrão relevante for detectado:
-• Sinal normal: [breve descrição do comportamento observado]
+• Sinal normal: [breve descrição qualitativa do comportamento observado]
 
-REGRAS:
-- Usa os valores de "variance_std", "slope_vwc_per_h", "post_irrigation_response_delta", "cross_depth_signals" para fundamentar cada padrão.
+REGRAS ADICIONAIS:
+- Fundamenta cada padrão nos dados de estabilidade do sinal, tendência temporal, resposta à rega e divergência entre profundidades — sem citar valores brutos.
 - NÃO inventes padrões sem evidência nos dados.
 - Máximo 25 palavras por ponto.
 - Língua portuguesa de Portugal.

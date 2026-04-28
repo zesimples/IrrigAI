@@ -10,6 +10,8 @@ class WeatherToday(BaseModel):
     rainfall_mm: float | None = None
     forecast_rain_next_48h_mm: float = 0.0
     forecast_rain_probability: float | None = None
+    humidity_pct: float | None = None
+    wind_speed_kmh: float | None = None
 
 
 class SectorSummary(BaseModel):
@@ -23,6 +25,7 @@ class SectorSummary(BaseModel):
     confidence_level: str | None = None
     confidence_score: float | None = None
     rootzone_status: str | None = None    # "dry", "optimal", "wet", "saturated", "unknown"
+    depletion_pct: float | None = None   # % of TAW depleted (0=full, 100=empty)
     active_alerts: int = 0
     probe_health: str = "unknown"        # "ok", "warning", "error", "no_probes"
     last_irrigated: date | None = None

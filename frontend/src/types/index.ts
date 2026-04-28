@@ -286,6 +286,8 @@ export interface WeatherToday {
   rainfall_mm: number | null;
   forecast_rain_next_48h_mm: number;
   forecast_rain_probability: number | null;
+  humidity_pct: number | null;
+  wind_speed_kmh: number | null;
 }
 
 export interface AlertCounts {
@@ -311,6 +313,7 @@ export interface SectorSummary {
   last_irrigated: string | null;
   last_irrigated_mm: number | null;
   rootzone_status: string | null;
+  depletion_pct: number | null;
 }
 
 export interface DashboardFarm {

@@ -137,50 +137,80 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
                 post_irrig_delta = round(peak_v - vwc_at_event, 4)
                 hours_to_peak = round((peak_t - evt_ts).total_seconds() / 3600, 1)
 
+        # Human-readable moisture level descriptor
+        moisture_level = _moisture_level(latest_vwc, field_capacity, wilting_point)
+        _latest_vwc_raw = latest_vwc  # kept internally for cross-depth divergence, stripped before return
+
+        # Qualitative trend based on slope
+        if abs(slope) < 0.0001:
+            trend = "estável"
+        elif slope < -0.001:
+            trend = "a consumir rapidamente"
+        elif slope < 0:
+            trend = "a consumir gradualmente"
+        elif slope > 0.001:
+            trend = "a aumentar rapidamente (recarga)"
+        else:
+            trend = "a aumentar ligeiramente"
+
         depth_stats.append({
             "depth_cm": pd.depth_cm,
             "n_readings": len(vwc_series),
-            "latest_vwc": round(latest_vwc, 3),
-            "vwc_min": round(min(vals), 3),
-            "vwc_max": round(max(vals), 3),
-            "variance_std": round(vwc_std, 4),
+            "humidade_actual": moisture_level,
+            "tendencia": trend,
             "sinal_estavel": vwc_std < _FLATLINE_STD and len(vwc_series) >= 4,
             "causa_sinal_estavel": (
                 "solo próximo da capacidade de campo, sem consumo nem drenagem activa"
                 if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4 and flatline_near_fc
-                else "VWC estável em gama baixa ou média, verificar sensor"
+                else "humidade estável em gama baixa ou média, verificar sensor"
                 if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4
                 else None
             ),
-            "slope_vwc_per_h": round(slope, 6),
-            "change_last_24h": round(change_24h, 4) if change_24h is not None else None,
-            "change_last_48h": round(change_48h, 4) if change_48h is not None else None,
-            "post_irrigation_response_delta": post_irrig_delta,
-            "hours_to_peak_after_irrigation": hours_to_peak,
+            "variabilidade_sinal": (
+                "muito baixa (sinal plano)" if vwc_std < _FLATLINE_STD
+                else "baixa" if vwc_std < 0.01
+                else "moderada" if vwc_std < 0.03
+                else "alta (sinal instável)"
+            ),
+            "variacao_24h": _delta_qualitative(change_24h),
+            "variacao_48h": _delta_qualitative(change_48h),
+            "resposta_rega": (
+                "forte" if post_irrig_delta is not None and post_irrig_delta > 0.05
+                else "moderada" if post_irrig_delta is not None and post_irrig_delta > _RESPONSE_THRESHOLD
+                else "fraca ou ausente" if post_irrig_delta is not None
+                else None
+            ),
+            "horas_ate_pico_apos_rega": hours_to_peak,
+            "_latest_vwc_raw": _latest_vwc_raw,  # internal — stripped before LLM sees it
         })
 
     # Cross-depth signals
-    valid = [d for d in depth_stats if "latest_vwc" in d]
+    valid = [d for d in depth_stats if "humidade_actual" in d]
     cross_depth: dict = {}
     if len(valid) >= 2:
         shallowest = valid[0]
         deepest = valid[-1]
-        cross_depth["shallowest_depth_cm"] = shallowest["depth_cm"]
-        cross_depth["deepest_depth_cm"] = deepest["depth_cm"]
-        cross_depth["shallowest_depletes_faster"] = (
-            (shallowest.get("slope_vwc_per_h") or 0) < (deepest.get("slope_vwc_per_h") or 0)
+        cross_depth["profundidade_rasa_cm"] = shallowest["depth_cm"]
+        cross_depth["profundidade_funda_cm"] = deepest["depth_cm"]
+        cross_depth["rasa_consome_mais_rapido"] = shallowest["tendencia"] in (
+            "a consumir rapidamente", "a consumir gradualmente"
+        ) and deepest["tendencia"] in ("estável", "a aumentar ligeiramente")
+        cross_depth["divergencia_entre_profundidades"] = _divergence_label(
+            _raw_vwc_lookup(depth_stats, shallowest["depth_cm"]),
+            _raw_vwc_lookup(depth_stats, deepest["depth_cm"]),
         )
-        cross_depth["vwc_divergence"] = round(
-            abs(shallowest["latest_vwc"] - deepest["latest_vwc"]), 3
-        )
-        s_resp = shallowest.get("post_irrigation_response_delta")
-        d_resp = deepest.get("post_irrigation_response_delta")
+        s_resp = shallowest.get("resposta_rega")
+        d_resp = deepest.get("resposta_rega")
         if s_resp is not None and d_resp is not None:
-            cross_depth["irrigation_reached_shallow"] = s_resp > _RESPONSE_THRESHOLD
-            cross_depth["irrigation_reached_deep"] = d_resp > _RESPONSE_THRESHOLD
-            cross_depth["irrigation_reached_shallow_not_deep"] = (
-                s_resp > _RESPONSE_THRESHOLD and d_resp <= _RESPONSE_THRESHOLD
+            cross_depth["rega_chegou_a_rasa"] = s_resp in ("forte", "moderada")
+            cross_depth["rega_chegou_a_funda"] = d_resp in ("forte", "moderada")
+            cross_depth["rega_so_na_rasa"] = (
+                s_resp in ("forte", "moderada") and d_resp == "fraca ou ausente"
             )
+
+    # Strip internal-only fields before returning to LLM
+    for d in depth_stats:
+        d.pop("_latest_vwc_raw", None)
 
     return {
         "probe_id": probe_id,
@@ -188,15 +218,74 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         "sector_id": probe.sector_id,
         "sector_name": sector_name,
         "soil_texture": soil_texture,
-        "field_capacity": field_capacity,
-        "wilting_point": wilting_point,
-        "root_depth_cm": root_depth_cm,
         "analysis_window_hours": _ANALYSIS_HOURS,
         "n_irrigation_events_in_window": len(irrigation_events),
         "last_irrigation_applied_mm": last_event.applied_mm if last_event else None,
         "depths": depth_stats,
         "cross_depth_signals": cross_depth,
     }
+
+
+def _moisture_level(vwc: float, fc: float | None, wp: float | None) -> str:
+    """Convert raw VWC to a qualitative moisture descriptor."""
+    if fc and wp and fc > wp:
+        ratio = (vwc - wp) / (fc - wp)
+        if ratio >= 0.95:
+            return "saturado / próximo da capacidade de campo"
+        if ratio >= 0.70:
+            return "humidade elevada"
+        if ratio >= 0.45:
+            return "humidade adequada"
+        if ratio >= 0.20:
+            return "humidade baixa"
+        return "humidade crítica / próximo do ponto de murchamento"
+    # Fallback: generic thresholds when FC/WP not configured
+    if vwc >= 0.38:
+        return "saturado / próximo da capacidade de campo"
+    if vwc >= 0.28:
+        return "humidade elevada"
+    if vwc >= 0.20:
+        return "humidade adequada"
+    if vwc >= 0.12:
+        return "humidade baixa"
+    return "humidade crítica"
+
+
+def _delta_qualitative(delta: float | None) -> str | None:
+    if delta is None:
+        return None
+    if abs(delta) < 0.003:
+        return "sem variação significativa"
+    if delta < -0.03:
+        return "descida acentuada"
+    if delta < -0.01:
+        return "descida moderada"
+    if delta < 0:
+        return "descida ligeira"
+    if delta > 0.03:
+        return "subida acentuada (rega ou chuva)"
+    if delta > 0.01:
+        return "subida moderada"
+    return "subida ligeira"
+
+
+def _divergence_label(vwc_a: float | None, vwc_b: float | None) -> str:
+    if vwc_a is None or vwc_b is None:
+        return "não determinada"
+    diff = abs(vwc_a - vwc_b)
+    if diff < 0.03:
+        return "pequena (profundidades semelhantes)"
+    if diff < 0.08:
+        return "moderada"
+    return "significativa (profundidades muito diferentes)"
+
+
+def _raw_vwc_lookup(depth_stats: list[dict], depth_cm: int) -> float | None:
+    """Retrieve the raw latest VWC for a depth (kept internally for divergence calc only)."""
+    for d in depth_stats:
+        if d.get("depth_cm") == depth_cm and "_latest_vwc_raw" in d:
+            return d["_latest_vwc_raw"]
+    return None
 
 
 def _nearest_value(series: list[tuple[datetime, float]], target: datetime) -> float | None:

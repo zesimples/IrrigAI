@@ -25,18 +25,18 @@ export function AppHeader({ crumbs, right, farmDate }: AppHeaderProps) {
 
   if (isFarmHeader) {
     return (
-      <header className="px-4 pt-5 pb-5 sm:px-6 border-b border-black/[0.07]">
-        <div className="mx-auto max-w-3xl flex items-start justify-between gap-4">
+      <header className="px-4 pt-5 pb-5 sm:px-8 lg:px-11 border-b border-rule bg-paper">
+        <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             <Link href="/" className="shrink-0 hover:opacity-70 transition-opacity" aria-label="Explorações">
               <Logo size={28} />
             </Link>
             <div>
-              <h1 className="font-display text-[20px] font-[500] leading-none tracking-[-0.02em] text-irrigai-text">
+              <h1 className="font-serif text-[20px] font-medium leading-none tracking-[-0.02em] text-ink">
                 {crumbs[0].label}
               </h1>
               {farmDate && (
-                <p className="mt-1 text-[12px] text-irrigai-text-muted">{farmDate}</p>
+                <p className="mt-1 font-mono text-[11px] text-ink-3">{farmDate}</p>
               )}
             </div>
           </div>
@@ -55,13 +55,13 @@ export function AppHeader({ crumbs, right, farmDate }: AppHeaderProps) {
   const trail = crumbs ? crumbs.slice(parentIdx + 1) : [];
 
   return (
-    <header className="sticky top-0 z-20 border-b border-black/[0.07] bg-white/95 backdrop-blur-sm">
-      <div className="mx-auto flex h-12 max-w-3xl items-center justify-between gap-3 px-4 sm:px-6">
+    <header className="sticky top-0 z-20 border-b border-rule bg-paper/95 backdrop-blur-sm">
+      <div className="mx-auto flex h-12 max-w-[1280px] items-center justify-between gap-3 px-4 sm:px-8 lg:px-11">
         <div className="flex min-w-0 items-center gap-1">
           {parent?.href ? (
             <Link
               href={parent.href}
-              className="flex items-center gap-0.5 text-[13px] text-irrigai-text-muted hover:text-irrigai-text transition-colors shrink-0"
+              className="flex items-center gap-0.5 font-mono text-[12px] text-ink-3 hover:text-ink transition-colors shrink-0"
               aria-label={`Voltar para ${parent.label}`}
             >
               <ChevronLeft className="h-4 w-4" />
@@ -80,20 +80,20 @@ export function AppHeader({ crumbs, right, farmDate }: AppHeaderProps) {
             const isLast = i === trail.length - 1;
             return (
               <span key={i} className="flex items-center gap-1 min-w-0">
-                <span className="mx-0.5 text-black/20">/</span>
+                <span className="mx-0.5 font-mono text-[11px] text-ink-3/50">/</span>
                 {crumb.href ? (
                   <Link
                     href={crumb.href}
-                    className="text-[13px] text-irrigai-text-muted hover:text-irrigai-text transition-colors shrink-0"
+                    className="font-mono text-[12px] text-ink-3 hover:text-ink transition-colors shrink-0"
                   >
                     {crumb.label}
                   </Link>
                 ) : isLast ? (
-                  <span className="truncate text-[13px] font-medium text-irrigai-text max-w-[160px]">
+                  <span className="truncate font-mono text-[12px] font-medium text-ink max-w-[200px]">
                     {crumb.label}
                   </span>
                 ) : (
-                  <span className="text-[13px] text-irrigai-text-muted shrink-0">
+                  <span className="font-mono text-[12px] text-ink-3 shrink-0">
                     {crumb.label}
                   </span>
                 )}
