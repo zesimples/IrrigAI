@@ -94,7 +94,7 @@ export default function FarmDashboardPage({ params }: Props) {
   const noAction = data.sectors_summary.filter((s) => s.action !== "irrigate").length;
 
   return (
-    <div className="min-h-screen bg-paper pb-32 sm:pb-8">
+    <div className="min-h-screen bg-paper pb-20 sm:pb-8">
       <AppHeader
         crumbs={[{ label: data.farm.name }]}
         farmDate={editionSubline(data.date)}
@@ -151,19 +151,6 @@ export default function FarmDashboardPage({ params }: Props) {
           </button>
         </div>
       )}
-
-      {/* Sticky mobile CTA */}
-      <div className="fixed bottom-[56px] inset-x-0 z-20 px-4 pb-2 sm:hidden">
-        <button
-          onClick={generateAll}
-          disabled={generating}
-          aria-busy={generating}
-          className="w-full flex items-center justify-center gap-2.5 bg-ink text-paper rounded-xl py-3.5 text-[15px] font-semibold shadow-[0_10px_30px_rgba(42,37,32,0.25)] disabled:opacity-50 transition-opacity"
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-terra" />
-          {generating ? "A gerar plano…" : "Gerar plano de rega"}
-        </button>
-      </div>
 
       <BottomNav farmId={farmId} />
       <ChatButton farmId={farmId} />
