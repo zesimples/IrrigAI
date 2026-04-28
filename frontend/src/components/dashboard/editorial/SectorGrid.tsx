@@ -68,7 +68,7 @@ export function SectorGrid({ sectors, farmId }: SectorGridProps) {
     <section className="px-4 pt-5 pb-6 sm:px-8 lg:px-11">
       {/* Tab bar */}
       {cropTabs.length > 0 && (
-        <div className="flex items-baseline gap-7 mb-4 relative" role="tablist">
+        <div className="flex items-baseline gap-7 mb-4 relative overflow-x-auto pb-[1px]" role="tablist">
           {cropTabs.map((ct) => {
             const label = CROP_LABELS[ct] ?? ct;
             const count = sectors.filter((s) => s.crop_type === ct).length;
@@ -93,7 +93,7 @@ export function SectorGrid({ sectors, farmId }: SectorGridProps) {
               </button>
             );
           })}
-          <p className="ml-auto font-mono text-[11px] text-ink-3 tracking-[0.04em] absolute right-0 bottom-2">
+          <p className="ml-auto font-mono text-[11px] text-ink-3 tracking-[0.04em] absolute right-0 bottom-2 hidden sm:block">
             Ordenado por urgência ↓
           </p>
         </div>

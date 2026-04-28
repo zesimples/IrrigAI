@@ -214,7 +214,7 @@ export default function SectorDetailPage({ params }: Props) {
   ];
 
   return (
-    <div className="min-h-screen bg-paper pb-20 sm:pb-8">
+    <div className="min-h-screen bg-paper pb-32 sm:pb-8">
       <AppHeader
         crumbs={[
           { label: "Exploração", href: `/farms/${farmId}` },
@@ -266,7 +266,7 @@ export default function SectorDetailPage({ params }: Props) {
             </div>
           </div>
 
-          {/* Right: AI lede */}
+          {/* Right: AI lede — desktop only */}
           <aside className="hidden lg:block max-w-[480px] border-l border-rule-soft pl-8">
             <p className="font-mono text-[10px] tracking-[0.16em] uppercase text-terra mb-1.5">
               Recomendação da IA
@@ -289,25 +289,52 @@ export default function SectorDetailPage({ params }: Props) {
             </p>
           </aside>
         </div>
+
+        {/* AI lede — mobile/tablet (below sector ID row) */}
+        {rec && (
+          <div className="mt-4 pt-4 border-t border-rule-soft lg:hidden">
+            <p className="font-mono text-[10px] tracking-[0.16em] uppercase text-terra mb-1.5">
+              Recomendação da IA
+            </p>
+            <p
+              className="font-serif text-[17px] font-normal leading-[1.4] tracking-[-0.01em] text-ink"
+              style={{ textWrap: "balance" } as React.CSSProperties}
+            >
+              {aiLede.before}
+              {aiLede.emphasis && (
+                <em
+                  className={`font-instrument not-italic ${
+                    aiLede.emphasisColor === "terra" ? "text-terra" : "text-olive"
+                  }`}
+                >
+                  {aiLede.emphasis}
+                </em>
+              )}
+              <span className="text-ink-2">{aiLede.after}</span>
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Tabs */}
-      <div className="px-4 border-b border-rule sm:px-8 lg:px-11 flex gap-7">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            role="tab"
-            aria-selected={activeTab === t.id}
-            onClick={() => setActiveTab(t.id)}
-            className={`pt-3.5 pb-3 -mb-px border-b-2 font-serif tracking-[-0.01em] transition-colors ${
-              activeTab === t.id
-                ? "border-terra text-ink text-[17px] font-semibold"
-                : "border-transparent text-ink-3 text-[16px] font-normal hover:text-ink-2"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="border-b border-rule overflow-x-auto">
+        <div className="flex gap-6 px-4 sm:px-8 lg:px-11 min-w-max sm:min-w-0">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={activeTab === t.id}
+              onClick={() => setActiveTab(t.id)}
+              className={`whitespace-nowrap pt-3.5 pb-3 -mb-px border-b-2 font-serif tracking-[-0.01em] transition-colors ${
+                activeTab === t.id
+                  ? "border-terra text-ink text-[17px] font-semibold"
+                  : "border-transparent text-ink-3 text-[16px] font-normal hover:text-ink-2"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Monitorização tab ──────────────────────────────────────────────────── */}
@@ -641,6 +668,18 @@ export default function SectorDetailPage({ params }: Props) {
             await refetch();
           }}
         />
+      )}
+
+      {/* Sticky mobile CTA — only when action is irrigate */}
+      {rec?.action === "irrigate" && rec.irrigation_depth_mm != null && (
+        <div className="fixed bottom-[56px] inset-x-0 z-20 px-4 pb-2 sm:hidden">
+          <button
+            className="w-full flex items-center justify-center gap-2.5 bg-terra text-[#fef7f2] rounded-xl py-3.5 text-[15px] font-semibold shadow-[0_8px_22px_rgba(184,74,42,0.3)]"
+            onClick={() => setShowOverrideModal(true)}
+          >
+            Iniciar rega — {rec.irrigation_depth_mm.toFixed(0)} mm
+          </button>
+        </div>
       )}
 
       <BottomNav farmId={farmId} />

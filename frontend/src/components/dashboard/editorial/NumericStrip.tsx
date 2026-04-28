@@ -15,7 +15,8 @@ export function NumericStrip({ totalSectors, toIrrigate, noAction, forecastRain4
   ];
 
   return (
-    <div className="flex border-t border-b border-rule-soft mt-5">
+    <div className="overflow-x-auto border-t border-b border-rule-soft mt-5">
+      <div className="flex min-w-[480px] sm:min-w-0">
       {cells.map((c, i) => (
         <div
           key={c.label}
@@ -27,6 +28,7 @@ export function NumericStrip({ totalSectors, toIrrigate, noAction, forecastRain4
           </p>
         </div>
       ))}
+      </div>
     </div>
   );
 }

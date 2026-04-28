@@ -15,7 +15,7 @@ export function BottomNav({ farmId }: BottomNavProps) {
   const isIrrigation = path.includes("/irrigation");
 
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-black/[0.07] bg-white/95 backdrop-blur-sm sm:hidden">
+    <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-rule bg-paper/95 backdrop-blur-sm sm:hidden">
       <div className="flex justify-around py-2.5 pb-safe">
         <NavItem
           href={`/farms/${farmId}`}
@@ -82,7 +82,7 @@ function NavItem({
     <Link
       href={href}
       className={`flex flex-col items-center gap-0.5 px-4 py-0.5 text-[10px] transition-colors ${
-        active ? "text-irrigai-text" : "text-irrigai-text-hint hover:text-irrigai-text-muted"
+        active ? "text-ink font-medium" : "text-ink-3 hover:text-ink-2"
       }`}
     >
       <span className="w-4 h-4">{icon}</span>
