@@ -514,9 +514,10 @@ export default function SectorDetailPage({ params }: Props) {
                 </div>
               </SidebarCard>
 
-              {/* Sonda */}
+              {/* Sonda — hidden on mobile (probe card is already in main column) */}
               {firstProbe && (
                 <SidebarCard
+                  className="hidden sm:block"
                   title="Sonda"
                   action={
                     <Link
