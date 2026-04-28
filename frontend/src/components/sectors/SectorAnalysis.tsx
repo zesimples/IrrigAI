@@ -174,7 +174,7 @@ function AssistantResult({
       {/* Top accent bar */}
       <div className="h-[3px] bg-gradient-to-r from-olive/70 via-olive/40 to-transparent" />
 
-      <div className="px-7 pt-5 pb-6">
+      <div className="px-5 pt-5 pb-6 sm:px-7">
         {/* Header */}
         <header className="flex items-start justify-between mb-5 gap-4 flex-wrap">
           <div>
@@ -195,22 +195,33 @@ function AssistantResult({
         {bullets.length > 0 ? (
           <ul className="list-none m-0 p-0 flex flex-col divide-y divide-olive/10">
             {bullets.map((b, i) => (
-              <li
-                key={i}
-                className="grid items-start gap-4 py-3.5 first:pt-0 last:pb-0"
-                style={{ gridTemplateColumns: "8px 152px 1fr" }}
-              >
-                <span
-                  className={`h-2 w-2 rounded-full mt-[4px] shrink-0 ${TONE_DOT[b.tone]}`}
-                />
-                {b.key ? (
-                  <span className="font-serif text-[15px] font-semibold text-ink tracking-[-0.01em] leading-snug">
-                    {b.key}
-                  </span>
-                ) : (
-                  <span />
-                )}
-                <span className="text-[14px] leading-[1.6] text-ink-2">{b.value}</span>
+              <li key={i} className="py-3.5 first:pt-0 last:pb-0">
+                {/* Mobile: stacked layout */}
+                <div className="flex items-center gap-2 mb-1 sm:hidden">
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${TONE_DOT[b.tone]}`} />
+                  {b.key && (
+                    <span className="font-serif text-[14px] font-semibold text-ink tracking-[-0.01em]">
+                      {b.key}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[13.5px] leading-[1.6] text-ink-2 sm:hidden">{b.value}</p>
+
+                {/* Desktop: 3-column grid */}
+                <div
+                  className="hidden sm:grid items-start gap-4"
+                  style={{ gridTemplateColumns: "8px 152px 1fr" }}
+                >
+                  <span className={`h-2 w-2 rounded-full mt-[4px] shrink-0 ${TONE_DOT[b.tone]}`} />
+                  {b.key ? (
+                    <span className="font-serif text-[15px] font-semibold text-ink tracking-[-0.01em] leading-snug">
+                      {b.key}
+                    </span>
+                  ) : (
+                    <span />
+                  )}
+                  <span className="text-[14px] leading-[1.6] text-ink-2">{b.value}</span>
+                </div>
               </li>
             ))}
           </ul>
