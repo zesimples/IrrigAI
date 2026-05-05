@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import Link from "next/link";
 import { useFarmDashboard } from "@/hooks/useFarmDashboard";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { BottomNav } from "@/components/ui/BottomNav";
@@ -134,15 +135,38 @@ export default function FarmDashboardPage({ params }: Props) {
         crumbs={[{ label: data.farm.name }]}
         farmDate={editionSubline(data.date)}
         right={
-          <button
-            onClick={generateAll}
-            disabled={generating}
-            aria-busy={generating}
-            className="inline-flex items-center gap-2 rounded-full border border-rule bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:opacity-85 disabled:opacity-50 transition-opacity"
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-terra" />
-            {generating ? "A gerar…" : "Gerar plano de rega"}
-          </button>
+          <>
+            {/* Alerts link — desktop only (mobile has BottomNav) */}
+            {(() => {
+              const totalAlerts =
+                (data.active_alerts_count.critical ?? 0) +
+                (data.active_alerts_count.warning ?? 0) +
+                (data.active_alerts_count.info ?? 0);
+              const hasCritical = data.active_alerts_count.critical > 0;
+              return (
+                <Link
+                  href={`/farms/${farmId}/alerts`}
+                  className="hidden sm:inline-flex items-center gap-2 rounded-full border border-rule bg-paper px-4 py-2 text-[13px] font-medium text-ink-2 hover:bg-paper-in transition-colors"
+                >
+                  Avisos
+                  {totalAlerts > 0 && (
+                    <span className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-medium text-paper ${hasCritical ? "bg-terra" : "bg-[#c9a34a]"}`}>
+                      {totalAlerts}
+                    </span>
+                  )}
+                </Link>
+              );
+            })()}
+            <button
+              onClick={generateAll}
+              disabled={generating}
+              aria-busy={generating}
+              className="inline-flex items-center gap-2 rounded-full border border-rule bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:opacity-85 disabled:opacity-50 transition-opacity"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-terra" />
+              {generating ? "A gerar…" : "Gerar plano de rega"}
+            </button>
+          </>
         }
       />
 
