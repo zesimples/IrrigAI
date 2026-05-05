@@ -59,6 +59,7 @@ export function EditorialSectorCard({ sector, farmId }: EditorialSectorCardProps
   const confidence = toConfidence(sector.confidence_level, sector.probe_health);
   const moisture = toMoisture(sector.depletion_pct, sector.rootzone_status);
   const regar = verdict === "regar";
+  const noProbe = sector.probe_health === "no_probes" || sector.probe_health === "no_readings";
   const stageLabel = STAGE_LABELS[sector.current_stage ?? ""] ?? sector.current_stage ?? "—";
   const id = sectorId(sector.sector_name);
   const suffix = sectorSuffix(sector.sector_name, "");
@@ -66,7 +67,7 @@ export function EditorialSectorCard({ sector, farmId }: EditorialSectorCardProps
   return (
     <Link
       href={`/farms/${farmId}/sectors/${sector.sector_id}`}
-      className={`relative block min-h-[170px] border-r border-b border-rule p-[18px_20px_16px] transition-colors hover:bg-paper-in ${regar ? "bg-terra-bg" : "bg-card"}`}
+      className={`relative block min-h-[170px] border-r border-b border-rule p-[18px_20px_16px] transition-colors hover:bg-paper-in ${regar ? "bg-terra-bg" : "bg-card"} ${noProbe ? "opacity-60 grayscale-[30%]" : ""}`}
     >
       {/* Left accent bar for "regar" */}
       {regar && <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-terra rounded-l" />}
