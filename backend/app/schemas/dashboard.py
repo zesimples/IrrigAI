@@ -31,6 +31,7 @@ class SectorSummary(BaseModel):
     last_irrigated: date | None = None
     last_irrigated_mm: float | None = None
     recommendation_generated_at: datetime | None = None
+    source_confidence: str | None = None   # "fresh" | "stale" | "forecast_only" | "no_probe"
 
 
 class AlertCounts(BaseModel):
@@ -45,6 +46,16 @@ class FarmOut(BaseModel):
     region: str | None = None
 
 
+class SyncStatusEntry(BaseModel):
+    provider: str
+    last_success_at: datetime | None = None
+    last_error_at: datetime | None = None
+    last_error_msg: str | None = None
+    last_latency_ms: int | None = None
+    last_records_inserted: int = 0
+    consecutive_failures: int = 0
+
+
 class DashboardResponse(BaseModel):
     farm: FarmOut
     date: date
@@ -52,3 +63,4 @@ class DashboardResponse(BaseModel):
     sectors_summary: list[SectorSummary]
     active_alerts_count: AlertCounts
     missing_data_prompts: list[str]
+    sync_status: list[SyncStatusEntry] = []

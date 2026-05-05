@@ -25,6 +25,15 @@ function toConfidence(level: string | null, probeHealth: string): Confidence {
   return "sem-sonda";
 }
 
+function dataQualityLabel(sourceConfidence: string | null, probeHealth: string): string {
+  if (sourceConfidence === "no_probe" || probeHealth === "no_probes") return "Sem sondas";
+  if (sourceConfidence === "forecast_only") return "Só previsão";
+  if (sourceConfidence === "stale") return "Dados atrasados";
+  if (sourceConfidence === "fresh") return "Dados actuais";
+  // Fall back to generic confidence label when source_confidence is absent (old recs)
+  return "—";
+}
+
 function toMoisture(depletionPct: number | null, rootzoneStatus: string | null): number {
   if (depletionPct != null) return Math.max(0, Math.min(1, 1 - depletionPct / 100));
   switch (rootzoneStatus) {
@@ -101,7 +110,9 @@ export function EditorialSectorCard({ sector, farmId }: EditorialSectorCardProps
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <ConfidenceDots level={confidence} />
-          <span className="font-mono text-[10px] text-ink-3">{confidenceLabel(confidence)}</span>
+          <span className="font-mono text-[10px] text-ink-3">
+            {dataQualityLabel(sector.source_confidence, sector.probe_health)}
+          </span>
         </div>
       </footer>
     </Link>

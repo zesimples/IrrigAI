@@ -33,6 +33,7 @@ def _make_inputs_snapshot(eng: EngineRecommendation, target_date: date) -> dict:
         "forecast_rain_next_48h": eng.forecast_rain_next_48h,
         "defaults_used": eng.defaults_used,
         "missing_config": eng.missing_config,
+        "source_confidence": eng.confidence.source_confidence,
     }
     if eng.stress_projection is not None:
         snap["stress_projection"] = eng.stress_projection

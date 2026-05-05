@@ -14,8 +14,8 @@ from app.adapters.mock_probe import MockProbeProvider
 from app.adapters.mock_weather import MockWeatherProvider
 from app.config import Settings
 
-# Cache adapters by (username, weather_device_id) so the same account reuses one
-# adapter (and its cached JWT token) across calls.
+# Cache adapters by a full credential tuple so two farms with different client_ids
+# or project scopes never share an adapter instance (and its JWT token).
 _irriwatch_instance: "IrriWatchAdapter | None" = None  # type: ignore[name-defined]
 _myirrigation_cache: "dict[tuple, MyIrrigationAdapter]" = {}  # type: ignore[name-defined]
 
@@ -67,7 +67,13 @@ def _get_myirrigation(
             "MYIRRIGATION_PASSWORD in .env or via FarmCredentials for the farm."
         )
 
-    cache_key = (resolved_username, resolved_device_id)
+    cache_key = (
+        config.MYIRRIGATION_BASE_URL,
+        resolved_username,
+        resolved_client_id,
+        resolved_project_id,
+        resolved_device_id,
+    )
     if cache_key not in _myirrigation_cache:
         _myirrigation_cache[cache_key] = MyIrrigationAdapter(
             base_url=config.MYIRRIGATION_BASE_URL,

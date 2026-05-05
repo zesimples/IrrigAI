@@ -314,12 +314,24 @@ export interface SectorSummary {
   last_irrigated_mm: number | null;
   rootzone_status: string | null;
   depletion_pct: number | null;
+  /** "fresh" | "stale" | "forecast_only" | "no_probe" — null when no recommendation yet */
+  source_confidence: string | null;
 }
 
 export interface DashboardFarm {
   id: string;
   name: string;
   region: string | null;
+}
+
+export interface ProviderSyncStatus {
+  provider: string;
+  last_success_at: string | null;
+  last_error_at: string | null;
+  last_error_msg: string | null;
+  last_latency_ms: number | null;
+  last_records_inserted: number;
+  consecutive_failures: number;
 }
 
 export interface DashboardResponse {
@@ -329,6 +341,7 @@ export interface DashboardResponse {
   sectors_summary: SectorSummary[];
   active_alerts_count: AlertCounts;
   missing_data_prompts: string[];
+  sync_status: ProviderSyncStatus[];
 }
 
 // ── Crop Profile ──────────────────────────────────────────────────────────────

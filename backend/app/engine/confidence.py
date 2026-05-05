@@ -133,7 +133,17 @@ def score(
     else:
         level = "medium"
 
-    return ConfidenceResult(score=conf, level=level, penalties=penalties, warnings=warnings)
+    # Structured data-source label for AI explanations and UI badges
+    if not rz.has_data:
+        src_conf = "no_probe"
+    elif rz.hours_since_any_reading is not None and rz.hours_since_any_reading > 24:
+        src_conf = "forecast_only"
+    elif rz.hours_since_any_reading is not None and rz.hours_since_any_reading > PROBE_STALE_H:
+        src_conf = "stale"
+    else:
+        src_conf = "fresh"
+
+    return ConfidenceResult(score=conf, level=level, penalties=penalties, warnings=warnings, source_confidence=src_conf)
 
 
 def _pen(

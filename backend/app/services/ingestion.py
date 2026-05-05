@@ -15,10 +15,13 @@ Supported units:
 """
 
 import logging
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import func as sql_func
 from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -29,9 +32,35 @@ from app.adapters.dto import (
     WeatherForecastDTO,
     WeatherObservationDTO,
 )
-from app.models import Probe, ProbeDepth, ProbeReading, WeatherForecast, WeatherObservation
+from app.models import Probe, ProbeDepth, ProbeReading, ProviderSyncLog, WeatherForecast, WeatherObservation
 
 logger = logging.getLogger(__name__)
+
+# Adaptive lookback — cap gap-fill at 7 days to avoid unbounded API requests
+MAX_ADAPTIVE_LOOKBACK_HOURS = 168
+
+
+def _adaptive_since(last_ts: datetime | None, default_lookback_hours: int, now: datetime) -> datetime:
+    """Return the fetch window start, extending back to cover any gap.
+
+    If the last known record is within the default window, return the normal
+    default_since.  If a gap is detected (e.g. after a worker restart), extend
+    back to just before the last known record, capped at MAX_ADAPTIVE_LOOKBACK_HOURS.
+    """
+    default_since = now - timedelta(hours=default_lookback_hours)
+    if last_ts is None:
+        return default_since
+    ts = last_ts if last_ts.tzinfo else last_ts.replace(tzinfo=UTC)
+    if ts >= default_since:
+        return default_since
+    gap_hours = (now - ts).total_seconds() / 3600
+    adaptive = max(ts - timedelta(minutes=5), now - timedelta(hours=MAX_ADAPTIVE_LOOKBACK_HOURS))
+    logger.info(
+        "Adaptive lookback: last record %s is %.1fh ago — extending window to %s",
+        ts.isoformat(), gap_hours, adaptive.isoformat(),
+    )
+    return adaptive
+
 
 # Quality thresholds — VWC
 VWC_MIN = 0.0
@@ -300,6 +329,65 @@ async def ingest_weather_forecasts(
 
 
 # ---------------------------------------------------------------------------
+# Sync-log upsert
+# ---------------------------------------------------------------------------
+
+async def _upsert_sync_log(
+    db: AsyncSession,
+    farm_id: str,
+    provider: str,
+    error_msg: str | None,
+    latency_ms: int,
+    records_inserted: int,
+) -> None:
+    """Upsert a provider_sync_log row for the given farm+provider.
+
+    On success (error_msg is None): update last_success_at and reset consecutive_failures.
+    On failure: update last_error_at/msg and increment consecutive_failures.
+    """
+    now = datetime.now(UTC)
+    if error_msg is None:
+        update_fields = {
+            "last_success_at": now,
+            "last_error_msg": None,
+            "last_latency_ms": latency_ms,
+            "last_records_inserted": records_inserted,
+            "consecutive_failures": 0,
+            "updated_at": now,
+        }
+    else:
+        update_fields = {
+            "last_error_at": now,
+            "last_error_msg": error_msg[:500],
+            "last_latency_ms": latency_ms,
+            "last_records_inserted": records_inserted,
+            "consecutive_failures": ProviderSyncLog.consecutive_failures + 1,
+            "updated_at": now,
+        }
+
+    stmt = (
+        pg_insert(ProviderSyncLog)
+        .values(
+            id=str(uuid.uuid4()),
+            farm_id=farm_id,
+            provider=provider,
+            last_success_at=now if error_msg is None else None,
+            last_error_at=now if error_msg is not None else None,
+            last_error_msg=error_msg[:500] if error_msg else None,
+            last_latency_ms=latency_ms,
+            last_records_inserted=records_inserted,
+            consecutive_failures=0 if error_msg is None else 1,
+            updated_at=now,
+        )
+        .on_conflict_do_update(
+            constraint="uq_provider_sync_log_farm_provider",
+            set_=update_fields,
+        )
+    )
+    await db.execute(stmt)
+
+
+# ---------------------------------------------------------------------------
 # Farm-level ingestion wrapper (used by scheduler)
 # ---------------------------------------------------------------------------
 
@@ -327,28 +415,46 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
     probe_provider = get_probe_provider(settings, farm=farm)
     weather_provider = get_weather_provider(settings, farm=farm)
     now = datetime.now(UTC)
-    since = now - timedelta(hours=lookback_hours)
 
+    # ── Probe ingestion ───────────────────────────────────────────────────────
     probe_total = 0
-    plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
-    for plot in plots_result.scalars().all():
-        sectors_result = await db.execute(select(Sector).where(Sector.plot_id == plot.id))
-        for sector in sectors_result.scalars().all():
-            probes_result = await db.execute(select(Probe).where(Probe.sector_id == sector.id))
-            for probe in probes_result.scalars().all():
-                try:
-                    summary = await ingest_probe_readings(
-                        db, probe_provider, probe.external_id, since, now
-                    )
-                    probe_total += summary.inserted
-                except Exception:
-                    logger.exception("Ingestion failed for probe %s", probe.external_id)
+    probe_error: str | None = None
+    probe_t0 = time.monotonic()
+    try:
+        plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+        for plot in plots_result.scalars().all():
+            sectors_result = await db.execute(select(Sector).where(Sector.plot_id == plot.id))
+            for sector in sectors_result.scalars().all():
+                probes_result = await db.execute(select(Probe).where(Probe.sector_id == sector.id))
+                for probe in probes_result.scalars().all():
+                    probe_since = _adaptive_since(probe.last_reading_at, lookback_hours, now)
+                    try:
+                        summary = await ingest_probe_readings(
+                            db, probe_provider, probe.external_id, probe_since, now
+                        )
+                        probe_total += summary.inserted
+                    except Exception as exc:
+                        probe_error = str(exc)
+                        logger.exception("Ingestion failed for probe %s", probe.external_id)
+    except Exception as exc:
+        probe_error = str(exc)
+        logger.exception("Probe ingestion batch failed for farm %s", farm_id)
+    probe_latency_ms = int((time.monotonic() - probe_t0) * 1000)
 
+    # ── Weather ingestion ─────────────────────────────────────────────────────
     weather_total = 0
+    weather_error: str | None = None
+    weather_t0 = time.monotonic()
     if farm.location_lat and farm.location_lon:
         try:
-            # Weather data is daily — look back 48 h so we always capture the latest daily record
-            weather_since = now - timedelta(hours=48)
+            latest_obs_result = await db.execute(
+                select(sql_func.max(WeatherObservation.timestamp)).where(
+                    WeatherObservation.farm_id == farm_id
+                )
+            )
+            latest_obs_ts = latest_obs_result.scalar_one_or_none()
+            # Weather is daily; default 48h window ensures the current day is always captured
+            weather_since = _adaptive_since(latest_obs_ts, 48, now)
             weather_total = await ingest_weather_observations(
                 db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
                 weather_since, now, source=settings.WEATHER_PROVIDER,
@@ -357,8 +463,23 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
                 db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
                 days=7, source=settings.WEATHER_PROVIDER,
             )
-        except Exception:
+        except Exception as exc:
+            weather_error = str(exc)
             logger.exception("Weather ingestion failed for farm %s", farm_id)
+    weather_latency_ms = int((time.monotonic() - weather_t0) * 1000)
+
+    # ── Sync log upsert ───────────────────────────────────────────────────────
+    await _upsert_sync_log(
+        db, farm_id,
+        f"{settings.PROBE_PROVIDER}:probes",
+        probe_error, probe_latency_ms, probe_total,
+    )
+    if farm.location_lat and farm.location_lon:
+        await _upsert_sync_log(
+            db, farm_id,
+            f"{settings.WEATHER_PROVIDER}:weather",
+            weather_error, weather_latency_ms, weather_total,
+        )
 
     await db.commit()
     return {"probes_inserted": probe_total, "weather_inserted": weather_total}

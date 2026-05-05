@@ -150,6 +150,12 @@ class ConfidenceResult:
     level: str              # "high", "medium", "low"
     penalties: list[tuple[str, float]]   # (reason, penalty_amount)
     warnings: list[str]
+    # Structured data-source label — used by AI explanation layer and UI badges
+    # "fresh"        → probe reading < 6 h old
+    # "stale"        → probe reading 6–24 h old
+    # "forecast_only"→ probe exists but last reading > 24 h ago (or never)
+    # "no_probe"     → no probe configured for this sector
+    source_confidence: str = "fresh"
 
 
 @dataclass

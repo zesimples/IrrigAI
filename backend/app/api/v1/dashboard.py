@@ -19,6 +19,7 @@ from app.models import (
     IrrigationEvent,
     Plot,
     Probe,
+    ProviderSyncLog,
     Recommendation,
     Sector,
     WeatherForecast,
@@ -29,6 +30,7 @@ from app.schemas.dashboard import (
     DashboardResponse,
     FarmOut,
     SectorSummary,
+    SyncStatusEntry,
     WeatherToday,
 )
 
@@ -216,6 +218,10 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
             last_irrigated=last_event.start_time.date() if last_event else None,
             last_irrigated_mm=last_event.applied_mm if last_event else None,
             recommendation_generated_at=latest_rec.generated_at if latest_rec else None,
+            source_confidence=(
+                (latest_rec.inputs_snapshot or {}).get("source_confidence")
+                if latest_rec else None
+            ),
         ))
 
         # Missing data prompts (Portuguese, shown to user)
@@ -230,6 +236,25 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
                 f"Defina-o para melhorar as recomendações."
             )
 
+    # --- Provider sync status ---
+    sync_log_rows = (
+        await db.execute(
+            select(ProviderSyncLog).where(ProviderSyncLog.farm_id == farm_id)
+        )
+    ).scalars().all()
+    sync_status = [
+        SyncStatusEntry(
+            provider=row.provider,
+            last_success_at=row.last_success_at,
+            last_error_at=row.last_error_at,
+            last_error_msg=row.last_error_msg,
+            last_latency_ms=row.last_latency_ms,
+            last_records_inserted=row.last_records_inserted,
+            consecutive_failures=row.consecutive_failures,
+        )
+        for row in sync_log_rows
+    ]
+
     return DashboardResponse(
         farm=FarmOut(id=farm.id, name=farm.name, region=farm.region),
         date=today,
@@ -241,4 +266,5 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
             info=all_alerts_info,
         ),
         missing_data_prompts=missing_prompts,
+        sync_status=sync_status,
     )

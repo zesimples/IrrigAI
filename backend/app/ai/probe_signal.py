@@ -114,6 +114,10 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         fc_threshold = (field_capacity * 0.90) if field_capacity else 0.32
         flatline_near_fc = latest_vwc >= fc_threshold
 
+        # Is this sensor depth beyond the configured root zone?
+        # Roots don't consume at this depth → stable VWC is expected, not a fault.
+        beyond_roots = root_depth_cm is not None and pd.depth_cm > root_depth_cm
+
         # Slope over full window
         first_ts, first_v = vwc_series[0]
         last_ts, last_v = vwc_series[-1]
@@ -162,10 +166,13 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
             "causa_sinal_estavel": (
                 "solo próximo da capacidade de campo, sem consumo nem drenagem activa"
                 if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4 and flatline_near_fc
-                else "humidade estável em gama baixa ou média, verificar sensor"
+                else "profundidade além da zona radicular activa — sem consumo radicular nem drenagem, comportamento normal"
+                if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4 and beyond_roots
+                else "humidade estável sem consumo nem recarga activos — equilíbrio hídrico"
                 if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4
                 else None
             ),
+            "profundidade_alem_raizes": beyond_roots if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4 else None,
             "variabilidade_sinal": (
                 "muito baixa (sinal plano)" if vwc_std < _FLATLINE_STD
                 else "baixa" if vwc_std < 0.01
@@ -218,6 +225,7 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         "sector_id": probe.sector_id,
         "sector_name": sector_name,
         "soil_texture": soil_texture,
+        "root_depth_cm": root_depth_cm,
         "analysis_window_hours": _ANALYSIS_HOURS,
         "n_irrigation_events_in_window": len(irrigation_events),
         "last_irrigation_applied_mm": last_event.applied_mm if last_event else None,

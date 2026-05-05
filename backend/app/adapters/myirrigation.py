@@ -37,7 +37,7 @@ ESPORÃO OLIVAL (project 1044) devices:
 .env settings:
     PROBE_PROVIDER=myirrigation
     WEATHER_PROVIDER=myirrigation
-    MYIRRIGATION_BASE_URL=http://api.myirrigation.eu/api/v1
+    MYIRRIGATION_BASE_URL=https://api.myirrigation.eu/api/v1
     MYIRRIGATION_USERNAME=esporao_api
     MYIRRIGATION_PASSWORD=esporao_api
     MYIRRIGATION_CLIENT_ID=7JTTP4XGVZ9S1M7PEABD
@@ -46,7 +46,9 @@ ESPORÃO OLIVAL (project 1044) devices:
     MYIRRIGATION_WEATHER_DEVICE_ID=1583
 """
 
+import asyncio
 import logging
+import random
 import re
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
@@ -74,6 +76,40 @@ _DEFAULT_TOKEN_TTL_SECONDS = 86400  # 24 h
 
 # Date format for POST form fields
 _DATE_FMT = "%Y-%m-%d %H:%M:%S"
+
+# Retry policy for transient HTTP / network errors
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 1.0  # seconds; doubles each attempt
+_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+
+async def _with_backoff(coro_factory, label: str):
+    """Run coro_factory() with exponential back-off on transient errors.
+
+    Retries on HTTP 5xx / 429 and network-level failures. Does NOT retry
+    on 4xx client errors (those indicate a logic / auth issue, not flakiness).
+    Jitter is applied so parallel workers do not storm the API together.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return await coro_factory()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in _RETRY_STATUSES:
+                raise
+            last_exc = exc
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+
+        if attempt < _MAX_RETRIES - 1:
+            wait = _RETRY_BACKOFF_BASE * (2 ** attempt) * (0.5 + random.random() * 0.5)
+            logger.warning(
+                "MyIrrigation: %s transient error (attempt %d/%d), retrying in %.1fs — %s",
+                label, attempt + 1, _MAX_RETRIES, wait, last_exc,
+            )
+            await asyncio.sleep(wait)
+
+    raise last_exc  # type: ignore[misc]
 
 
 class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
@@ -182,26 +218,30 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
     # ------------------------------------------------------------------
 
     async def _get_json(self, path: str, params: dict | None = None) -> list | dict:
-        """GET with auth, single retry on 401/403."""
+        """GET with auth, re-auth on 401/403, backoff on 5xx / network errors."""
         await self.authenticate()
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                f"{self._base_url}{path}",
-                params=params,
-                headers=self._auth_headers(),
-            )
-            if resp.status_code in (401, 403):
-                logger.warning("MyIrrigation: %s on GET %s — re-authenticating", resp.status_code, path)
-                self._token = None
-                self._token_expires_at = None
-                await self.authenticate()
+
+        async def _do():
+            async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.get(
                     f"{self._base_url}{path}",
                     params=params,
                     headers=self._auth_headers(),
                 )
-            resp.raise_for_status()
-            return resp.json()
+                if resp.status_code in (401, 403):
+                    logger.warning("MyIrrigation: %s on GET %s — re-authenticating", resp.status_code, path)
+                    self._token = None
+                    self._token_expires_at = None
+                    await self.authenticate()
+                    resp = await client.get(
+                        f"{self._base_url}{path}",
+                        params=params,
+                        headers=self._auth_headers(),
+                    )
+                resp.raise_for_status()
+                return resp.json()
+
+        return await _with_backoff(_do, f"GET {path}")
 
     async def _post_form_json(
         self,
@@ -209,28 +249,32 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
         form_data: dict,
         params: dict | None = None,
     ) -> list | dict:
-        """POST with form-encoded body and auth, single retry on 401/403."""
+        """POST with form-encoded body and auth, re-auth on 401/403, backoff on 5xx / network errors."""
         await self.authenticate()
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{self._base_url}{path}",
-                data=form_data,
-                params=params,
-                headers=self._auth_headers(),
-            )
-            if resp.status_code in (401, 403):
-                logger.warning("MyIrrigation: %s on POST %s — re-authenticating", resp.status_code, path)
-                self._token = None
-                self._token_expires_at = None
-                await self.authenticate()
+
+        async def _do():
+            async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
                     f"{self._base_url}{path}",
                     data=form_data,
                     params=params,
                     headers=self._auth_headers(),
                 )
-            resp.raise_for_status()
-            return resp.json()
+                if resp.status_code in (401, 403):
+                    logger.warning("MyIrrigation: %s on POST %s — re-authenticating", resp.status_code, path)
+                    self._token = None
+                    self._token_expires_at = None
+                    await self.authenticate()
+                    resp = await client.post(
+                        f"{self._base_url}{path}",
+                        data=form_data,
+                        params=params,
+                        headers=self._auth_headers(),
+                    )
+                resp.raise_for_status()
+                return resp.json()
+
+        return await _with_backoff(_do, f"POST {path}")
 
     # ------------------------------------------------------------------
     # ProbeDataProvider

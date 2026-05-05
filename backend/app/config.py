@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     IRRIWATCH_COMPANY_UUID: str = ""   # Company UUID (see /api/v1/company after login)
 
     # MyIrrigation — used when PROBE_PROVIDER=myirrigation or WEATHER_PROVIDER=myirrigation
-    MYIRRIGATION_BASE_URL: str = "http://api.myirrigation.eu/api/v1"
+    MYIRRIGATION_BASE_URL: str = "https://api.myirrigation.eu/api/v1"
     MYIRRIGATION_USERNAME: str = ""
     MYIRRIGATION_PASSWORD: str = ""
     MYIRRIGATION_CLIENT_ID: str = ""

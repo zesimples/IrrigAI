@@ -21,6 +21,7 @@ from app.models.irrigation_event import IrrigationEvent
 from app.models.alert import Alert
 from app.models.audit_log import AuditLog
 from app.models.sector_override import SectorOverride
+from app.models.provider_sync_log import ProviderSyncLog
 
 __all__ = [
     "CropProfileTemplate",
@@ -43,4 +44,5 @@ __all__ = [
     "Alert",
     "AuditLog",
     "SectorOverride",
+    "ProviderSyncLog",
 ]

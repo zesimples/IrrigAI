@@ -107,6 +107,7 @@ export default function SectorDetailPage({ params }: Props) {
   const [showOverrideModal, setShowOverrideModal] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [probeOpenTrigger, setProbeOpenTrigger] = useState(0);
+  const [improveCardDismissed, setImproveCardDismissed] = useState(false);
   const probeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -560,10 +561,11 @@ export default function SectorDetailPage({ params }: Props) {
               )}
 
               {/* Improve reliability */}
-              {showImproveCard && (
+              {showImproveCard && !improveCardDismissed && (
                 <ImproveReliabilityCard
                   onDefineSoil={() => setActiveTab("solo")}
                   onConfirmStage={() => setActiveTab("fenologia")}
+                  onDismiss={() => setImproveCardDismissed(true)}
                 />
               )}
 

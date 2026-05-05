@@ -1,12 +1,22 @@
 interface Props {
   onDefineSoil: () => void;
   onConfirmStage: () => void;
+  onDismiss?: () => void;
 }
 
-export function ImproveReliabilityCard({ onDefineSoil, onConfirmStage }: Props) {
+export function ImproveReliabilityCard({ onDefineSoil, onConfirmStage, onDismiss }: Props) {
   return (
     <div className="relative overflow-hidden bg-terra-bg border border-rule-soft rounded-lg p-[16px_18px]">
       <span className="absolute inset-y-0 left-0 w-[3px] bg-terra rounded-l" />
+      {onDismiss && (
+        <button
+          onClick={onDismiss}
+          aria-label="Fechar"
+          className="absolute top-2.5 right-2.5 text-terra/50 hover:text-terra transition-colors leading-none text-[16px]"
+        >
+          ×
+        </button>
+      )}
       <p className="font-mono text-[10px] tracking-[0.14em] uppercase text-terra mb-2">
         Melhorar fiabilidade
       </p>

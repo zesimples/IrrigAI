@@ -6,6 +6,7 @@ import { subHours } from "date-fns";
 import { ChevronDown, ExternalLink, ScanLine, RefreshCw } from "lucide-react";
 import { useProbeReadings } from "@/hooks/useProbeReadings";
 import { ProbeChart } from "@/components/probes/ProbeChart";
+import { ProbeSumChart } from "@/components/probes/ProbeSumChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { sectorsApi, probesApi } from "@/lib/api";
 import type { ReferenceLines } from "@/types";
@@ -45,6 +46,8 @@ export function ProbeReadingsInline({
 
   const [refLines, setRefLines] = useState<ReferenceLines | null>(null);
 
+  const [chartView, setChartView] = useState<"depths" | "sum">("depths");
+
   const [editing, setEditing] = useState(false);
   const [ccInput, setCcInput] = useState("");
   const [pmpInput, setPmpInput] = useState("");
@@ -61,9 +64,14 @@ export function ProbeReadingsInline({
 
   const activeRefLines = refLines ?? data?.reference_lines ?? { field_capacity: null, wilting_point: null };
 
+  const nDepths = data?.depths.length ?? 1;
+  const editScale = chartView === "sum" ? nDepths : 1;
+
   function startEdit() {
-    setCcInput(activeRefLines.field_capacity != null ? (activeRefLines.field_capacity * 100).toFixed(1) : "");
-    setPmpInput(activeRefLines.wilting_point != null ? (activeRefLines.wilting_point * 100).toFixed(1) : "");
+    const fc = activeRefLines.field_capacity;
+    const wp = activeRefLines.wilting_point;
+    setCcInput(fc != null ? (fc * 100 * editScale).toFixed(1) : "");
+    setPmpInput(wp != null ? (wp * 100 * editScale).toFixed(1) : "");
     setSaved(false);
     setEditing(true);
   }
@@ -74,11 +82,13 @@ export function ProbeReadingsInline({
     if (isNaN(cc) || isNaN(pmp) || cc <= 0 || pmp <= 0 || pmp >= cc) return;
     setSaving(true);
     try {
+      const fcPerDepth = cc / 100 / editScale;
+      const wpPerDepth = pmp / 100 / editScale;
       await sectorsApi.updateCropProfile(sectorId, {
-        field_capacity: cc / 100,
-        wilting_point: pmp / 100,
+        field_capacity: fcPerDepth,
+        wilting_point: wpPerDepth,
       });
-      setRefLines({ field_capacity: cc / 100, wilting_point: pmp / 100 });
+      setRefLines({ field_capacity: fcPerDepth, wilting_point: wpPerDepth });
       setSaved(true);
       setEditing(false);
       setTimeout(() => setSaved(false), 2500);
@@ -150,9 +160,33 @@ export function ProbeReadingsInline({
         <div className="px-5 py-4 space-y-4 bg-paper">
           {/* Controls row */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
-              Humidade do solo (VWC)
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+                Humidade do solo (VWC)
+              </span>
+              <div className="flex rounded-md border border-rule-soft overflow-hidden">
+                <button
+                  onClick={() => setChartView("depths")}
+                  className={`px-2.5 py-1 font-mono text-[10px] tracking-[0.06em] transition-colors ${
+                    chartView === "depths"
+                      ? "bg-ink text-paper"
+                      : "bg-card text-ink-3 hover:text-ink"
+                  }`}
+                >
+                  Profundidades
+                </button>
+                <button
+                  onClick={() => setChartView("sum")}
+                  className={`px-2.5 py-1 font-mono text-[10px] tracking-[0.06em] border-l border-rule-soft transition-colors ${
+                    chartView === "sum"
+                      ? "bg-ink text-paper"
+                      : "bg-card text-ink-3 hover:text-ink"
+                  }`}
+                >
+                  Agregado
+                </button>
+              </div>
+            </div>
             <ReadingsControls
               sinceHours={sinceHours}
               interval={interval}
@@ -169,11 +203,18 @@ export function ProbeReadingsInline({
             </div>
           ) : data && data.depths.length > 0 ? (
             <>
-              <ProbeChart
-                depths={data.depths}
-                referenceLines={activeRefLines}
-                interval={interval}
-              />
+              {chartView === "depths" ? (
+                <ProbeChart
+                  depths={data.depths}
+                  referenceLines={activeRefLines}
+                  interval={interval}
+                />
+              ) : (
+                <ProbeSumChart
+                  depths={data.depths}
+                  referenceLines={activeRefLines}
+                />
+              )}
 
               {/* CC / PMP row */}
               <div className="flex flex-wrap items-center gap-3 rounded-md border border-rule-soft bg-card px-4 py-3">
@@ -187,10 +228,12 @@ export function ProbeReadingsInline({
                         onChange={(e) => setCcInput(e.target.value)}
                         step="0.1"
                         min="0"
-                        max="100"
+                        max={100 * editScale}
                         className="w-20 rounded-md border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink tabular-nums focus:outline-none focus:ring-1 focus:ring-olive/30"
                       />
-                      <span className="font-mono text-[11px] text-ink-3">%</span>
+                      <span className="font-mono text-[11px] text-ink-3">
+                        {chartView === "sum" ? "% soma" : "%"}
+                      </span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <label className="font-mono text-[11px] font-medium text-terra min-w-[36px]">PMP</label>
@@ -200,10 +243,12 @@ export function ProbeReadingsInline({
                         onChange={(e) => setPmpInput(e.target.value)}
                         step="0.1"
                         min="0"
-                        max="100"
+                        max={100 * editScale}
                         className="w-20 rounded-md border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink tabular-nums focus:outline-none focus:ring-1 focus:ring-terra/30"
                       />
-                      <span className="font-mono text-[11px] text-ink-3">%</span>
+                      <span className="font-mono text-[11px] text-ink-3">
+                        {chartView === "sum" ? "% soma" : "%"}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2 ml-auto">
                       <button
@@ -225,12 +270,34 @@ export function ProbeReadingsInline({
                   </>
                 ) : (
                   <>
-                    <span className="font-mono text-[11.5px] font-medium text-olive">
-                      CC {activeRefLines.field_capacity != null ? `${(activeRefLines.field_capacity * 100).toFixed(1)}%` : "—"}
-                    </span>
-                    <span className="font-mono text-[11.5px] font-medium text-terra">
-                      PMP {activeRefLines.wilting_point != null ? `${(activeRefLines.wilting_point * 100).toFixed(1)}%` : "—"}
-                    </span>
+                    {chartView === "depths" ? (
+                      <>
+                        <span className="font-mono text-[11.5px] font-medium text-olive">
+                          CC {activeRefLines.field_capacity != null ? `${(activeRefLines.field_capacity * 100).toFixed(1)}%` : "—"}
+                        </span>
+                        <span className="font-mono text-[11.5px] font-medium text-terra">
+                          PMP {activeRefLines.wilting_point != null ? `${(activeRefLines.wilting_point * 100).toFixed(1)}%` : "—"}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-mono text-[11.5px] font-medium text-olive">
+                          CC soma{" "}
+                          {activeRefLines.field_capacity != null
+                            ? `${(activeRefLines.field_capacity * 100 * data.depths.length).toFixed(1)}%`
+                            : "—"}
+                        </span>
+                        <span className="font-mono text-[11.5px] font-medium text-terra">
+                          PMP soma{" "}
+                          {activeRefLines.wilting_point != null
+                            ? `${(activeRefLines.wilting_point * 100 * data.depths.length).toFixed(1)}%`
+                            : "—"}
+                        </span>
+                        <span className="font-mono text-[10px] text-ink-3">
+                          ×{data.depths.length} profundidades
+                        </span>
+                      </>
+                    )}
                     {saved && (
                       <span className="font-mono text-[11px] text-olive">Guardado ✓</span>
                     )}

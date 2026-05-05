@@ -68,6 +68,12 @@ class SectorAssistantContext:
     # Live probe readings (independent of last recommendation)
     probe_live: dict | None
 
+    # Data quality (#9 quality scoring)
+    # "fresh" | "stale" | "forecast_only" | "no_probe"
+    source_confidence: str
+    # Pre-built Portuguese sentence for the AI to cite in its "Qualidade dos dados" bullet
+    data_quality_explanation: str
+
     # Data freshness
     generated_at: str | None
 
@@ -83,6 +89,51 @@ class FarmAssistantContext:
     total_active_alerts: int
     missing_data_priorities: list[str]
     setup_completion_pct: float
+
+
+# ---------------------------------------------------------------------------
+# Data-quality helpers
+# ---------------------------------------------------------------------------
+
+def _source_confidence_and_explanation(probe_live: dict | None) -> tuple[str, str]:
+    """Derive (source_confidence, data_quality_explanation) from the live probe snapshot."""
+    if probe_live is None:
+        return (
+            "no_probe",
+            "Sem sondas configuradas — recomendação baseada exclusivamente em "
+            "balanço hídrico e dados meteorológicos.",
+        )
+
+    h = probe_live.get("hours_since_any_reading")
+    if h is None:
+        return (
+            "fresh",
+            "Dados da sonda disponíveis — leitura directa do estado hídrico do solo.",
+        )
+
+    if h > 24:
+        return (
+            "forecast_only",
+            f"Sonda sem comunicação há {h:.0f}h — estimativa de humidade baseada "
+            f"no modelo, sem leitura real do solo.",
+        )
+    if h > 6:
+        return (
+            "stale",
+            f"Última leitura da sonda há {h:.1f}h — o estado actual do solo pode "
+            f"ter mudado entretanto.",
+        )
+
+    # Fresh — express in minutes when < 1 h
+    if h < 1:
+        mins = round(h * 60)
+        time_str = f"há {mins} min"
+    else:
+        time_str = f"há {h:.1f}h"
+    return (
+        "fresh",
+        f"Dados da sonda actuais ({time_str}) — leitura directa do estado hídrico do solo.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +227,7 @@ class AssistantContextBuilder:
         probe_snapshot = await interpret_probes(eng_ctx, db)
         rz = probe_snapshot.rootzone
         probe_live: dict | None = None
+        # Populated below; used by _source_confidence_and_explanation afterwards
         if rz.has_data:
             depths_info = [
                 {
@@ -195,6 +247,8 @@ class AssistantContextBuilder:
                 "depths": depths_info,
                 "anomalies": probe_snapshot.anomalies_detected,
             }
+
+        src_conf, dqe = _source_confidence_and_explanation(probe_live)
 
         return SectorAssistantContext(
             sector_id=sector_id,
@@ -234,6 +288,8 @@ class AssistantContextBuilder:
             total_irrigation_7d_mm=irrig_ctx.total_applied_7d_mm,
             active_alerts=active_alerts,
             probe_live=probe_live,
+            source_confidence=src_conf,
+            data_quality_explanation=dqe,
             generated_at=rec.generated_at.isoformat() if rec else None,
         )
 

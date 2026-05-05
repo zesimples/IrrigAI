@@ -12,9 +12,44 @@ import { RefreshCw } from "lucide-react";
 import { Lede } from "@/components/dashboard/editorial/Lede";
 import { NumericStrip } from "@/components/dashboard/editorial/NumericStrip";
 import { SectorGrid } from "@/components/dashboard/editorial/SectorGrid";
+import type { ProviderSyncStatus } from "@/types";
 
 interface Props {
   params: { farmId: string };
+}
+
+function relativeTime(isoStr: string): string {
+  const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+  if (diff < 60) return "agora mesmo";
+  if (diff < 3600) return `há ${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `há ${Math.floor(diff / 3600)} h`;
+  return `há ${Math.floor(diff / 86400)} d`;
+}
+
+function SyncStatusBar({ entries }: { entries: ProviderSyncStatus[] }) {
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="px-4 sm:px-8 lg:px-11 py-2 border-b border-rule-soft flex flex-wrap gap-x-5 gap-y-1">
+      {entries.map((e) => {
+        const hasError = e.consecutive_failures > 0;
+        const label = e.provider.replace(":probes", " · sonda").replace(":weather", " · clima");
+        return (
+          <span key={e.provider} className="flex items-center gap-1.5">
+            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${hasError ? "bg-terra" : "bg-olive"}`} />
+            <span className="font-mono text-[10px] tracking-[0.06em] text-ink-3">
+              {label}
+              {hasError
+                ? ` — erro ${e.last_error_at ? relativeTime(e.last_error_at) : ""}`
+                : e.last_success_at
+                  ? ` · ${relativeTime(e.last_success_at)}`
+                  : " · nunca sincronizado"}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 function editionSubline(dateStr: string): string {
@@ -135,6 +170,8 @@ export default function FarmDashboardPage({ params }: Props) {
           forecastRain48h={data.weather_today.forecast_rain_next_48h_mm}
         />
       </div>
+
+      <SyncStatusBar entries={data.sync_status ?? []} />
 
       {/* Sector grid with tabs */}
       {data.sectors_summary.length > 0 ? (
