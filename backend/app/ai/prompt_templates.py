@@ -200,7 +200,7 @@ PROBE_INTERPRETATION_PT = """
 PADRÕES A VERIFICAR (menciona apenas os que encontrares evidência):
 1. Sonda estável — solo saturado: sinal estável com humidade próxima da capacidade de campo. O solo está bem hidratado sem consumo radicular activo nem drenagem activa.
 2. Profundidade além da zona radicular: sinal estável a uma profundidade superior à zona radicular activa. As raízes não chegam a essa camada — por isso não há consumo nem drenagem, e a humidade mantém-se constante. Comportamento normal e esperado.
-3. Solo em equilíbrio hídrico: sinal estável dentro da zona radicular, com humidade intermédia, sem consumo nem recarga activos. Pode indicar período de baixa evapotranspiração, dormência parcial das raízes, ou que a rega está a compensar exactamente o consumo.
+3. Solo em equilíbrio hídrico: sinal estável dentro da zona radicular, sem consumo nem recarga activos. A planta não está a retirar água — não há procura hídrica activa neste momento. NUNCA sugerir rega com base neste padrão: sem consumo activo, a rega não é justificada. A acção é sempre monitorizar e aguardar que a tendência mude para consumo activo.
 4. Resposta à rega fraca: o solo absorveu pouco após a rega; possível bypassing, DU baixa ou rega insuficiente para a profundidade.
 5. Drenagem rápida: humidade sobe e desce abruptamente; solo poroso ou rega excessiva.
 6. Percolação profunda: profundidade maior responde mais do que a superficial após rega.
@@ -221,11 +221,20 @@ REGRAS OBRIGATÓRIAS DE LINGUAGEM:
 - NUNCA incluas nomes de campos JSON na resposta. Usa apenas linguagem natural.
 
 FORMATO — obrigatório:
-Para cada padrão detectado:
-• [Nome do padrão]: [observação qualitativa] → [causa mais provável] → [acção recomendada]
+Para cada padrão detectado (usa apenas o nome descritivo curto, SEM prefixo "Padrão X" nem numeração):
+• [nome descritivo curto]: [observação qualitativa] → [causa mais provável] → [acção recomendada]
+
+Exemplos de nomes descritivos curtos: "Solo saturado", "Além das raízes", "Equilíbrio hídrico", "Resposta fraca à rega", "Drenagem rápida".
 
 Se nenhum padrão relevante for detectado:
 • Sinal normal: [breve descrição qualitativa do comportamento observado]
+
+REGRAS DE ACÇÃO OBRIGATÓRIAS:
+- Padrão 1 (saturado) → acção: monitorizar a rega, solo bem hidratado.
+- Padrão 2 (além das raízes) → acção: comportamento normal, sem acção necessária.
+- Padrão 3 (equilíbrio hídrico) → acção: SEMPRE "monitorizar e aguardar consumo activo antes de regar" — NUNCA sugerir rega, independentemente do nível de humidade.
+- Padrão 4 (resposta fraca) → acção: rever DU, caudal ou posicionamento dos emissores.
+- Padrão 5 (drenagem rápida) → acção: reduzir volume ou fraccionamento da rega.
 
 REGRAS ADICIONAIS:
 - Fundamenta cada padrão nos dados de estabilidade do sinal, tendência temporal, resposta à rega e divergência entre profundidades — sem citar valores brutos.
