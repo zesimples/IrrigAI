@@ -74,6 +74,14 @@ class ProbeDetectedEvent(BaseModel):
     delta_vwc: float
     rainfall_mm: float | None = None
     irrigation_mm: float | None = None
+    score: float = 0.0
+    probability_irrigation: float = 0.0
+    probability_rain: float = 0.0
+    probability_unlogged: float = 0.0
+    source_match_score: float = 0.0
+    depth_sequence_score: float = 0.0
+    signal_strength_score: float = 0.0
+    sensor_quality_score: float = 0.0
     message: str
 
 

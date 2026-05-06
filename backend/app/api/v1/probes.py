@@ -5,18 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import (
-    IrrigationEvent,
-    Plot,
-    Probe,
-    ProbeDepth,
-    ProbeReading,
-    Sector,
-    WeatherObservation,
-)
+from app.engine.water_event_detector import detect_water_events
+from app.models import Plot, Probe, ProbeDepth, ProbeReading, Sector
 from app.schemas.probe import (
     DepthReadings,
-    ProbeDetectedEvent,
     ProbeCreate,
     ProbeDetail,
     ProbeDepthOut,
@@ -136,7 +128,7 @@ async def get_probe_readings(
     fc = plot.field_capacity if plot else None
     pwp = plot.wilting_point if plot else None
     optimal = [round(pwp + (fc - pwp) * 0.4, 3), round(pwp + (fc - pwp) * 0.8, 3)] if fc and pwp else None
-    events = await _detect_wetting_events(
+    events = await detect_water_events(
         db=db,
         sector=sector,
         plot=plot,
@@ -218,160 +210,3 @@ def _downsample(points: list[TimeSeriesPoint], interval_h: float) -> list[TimeSe
         result.append(current_bucket[-1])
 
     return result
-
-
-async def _detect_wetting_events(
-    db: AsyncSession,
-    sector: Sector | None,
-    plot: Plot | None,
-    depths: list[DepthReadings],
-    since: datetime,
-    until: datetime,
-) -> list[ProbeDetectedEvent]:
-    """Detect likely wetting fronts from VWC jumps and classify against known sources."""
-    if not sector or not depths:
-        return []
-
-    candidates: list[dict[str, object]] = []
-    for depth in depths:
-        readings = sorted(
-            (pt for pt in depth.readings if pt.quality != "invalid"),
-            key=lambda pt: pt.timestamp,
-        )
-        previous: TimeSeriesPoint | None = None
-        for point in readings:
-            if previous is None:
-                previous = point
-                continue
-            elapsed_h = (point.timestamp - previous.timestamp).total_seconds() / 3600
-            delta = point.vwc - previous.vwc
-            if 0 < elapsed_h <= 12 and delta >= 0.015:
-                candidates.append(
-                    {
-                        "timestamp": point.timestamp,
-                        "depth_cm": depth.depth_cm,
-                        "delta_vwc": delta,
-                    }
-                )
-            previous = point
-
-    if not candidates:
-        return []
-
-    candidates.sort(key=lambda c: c["timestamp"])
-    groups: list[list[dict[str, object]]] = []
-    for candidate in candidates:
-        if not groups:
-            groups.append([candidate])
-            continue
-        last_ts = groups[-1][-1]["timestamp"]
-        if isinstance(last_ts, datetime) and (candidate["timestamp"] - last_ts).total_seconds() <= 6 * 3600:
-            groups[-1].append(candidate)
-        else:
-            groups.append([candidate])
-
-    window_start = since - timedelta(hours=24)
-    window_end = until + timedelta(hours=24)
-    irrigation_events = (
-        await db.execute(
-            select(IrrigationEvent)
-            .where(
-                IrrigationEvent.sector_id == sector.id,
-                IrrigationEvent.start_time >= window_start,
-                IrrigationEvent.start_time <= window_end,
-            )
-            .order_by(IrrigationEvent.start_time)
-        )
-    ).scalars().all()
-
-    weather_events = []
-    if plot:
-        weather_events = (
-            await db.execute(
-                select(WeatherObservation)
-                .where(
-                    WeatherObservation.farm_id == plot.farm_id,
-                    WeatherObservation.timestamp >= window_start,
-                    WeatherObservation.timestamp <= window_end,
-                    WeatherObservation.rainfall_mm.is_not(None),
-                    WeatherObservation.rainfall_mm > 0.2,
-                )
-                .order_by(WeatherObservation.timestamp)
-            )
-        ).scalars().all()
-
-    detected: list[ProbeDetectedEvent] = []
-    for idx, group in enumerate(groups[:12]):
-        timestamps = [c["timestamp"] for c in group if isinstance(c["timestamp"], datetime)]
-        if not timestamps:
-            continue
-        event_ts = min(timestamps)
-        depth_deltas: dict[int, float] = {}
-        for candidate in group:
-            depth_cm = candidate["depth_cm"]
-            delta_vwc = candidate["delta_vwc"]
-            if isinstance(depth_cm, int) and isinstance(delta_vwc, float):
-                depth_deltas[depth_cm] = max(depth_deltas.get(depth_cm, 0), delta_vwc)
-
-        depths_cm = sorted(depth_deltas)
-        total_delta = round(sum(depth_deltas.values()), 4)
-        irrigation = _nearest_irrigation(irrigation_events, event_ts)
-        rain = _nearest_rain(weather_events, event_ts)
-        kind = "unlogged"
-        confidence = "medium" if len(depths_cm) >= 2 else "low"
-        source_text = "entrada de água detectada sem correspondência no registo"
-        irrigation_mm = None
-        rainfall_mm = None
-
-        if irrigation:
-            kind = "irrigation"
-            irrigation_mm = irrigation.applied_mm
-            confidence = "high" if len(depths_cm) >= 2 else "medium"
-            source_text = "compatível com rega registada"
-        elif rain:
-            kind = "rain"
-            rainfall_mm = rain.rainfall_mm
-            confidence = "high" if len(depths_cm) >= 2 else "medium"
-            source_text = "compatível com chuva registada"
-
-        detected.append(
-            ProbeDetectedEvent(
-                id=f"wetting-{idx}-{int(event_ts.timestamp())}",
-                timestamp=event_ts,
-                kind=kind,
-                confidence=confidence,
-                depths_cm=depths_cm,
-                delta_vwc=total_delta,
-                rainfall_mm=rainfall_mm,
-                irrigation_mm=irrigation_mm,
-                message=(
-                    f"Entrada de água detectada em {len(depths_cm)} profundidade(s)"
-                    + (f", {source_text}" if kind != "unlogged" else "")
-                    + "."
-                ),
-            )
-        )
-
-    return detected
-
-
-def _nearest_irrigation(events: list[IrrigationEvent], timestamp: datetime) -> IrrigationEvent | None:
-    nearby = [
-        event
-        for event in events
-        if abs((event.start_time - timestamp).total_seconds()) <= 8 * 3600
-    ]
-    if not nearby:
-        return None
-    return min(nearby, key=lambda event: abs((event.start_time - timestamp).total_seconds()))
-
-
-def _nearest_rain(events: list[WeatherObservation], timestamp: datetime) -> WeatherObservation | None:
-    nearby = [
-        event
-        for event in events
-        if abs((event.timestamp - timestamp).total_seconds()) <= 24 * 3600
-    ]
-    if not nearby:
-        return None
-    return max(nearby, key=lambda event: event.rainfall_mm or 0)

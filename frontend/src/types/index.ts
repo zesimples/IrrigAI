@@ -225,6 +225,14 @@ export interface ProbeDetectedEvent {
   delta_vwc: number;
   rainfall_mm: number | null;
   irrigation_mm: number | null;
+  score: number;
+  probability_irrigation: number;
+  probability_rain: number;
+  probability_unlogged: number;
+  source_match_score: number;
+  depth_sequence_score: number;
+  signal_strength_score: number;
+  sensor_quality_score: number;
   message: string;
 }
 

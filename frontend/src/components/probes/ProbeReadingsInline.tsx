@@ -458,6 +458,11 @@ function DetectedEvents({ events, hoveredEventId, onHover }: {
                     <span className="font-mono text-[11px] text-ink-3">
                       conf. {event.confidence}
                     </span>
+                    {event.score != null && (
+                      <span className="font-mono text-[11px] text-ink-3">
+                        score {(event.score * 100).toFixed(0)}%
+                      </span>
+                    )}
                   </div>
                   <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
                     {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {(event.delta_vwc * 100).toFixed(1)}%.
