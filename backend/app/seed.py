@@ -1,10 +1,16 @@
 """Seed script for IrrigAI.
 
-Usage: python -m app.seed
+Usage:
+  python -m app.seed                 # seed everything
+  python -m app.seed --farm adl      # seed only Amendoas do Lago (safe on prod)
+  python -m app.seed --farm esporao  # seed only Esporão
+  python -m app.seed --farm conqueiros
 
 Populates:
   A) System templates (crop profiles, soil presets) — always, idempotent
   B) Farm "Herdade do Esporão" — 7 olive sectors + vineyard sectors
+  C) Farm "Herdade dos Conqueiros"
+  D) Farm "Herdade das Amendoas do Lago" — 13 almond sectors
 
 Safe to re-run: clears existing farm data first, never touches system
 templates that already exist.
@@ -364,7 +370,16 @@ def _generate_readings(
 # Main seed function
 # ---------------------------------------------------------------------------
 
-def seed(engine) -> None:
+def seed(engine, only_farms: set[str] | None = None) -> None:
+    """Run the seed script.
+
+    only_farms: if given, restrict farm seeding to the named subset.
+                Valid values: "esporao", "conqueiros", "adl".
+                System templates (section A) always run — they are idempotent.
+    """
+    def _should_seed(name: str) -> bool:
+        return only_farms is None or name in only_farms
+
     print("=== IrrigAI Seed Script ===")
 
     with Session(engine) as session:
@@ -1354,6 +1369,60 @@ def seed(engine) -> None:
     # ----------------------------------------------------------------
     # D) Sample farm — Herdade das Amendoas do Lago
     # ----------------------------------------------------------------
+    if _should_seed("adl"):
+        seed_adl(engine)
+
+    # Verify counts (Esporão-specific assertions; skip if Esporão wasn't seeded)
+    if _should_seed("esporao"):
+        with Session(engine) as session:
+            n_templates = session.execute(select(CropProfileTemplate)).all()
+            n_presets = session.execute(select(SoilPreset)).all()
+            n_readings = session.execute(text("SELECT COUNT(*) FROM probe_reading")).scalar()
+            n_obs = session.execute(text("SELECT COUNT(*) FROM weather_observation")).scalar()
+
+            sector_t01 = session.execute(
+                select(Sector).where(Sector.name == "T01 - Cobrançosa")
+            ).scalar_one()
+            scp = session.execute(
+                select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_t01.id)
+            ).scalar_one()
+            stage_keys = [s["key"] for s in scp.stages]
+            assert "olive_oil_accumulation" in stage_keys, "olive_oil_accumulation stage missing!"
+            first_stage_kc = scp.stages[0]["kc"]
+            assert first_stage_kc == 0.40, f"Expected Kc=0.40 for dormancy, got {first_stage_kc}"
+
+            sector_t17 = session.execute(
+                select(Sector).where(Sector.name == "T17 - Arbequina")
+            ).scalar_one()
+            assert sector_t17.variety == "Arbequina", "T17 should be Arbequina variety"
+            assert sector_t17.current_phenological_stage == "olive_oil_accumulation"
+
+            print("\n=== Seed complete ===")
+            print(f"  Farm:             Herdade do Esporão")
+            print(f"  Crop templates:   {len(n_templates)}")
+            print(f"  Soil presets:     {len(n_presets)}")
+            print(f"  Probe readings:   {n_readings:,} (0 expected — real data from MyIrrigation ingestion)")
+            print(f"  Weather obs:      {n_obs} (mock seed data; replaced by MyIrrigation on first ingestion)")
+            print(f"  T01 SCP:          olive, {len(scp.stages)} stages, Kc0={first_stage_kc} ✓")
+            print(f"  T17 variety:      Arbequina ✓")
+            print()
+            print("  Probe external_ids (MyIrrigation device IDs, project 1044):")
+            print("    T01 Cobrançosa WM01 → 1044/4663")
+            print("    T04 Cobrançosa WM06 → 1044/4664")
+            print("    T05 Cobrançosa WM02 → 1044/4662")
+            print("    T07 Cobrançosa WM03 → 1044/4661")
+            print("    T10 Cobrançosa WM04 → 1044/4666")
+            print("    T17 Arbequina  WM07 → 1044/4665")
+            print("    T18 Arbequina  WM05 → 1044/4667")
+            print()
+
+
+def seed_adl(engine) -> None:
+    """Seed only the Herdade das Amendoas do Lago farm.
+
+    Safe to run standalone on production when the other farms already exist.
+    Clears and recreates ADL data without touching Esporão or Conqueiros.
+    """
     print("\n[4/4] Seeding sample farm 'Herdade das Amendoas do Lago'...")
     with Session(engine) as session:
         existing_adl = session.execute(
@@ -1573,52 +1642,27 @@ def seed(engine) -> None:
         session.commit()
         print(f"  Amendoas do Lago: 3 plots, {len(adl_sectors)} sectors seeded ✓")
 
-    # Verify counts
-    with Session(engine) as session:
-        n_templates = session.execute(select(CropProfileTemplate)).all()
-        n_presets = session.execute(select(SoilPreset)).all()
-        n_readings = session.execute(text("SELECT COUNT(*) FROM probe_reading")).scalar()
-        n_obs = session.execute(text("SELECT COUNT(*) FROM weather_observation")).scalar()
-
-        # Verify T01 crop profile has olive stages
-        sector_t01 = session.execute(
-            select(Sector).where(Sector.name == "T01 - Cobrançosa")
-        ).scalar_one()
-        scp = session.execute(
-            select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_t01.id)
-        ).scalar_one()
-        stage_keys = [s["key"] for s in scp.stages]
-        assert "olive_oil_accumulation" in stage_keys, "olive_oil_accumulation stage missing!"
-        first_stage_kc = scp.stages[0]["kc"]
-        assert first_stage_kc == 0.40, f"Expected Kc=0.40 for dormancy, got {first_stage_kc}"
-
-        # Verify T17 is Arbequina variety
-        sector_t17 = session.execute(
-            select(Sector).where(Sector.name == "T17 - Arbequina")
-        ).scalar_one()
-        assert sector_t17.variety == "Arbequina", "T17 should be Arbequina variety"
-        assert sector_t17.current_phenological_stage == "olive_oil_accumulation"
-
-        print("\n=== Seed complete ===")
-        print(f"  Farm:             Herdade do Esporão")
-        print(f"  Crop templates:   {len(n_templates)}")
-        print(f"  Soil presets:     {len(n_presets)}")
-        print(f"  Probe readings:   {n_readings:,} (0 expected — real data from MyIrrigation ingestion)")
-        print(f"  Weather obs:      {n_obs} (mock seed data; replaced by MyIrrigation on first ingestion)")
-        print(f"  T01 SCP:          olive, {len(scp.stages)} stages, Kc0={first_stage_kc} ✓")
-        print(f"  T17 variety:      Arbequina ✓")
-        print()
-        print("  Probe external_ids (MyIrrigation device IDs, project 1044):")
-        print("    T01 Cobrançosa WM01 → 1044/4663")
-        print("    T04 Cobrançosa WM06 → 1044/4664")
-        print("    T05 Cobrançosa WM02 → 1044/4662")
-        print("    T07 Cobrançosa WM03 → 1044/4661")
-        print("    T10 Cobrançosa WM04 → 1044/4666")
-        print("    T17 Arbequina  WM07 → 1044/4665")
-        print("    T18 Arbequina  WM05 → 1044/4667")
-        print()
+    print("\n=== Amendoas do Lago seed complete ===")
+    print("  Next step: trigger data fetch so the scheduler pulls probe readings.")
+    print("  curl -X POST http://localhost:8000/api/v1/farms/<farm-id>/weather/trigger-fetch")
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="IrrigAI seed script")
+    parser.add_argument(
+        "--farm",
+        choices=["esporao", "conqueiros", "adl"],
+        help="Seed only one farm instead of all three (system templates always run).",
+    )
+    args = parser.parse_args()
+
     engine = create_engine(settings.DATABASE_URL_SYNC, echo=False)
-    seed(engine)
+
+    if args.farm == "adl":
+        print("=== IrrigAI Seed Script (ADL only) ===")
+        seed_adl(engine)
+    else:
+        only = {args.farm} if args.farm else None
+        seed(engine, only_farms=only)
