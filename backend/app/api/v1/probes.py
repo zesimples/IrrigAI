@@ -319,7 +319,7 @@ async def _detect_wetting_events(
         rain = _nearest_rain(weather_events, event_ts)
         kind = "unlogged"
         confidence = "medium" if len(depths_cm) >= 2 else "low"
-        source_text = "sem registo de rega ou chuva próximo"
+        source_text = "entrada de água detectada sem correspondência no registo"
         irrigation_mm = None
         rainfall_mm = None
 
@@ -345,8 +345,9 @@ async def _detect_wetting_events(
                 rainfall_mm=rainfall_mm,
                 irrigation_mm=irrigation_mm,
                 message=(
-                    f"Aumento rápido de humidade em {len(depths_cm)} profundidade(s), "
-                    f"{source_text}."
+                    f"Entrada de água detectada em {len(depths_cm)} profundidade(s)"
+                    + (f", {source_text}" if kind != "unlogged" else "")
+                    + "."
                 ),
             )
         )

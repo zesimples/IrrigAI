@@ -151,7 +151,7 @@ export function ProbeSumChart({ depths, referenceLines, events }: ProbeSumChartP
         </LineChart>
       </ResponsiveContainer>
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div className="rounded-md border border-rule-soft bg-card px-3 py-2">
           <p className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-3">Soma atual</p>
           <p className="mt-0.5 font-mono text-[14px] font-medium text-ink tabular-nums">
@@ -162,12 +162,6 @@ export function ProbeSumChart({ depths, referenceLines, events }: ProbeSumChartP
           <p className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-3">Min / Max</p>
           <p className="mt-0.5 font-mono text-[14px] font-medium text-ink tabular-nums">
             {minVal.toFixed(1)}% / {maxVal.toFixed(1)}%
-          </p>
-        </div>
-        <div className="rounded-md border border-rule-soft bg-card px-3 py-2">
-          <p className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-3">Sensores</p>
-          <p className="mt-0.5 font-mono text-[14px] font-medium text-ink tabular-nums">
-            {latest.depthCount}/{n}
           </p>
         </div>
       </div>
