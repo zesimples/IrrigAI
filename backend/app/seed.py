@@ -67,6 +67,28 @@ PROBE_CONQ_S19  = "959/8404"   # Turno 3 (S19) Amendoal Novo — almond
 PROBE_CONQ_S25  = "959/7044"   # Turno 4 (S25) Amendoal Novo — almond
 
 # ---------------------------------------------------------------------------
+# Herdade das Amendoas do Lago
+#   CASTELOS NORTE (project 964), FALCÃO (project 963), VALEMOURA (project 1162)
+#   Rusty probes — soil moisture (VWC), depths to be confirmed; using [20,40,60]
+# ---------------------------------------------------------------------------
+# CASTELOS NORTE
+PROBE_ADL_CN_S1 = "964/9124"   # S1 Non Pareil — Rusty 06, serial 0120AB0A
+PROBE_ADL_CN_S2 = "964/9125"   # S2 Non Pareil — Rusty 03, serial 0120AB24
+# FALCÃO
+PROBE_ADL_FA_S2 = "963/9126"   # S2 Non Pareil — Rusty 01, serial 0120AB0B
+PROBE_ADL_FA_S3 = "963/9127"   # S3 Non Pareil — Rusty 09, serial 0120B5E2
+PROBE_ADL_FA_S5 = "963/9128"   # S5 Non Pareil — Rusty 05, serial 0120AB0C
+# VALEMOURA
+PROBE_ADL_VM_V007 = "1162/9129"  # V007 Non Pareil — Rusty 11, serial 0020D885
+PROBE_ADL_VM_V029 = "1162/9136"  # V029 Non Pareil — adl04
+PROBE_ADL_VM_V064 = "1162/9134"  # V064 Non Pareil — adl02
+PROBE_ADL_VM_V106 = "1162/9132"  # V106 Non Pareil — Rusty 14, serial 0020D96D
+PROBE_ADL_VM_V108 = "1162/9135"  # V108 Non Pareil — adl03
+PROBE_ADL_VM_V115 = "1162/9130"  # V115 Non Pareil — Rusty 12, serial 0020D95F
+PROBE_ADL_VM_V185 = "1162/9131"  # V185 Non Pareil — Rusty 13, serial 0020D966
+PROBE_ADL_VM_V225 = "1162/9133"  # V225 Non Pareil — adl01
+
+# ---------------------------------------------------------------------------
 # Conqueiros — Olival (project 1597) — Watermark WM200SS, cBar
 # ---------------------------------------------------------------------------
 PROBE_CONQ_O01A = "1597/3634"  # Turno 1 (S01) — olive
@@ -90,6 +112,7 @@ from app.config import get_settings
 from app.models import (
     CropProfileTemplate,
     Farm,
+    FarmCredentials,
     IrrigationEvent,
     IrrigationSystem,
     Plot,
@@ -480,13 +503,18 @@ def seed(engine) -> None:
             region="Alentejo",
             timezone="Europe/Lisbon",
             owner_id=grower.id,
-            myirrigation_username="esporao_api",
-            myirrigation_password="esporao_api",
-            myirrigation_client_id="7JTTP4XGVZ9S1M7PEABD",
-            myirrigation_client_secret="PKVSK5BPNNYE4JE2KOQ2",
-            myirrigation_weather_device_id="1583",
         )
         session.add(farm)
+        session.flush()
+        session.add(FarmCredentials(
+            id=str(uuid.uuid4()),
+            farm_id=farm.id,
+            username="esporao_api",
+            password="esporao_api",
+            client_id="7JTTP4XGVZ9S1M7PEABD",
+            client_secret="PKVSK5BPNNYE4JE2KOQ2",
+            weather_device_id="1583",
+        ))
         session.flush()
 
         # Soil preset — sandy clay loam for Alentejo olive groves
@@ -1033,13 +1061,18 @@ def seed(engine) -> None:
             region="Alentejo",
             timezone="Europe/Lisbon",
             owner_id=grower.id,
-            myirrigation_username="conqueiros_api",
-            myirrigation_password="conqueiros_api",
-            myirrigation_client_id="YYRIcSNREmmcFwNbt1i02w",
-            myirrigation_client_secret="BTF77w9Yf6gUjabINuiFRA",
-            myirrigation_weather_device_id="824",
         )
         session.add(farm_conq)
+        session.flush()
+        session.add(FarmCredentials(
+            id=str(uuid.uuid4()),
+            farm_id=farm_conq.id,
+            username="conqueiros_api",
+            password="conqueiros_api",
+            client_id="YYRIcSNREmmcFwNbt1i02w",
+            client_secret="BTF77w9Yf6gUjabINuiFRA",
+            weather_device_id="824",
+        ))
         session.flush()
 
         _DRIP_CONQ_ALMOND = {
@@ -1313,6 +1346,228 @@ def seed(engine) -> None:
 
         session.commit()
         print(f"  Conqueiros: 2 plots, {len(conq_sectors)} sectors seeded ✓")
+
+    # ----------------------------------------------------------------
+    # D) Sample farm — Herdade das Amendoas do Lago
+    # ----------------------------------------------------------------
+    print("\n[4/4] Seeding sample farm 'Herdade das Amendoas do Lago'...")
+    with Session(engine) as session:
+        existing_adl = session.execute(
+            select(Farm).where(Farm.name == "Herdade das Amendoas do Lago")
+        ).scalar_one_or_none()
+
+        if existing_adl:
+            print("  Clearing existing Amendoas do Lago data...")
+            sector_ids = [
+                row[0] for row in session.execute(
+                    text("""
+                        SELECT s.id FROM sector s
+                        JOIN plot p ON s.plot_id = p.id
+                        WHERE p.farm_id = :farm_id
+                    """),
+                    {"farm_id": existing_adl.id},
+                ).fetchall()
+            ]
+            if sector_ids:
+                probe_ids = [
+                    row[0] for row in session.execute(
+                        text("SELECT id FROM probe WHERE sector_id = ANY(:ids)"),
+                        {"ids": sector_ids},
+                    ).fetchall()
+                ]
+                if probe_ids:
+                    depth_ids = [
+                        row[0] for row in session.execute(
+                            text("SELECT id FROM probe_depth WHERE probe_id = ANY(:ids)"),
+                            {"ids": probe_ids},
+                        ).fetchall()
+                    ]
+                    if depth_ids:
+                        session.execute(
+                            text("DELETE FROM probe_reading WHERE probe_depth_id = ANY(:ids)"),
+                            {"ids": depth_ids},
+                        )
+            session.delete(existing_adl)
+            session.flush()
+            print("  Existing Amendoas do Lago data cleared.")
+
+        grower = session.execute(
+            select(User).where(User.email == "joao.silva@demo.irrigai.pt")
+        ).scalar_one()
+
+        almond_tmpl = session.execute(
+            select(CropProfileTemplate).where(
+                CropProfileTemplate.crop_type == "almond",
+                CropProfileTemplate.is_system_default.is_(True),
+            )
+        ).scalar_one()
+
+        soil = session.execute(
+            select(SoilPreset).where(SoilPreset.texture == "sandy_clay_loam")
+        ).scalar_one()
+
+        farm_adl = Farm(
+            id=str(uuid.uuid4()),
+            name="Herdade das Amendoas do Lago",
+            location_lat=38.496,
+            location_lon=-7.839,
+            region="Alentejo",
+            timezone="Europe/Lisbon",
+            owner_id=grower.id,
+        )
+        session.add(farm_adl)
+        session.flush()
+        session.add(FarmCredentials(
+            id=str(uuid.uuid4()),
+            farm_id=farm_adl.id,
+            username="amendoaslago_api",
+            password="amendoaslago_api",
+            client_id="8xjCxtrmHAbTQtQ5icbV0g",
+            client_secret="b98AvVG7HzPhcO24xAAxTA",
+            weather_device_id="4919",
+        ))
+        session.flush()
+
+        _DRIP_ADL = {
+            "system_type": "drip",
+            "emitter_flow_lph": 2.3,
+            "emitter_spacing_m": 0.5,
+            "lines_per_row": 1,
+            "efficiency": 0.90,
+            "distribution_uniformity": 0.88,
+            "max_runtime_hours": 8.0,
+        }
+
+        plot_cn = Plot(
+            id=str(uuid.uuid4()),
+            farm_id=farm_adl.id,
+            name="Castelos Norte",
+            area_ha=None,
+            soil_texture=soil.texture,
+            field_capacity=soil.field_capacity,
+            wilting_point=soil.wilting_point,
+            stone_content_pct=5.0,
+            soil_preset_id=soil.id,
+        )
+        plot_fa = Plot(
+            id=str(uuid.uuid4()),
+            farm_id=farm_adl.id,
+            name="Falcão",
+            area_ha=None,
+            soil_texture=soil.texture,
+            field_capacity=soil.field_capacity,
+            wilting_point=soil.wilting_point,
+            stone_content_pct=5.0,
+            soil_preset_id=soil.id,
+        )
+        plot_vm = Plot(
+            id=str(uuid.uuid4()),
+            farm_id=farm_adl.id,
+            name="Valemoura",
+            area_ha=None,
+            soil_texture=soil.texture,
+            field_capacity=soil.field_capacity,
+            wilting_point=soil.wilting_point,
+            stone_content_pct=5.0,
+            soil_preset_id=soil.id,
+        )
+        session.add_all([plot_cn, plot_fa, plot_vm])
+        session.flush()
+
+        adl_sectors = [
+            # ── Castelos Norte (project 964) ─────────────────────────────
+            {"plot_id": plot_cn.id, "name": "S1 - Non Pareil",
+             "probe_external_id": PROBE_ADL_CN_S1},
+            {"plot_id": plot_cn.id, "name": "S2 - Non Pareil",
+             "probe_external_id": PROBE_ADL_CN_S2},
+            # ── Falcão (project 963) ──────────────────────────────────────
+            {"plot_id": plot_fa.id, "name": "S2 - Non Pareil",
+             "probe_external_id": PROBE_ADL_FA_S2},
+            {"plot_id": plot_fa.id, "name": "S3 - Non Pareil",
+             "probe_external_id": PROBE_ADL_FA_S3},
+            {"plot_id": plot_fa.id, "name": "S5 - Non Pareil",
+             "probe_external_id": PROBE_ADL_FA_S5},
+            # ── Valemoura (project 1162) ──────────────────────────────────
+            {"plot_id": plot_vm.id, "name": "V007 - Non Pareil",
+             "probe_external_id": PROBE_ADL_VM_V007},
+            {"plot_id": plot_vm.id, "name": "V029 - Non Pareil",
+             "probe_external_id": PROBE_ADL_VM_V029},
+            {"plot_id": plot_vm.id, "name": "V064 - Non Pareil",
+             "probe_external_id": PROBE_ADL_VM_V064},
+            {"plot_id": plot_vm.id, "name": "V106 - Non Pareil",
+             "probe_external_id": PROBE_ADL_VM_V106},
+            {"plot_id": plot_vm.id, "name": "V108 - Non Pareil",
+             "probe_external_id": PROBE_ADL_VM_V108},
+            {"plot_id": plot_vm.id, "name": "V115 - Non Pareil",
+             "probe_external_id": PROBE_ADL_VM_V115},
+            {"plot_id": plot_vm.id, "name": "V185 - Non Pareil",
+             "probe_external_id": PROBE_ADL_VM_V185},
+            {"plot_id": plot_vm.id, "name": "V225 - Non Pareil",
+             "probe_external_id": PROBE_ADL_VM_V225},
+        ]
+
+        for sd in adl_sectors:
+            probe_ext_id = sd.pop("probe_external_id")
+            sector = Sector(
+                id=str(uuid.uuid4()),
+                crop_type="almond",
+                variety="Non Pareil",
+                current_phenological_stage="almond_kernel_fill",
+                irrigation_strategy="full_etc",
+                **sd,
+            )
+            session.add(sector)
+            session.flush()
+
+            scp = SectorCropProfile(
+                id=str(uuid.uuid4()),
+                sector_id=sector.id,
+                source_template_id=almond_tmpl.id,
+                crop_type=almond_tmpl.crop_type,
+                mad=almond_tmpl.mad,
+                root_depth_mature_m=almond_tmpl.root_depth_mature_m,
+                root_depth_young_m=almond_tmpl.root_depth_young_m,
+                maturity_age_years=almond_tmpl.maturity_age_years,
+                stages=copy.deepcopy(almond_tmpl.stages),
+                is_customized=False,
+            )
+            session.add(scp)
+
+            irrig_sys = IrrigationSystem(
+                id=str(uuid.uuid4()),
+                sector_id=sector.id,
+                **_DRIP_ADL,
+            )
+            session.add(irrig_sys)
+
+            probe = Probe(
+                id=str(uuid.uuid4()),
+                sector_id=sector.id,
+                external_id=probe_ext_id,
+                manufacturer="Pessl Instruments",
+                model="Rusty Soil Moisture",
+                install_date=date(2021, 8, 1),
+                health_status="ok",
+                last_reading_at=None,
+                is_reference=True,
+            )
+            session.add(probe)
+            session.flush()
+
+            for depth_cm in [20, 40, 60]:
+                session.add(ProbeDepth(
+                    id=str(uuid.uuid4()),
+                    probe_id=probe.id,
+                    depth_cm=depth_cm,
+                    sensor_type="soil_moisture",
+                    calibration_offset=0.0,
+                    calibration_factor=1.0,
+                ))
+
+            print(f"  [+] Sector '{sector.name}' | probe={probe_ext_id}")
+
+        session.commit()
+        print(f"  Amendoas do Lago: 3 plots, {len(adl_sectors)} sectors seeded ✓")
 
     # Verify counts
     with Session(engine) as session:
