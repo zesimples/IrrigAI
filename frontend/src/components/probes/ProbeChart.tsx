@@ -12,7 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { format } from "date-fns";
-import type { DepthReadings, ReferenceLines } from "@/types";
+import type { DepthReadings, ProbeDetectedEvent, ReferenceLines } from "@/types";
 
 const DEPTH_COLORS = [
   "#059669", // emerald-600
@@ -25,6 +25,7 @@ const DEPTH_COLORS = [
 interface ProbeChartProps {
   depths: DepthReadings[];
   referenceLines: ReferenceLines;
+  events?: ProbeDetectedEvent[];
   interval?: string;
 }
 
@@ -46,7 +47,7 @@ function fmtTick(ts: number) {
   return format(new Date(ts), "dd/MM HH:mm");
 }
 
-export function ProbeChart({ depths, referenceLines }: ProbeChartProps) {
+export function ProbeChart({ depths, referenceLines, events }: ProbeChartProps) {
   const data = buildChartData(depths);
 
   if (data.length === 0) {
@@ -104,6 +105,20 @@ export function ProbeChart({ depths, referenceLines }: ProbeChartProps) {
             label={{ value: "PMP", fontSize: 11, fill: "#dc2626", position: "insideBottomRight" }}
           />
         )}
+        {events?.map((event) => (
+          <ReferenceLine
+            key={event.id}
+            x={new Date(event.timestamp).getTime()}
+            stroke={event.kind === "rain" ? "#0284c7" : event.kind === "irrigation" ? "#059669" : "#d97706"}
+            strokeDasharray="4 4"
+            label={{
+              value: event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "H2O?",
+              fontSize: 10,
+              fill: event.kind === "rain" ? "#0284c7" : event.kind === "irrigation" ? "#059669" : "#d97706",
+              position: "insideTop",
+            }}
+          />
+        ))}
         {depths.map((d, idx) => (
           <Line
             key={d.depth_cm}

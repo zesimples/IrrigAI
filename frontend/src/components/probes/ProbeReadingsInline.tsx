@@ -9,7 +9,7 @@ import { ProbeChart } from "@/components/probes/ProbeChart";
 import { ProbeSumChart } from "@/components/probes/ProbeSumChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { sectorsApi, probesApi } from "@/lib/api";
-import type { ReferenceLines } from "@/types";
+import type { ProbeDetectedEvent, ReferenceLines } from "@/types";
 
 interface ProbeReadingsInlineProps {
   probeId: string;
@@ -160,38 +160,16 @@ export function ProbeReadingsInline({
         <div className="px-5 py-4 space-y-4 bg-paper">
           {/* Controls row */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
-                Humidade do solo (VWC)
-              </span>
-              <div className="flex rounded-md border border-rule-soft overflow-hidden">
-                <button
-                  onClick={() => setChartView("depths")}
-                  className={`px-2.5 py-1 font-mono text-[10px] tracking-[0.06em] transition-colors ${
-                    chartView === "depths"
-                      ? "bg-ink text-paper"
-                      : "bg-card text-ink-3 hover:text-ink"
-                  }`}
-                >
-                  Profundidades
-                </button>
-                <button
-                  onClick={() => setChartView("sum")}
-                  className={`px-2.5 py-1 font-mono text-[10px] tracking-[0.06em] border-l border-rule-soft transition-colors ${
-                    chartView === "sum"
-                      ? "bg-ink text-paper"
-                      : "bg-card text-ink-3 hover:text-ink"
-                  }`}
-                >
-                  Agregado
-                </button>
-              </div>
-            </div>
+            <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+              Humidade do solo (VWC)
+            </span>
             <ReadingsControls
               sinceHours={sinceHours}
               interval={interval}
+              view={chartView}
               onSinceChange={setSinceHours}
               onIntervalChange={setInterval}
+              onViewChange={setChartView}
             />
           </div>
 
@@ -207,14 +185,18 @@ export function ProbeReadingsInline({
                 <ProbeChart
                   depths={data.depths}
                   referenceLines={activeRefLines}
+                  events={data.events ?? []}
                   interval={interval}
                 />
               ) : (
                 <ProbeSumChart
                   depths={data.depths}
                   referenceLines={activeRefLines}
+                  events={data.events ?? []}
                 />
               )}
+
+              <DetectedEvents events={data.events ?? []} />
 
               {/* CC / PMP row */}
               <div className="flex flex-wrap items-center gap-3 rounded-md border border-rule-soft bg-card px-4 py-3">
@@ -410,6 +392,56 @@ export function ProbeReadingsInline({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function DetectedEvents({ events }: { events: ProbeDetectedEvent[] }) {
+  if (events.length === 0) {
+    return (
+      <div className="rounded-md border border-rule-soft bg-card px-4 py-3">
+        <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+          Rega / chuva detectada
+        </p>
+        <p className="mt-1 text-[12.5px] text-ink-3">
+          Sem aumentos rápidos de humidade no período seleccionado.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-rule-soft bg-card px-4 py-3">
+      <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+        Rega / chuva detectada
+      </p>
+      <ul className="mt-2 divide-y divide-rule-soft">
+        {events.map((event) => (
+          <li key={event.id} className="py-2 first:pt-0 last:pb-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${event.kind === "rain" ? "bg-[#0284c7]/10 text-[#0284c7]" : event.kind === "irrigation" ? "bg-olive/10 text-olive" : "bg-[#c9a34a]/10 text-[#c9a34a]"}`}>
+                {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Sem registo"}
+              </span>
+              <span className="font-mono text-[11px] text-ink-3">
+                {new Date(event.timestamp).toLocaleString("pt-PT", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+              <span className="font-mono text-[11px] text-ink-3">
+                conf. {event.confidence}
+              </span>
+            </div>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
+              {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {(event.delta_vwc * 100).toFixed(1)}%.
+              {event.rainfall_mm != null ? ` Chuva: ${event.rainfall_mm.toFixed(1)} mm.` : ""}
+              {event.irrigation_mm != null ? ` Rega: ${event.irrigation_mm.toFixed(1)} mm.` : ""}
+            </p>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

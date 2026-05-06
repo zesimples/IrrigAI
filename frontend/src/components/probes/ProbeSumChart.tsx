@@ -12,26 +12,37 @@ import {
   YAxis,
 } from "recharts";
 import { format } from "date-fns";
-import type { DepthReadings, ReferenceLines } from "@/types";
+import type { DepthReadings, ProbeDetectedEvent, ReferenceLines } from "@/types";
 
 interface ProbeSumChartProps {
   depths: DepthReadings[];
   referenceLines: ReferenceLines;
+  events?: ProbeDetectedEvent[];
+}
+
+interface SumPoint {
+  ts: number;
+  sum: number;
+  depthCount: number;
 }
 
 function buildSumData(depths: DepthReadings[]) {
-  const map = new Map<string, { ts: number; sum: number }>();
+  const map = new Map<string, SumPoint>();
   for (const d of depths) {
     for (const pt of d.readings) {
       const ts = pt.timestamp;
-      if (!map.has(ts)) map.set(ts, { ts: new Date(ts).getTime(), sum: 0 });
-      map.get(ts)!.sum += pt.vwc * 100;
+      if (!map.has(ts)) {
+        map.set(ts, { ts: new Date(ts).getTime(), sum: 0, depthCount: 0 });
+      }
+      const row = map.get(ts)!;
+      row.sum += pt.vwc * 100;
+      row.depthCount += 1;
     }
   }
   return [...map.values()].sort((a, b) => a.ts - b.ts);
 }
 
-export function ProbeSumChart({ depths, referenceLines }: ProbeSumChartProps) {
+export function ProbeSumChart({ depths, referenceLines, events }: ProbeSumChartProps) {
   const data = buildSumData(depths);
 
   if (data.length === 0) {
@@ -52,6 +63,8 @@ export function ProbeSumChart({ depths, referenceLines }: ProbeSumChartProps) {
   const sumWP = wpPerDepth != null ? wpPerDepth * 100 * n : null;
 
   const maxVal = Math.max(...data.map((d) => d.sum));
+  const minVal = Math.min(...data.map((d) => d.sum));
+  const latest = data[data.length - 1];
   const yMax = Math.ceil(Math.max(maxVal, sumFC ?? 0) * 1.12);
   const yMin = 0;
 
@@ -92,6 +105,20 @@ export function ProbeSumChart({ depths, referenceLines }: ProbeSumChartProps) {
               label={{ value: "PMP", fontSize: 10, fill: "#dc2626", position: "insideBottomRight" }}
             />
           )}
+          {events?.map((event) => (
+            <ReferenceLine
+              key={event.id}
+              x={new Date(event.timestamp).getTime()}
+              stroke={event.kind === "rain" ? "#0284c7" : event.kind === "irrigation" ? "#059669" : "#d97706"}
+              strokeDasharray="4 4"
+              label={{
+                value: event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "H2O?",
+                fontSize: 10,
+                fill: event.kind === "rain" ? "#0284c7" : event.kind === "irrigation" ? "#059669" : "#d97706",
+                position: "insideTop",
+              }}
+            />
+          ))}
 
           <XAxis
             dataKey="ts"
@@ -108,7 +135,7 @@ export function ProbeSumChart({ depths, referenceLines }: ProbeSumChartProps) {
             width={40}
           />
           <Tooltip
-            formatter={(value: number) => [`${value.toFixed(1)}%`, "Soma VWC"]}
+            formatter={(value: number) => [`${value.toFixed(1)}%`, "Soma das profundidades"]}
             labelFormatter={(label: number) => format(new Date(label), "dd/MM/yyyy HH:mm")}
             contentStyle={{ fontSize: 12 }}
           />
@@ -123,6 +150,27 @@ export function ProbeSumChart({ depths, referenceLines }: ProbeSumChartProps) {
           />
         </LineChart>
       </ResponsiveContainer>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="rounded-md border border-rule-soft bg-card px-3 py-2">
+          <p className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-3">Soma atual</p>
+          <p className="mt-0.5 font-mono text-[14px] font-medium text-ink tabular-nums">
+            {latest.sum.toFixed(1)}%
+          </p>
+        </div>
+        <div className="rounded-md border border-rule-soft bg-card px-3 py-2">
+          <p className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-3">Min / Max</p>
+          <p className="mt-0.5 font-mono text-[14px] font-medium text-ink tabular-nums">
+            {minVal.toFixed(1)}% / {maxVal.toFixed(1)}%
+          </p>
+        </div>
+        <div className="rounded-md border border-rule-soft bg-card px-3 py-2">
+          <p className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-3">Sensores</p>
+          <p className="mt-0.5 font-mono text-[14px] font-medium text-ink tabular-nums">
+            {latest.depthCount}/{n}
+          </p>
+        </div>
+      </div>
 
       {/* Zone legend */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">

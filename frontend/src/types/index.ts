@@ -214,10 +214,25 @@ export interface ReferenceLines {
   wilting_point: number | null;
 }
 
+export type ProbeDetectedEventKind = "irrigation" | "rain" | "unlogged" | "unknown";
+
+export interface ProbeDetectedEvent {
+  id: string;
+  timestamp: string;
+  kind: ProbeDetectedEventKind;
+  confidence: ConfidenceLevel;
+  depths_cm: number[];
+  delta_vwc: number;
+  rainfall_mm: number | null;
+  irrigation_mm: number | null;
+  message: string;
+}
+
 export interface ProbeReadingsResponse {
   probe_id: string;
   depths: DepthReadings[];
   reference_lines: ReferenceLines;
+  events: ProbeDetectedEvent[];
 }
 
 // ── Recommendation ────────────────────────────────────────────────────────────

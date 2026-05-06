@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ProbeDepthOut(BaseModel):
@@ -64,7 +65,20 @@ class ReferenceLines(BaseModel):
     optimal_range: list[float] | None = None   # [lower, upper]
 
 
+class ProbeDetectedEvent(BaseModel):
+    id: str
+    timestamp: datetime
+    kind: Literal["irrigation", "rain", "unlogged", "unknown"]
+    confidence: Literal["low", "medium", "high"]
+    depths_cm: list[int]
+    delta_vwc: float
+    rainfall_mm: float | None = None
+    irrigation_mm: float | None = None
+    message: str
+
+
 class ProbeReadingsResponse(BaseModel):
     probe_id: str
     depths: list[DepthReadings]
     reference_lines: ReferenceLines
+    events: list[ProbeDetectedEvent] = Field(default_factory=list)
