@@ -27,38 +27,51 @@ export function SectorGrid({ sectors, farmId }: SectorGridProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const cropTabs = useMemo(() => {
-    const seen = new Set<string>();
-    const order: string[] = [];
-    // Put crops with "irrigate" sectors first
-    const irrigateCrops = new Set(sectors.filter((s) => s.action === "irrigate").map((s) => s.crop_type));
+  // If all sectors share one crop type, tab by plot instead of crop.
+  const uniqueCrops = useMemo(() => new Set(sectors.map((s) => s.crop_type ?? "other")), [sectors]);
+  const tabMode: "crop" | "plot" = uniqueCrops.size <= 1 && sectors.some((s) => s.plot_name) ? "plot" : "crop";
+
+  const tabs = useMemo(() => {
+    const irrigateKeys = new Set(
+      sectors.filter((s) => s.action === "irrigate").map((s) =>
+        tabMode === "plot" ? (s.plot_id || s.plot_name) : (s.crop_type ?? "other")
+      )
+    );
+    const seen = new Map<string, string>(); // key → label
     for (const s of sectors) {
-      const ct = s.crop_type ?? "other";
-      if (!seen.has(ct)) { seen.add(ct); }
+      const key = tabMode === "plot" ? (s.plot_id || s.plot_name) : (s.crop_type ?? "other");
+      const label = tabMode === "plot" ? s.plot_name : (CROP_LABELS[s.crop_type] ?? s.crop_type);
+      if (!seen.has(key)) seen.set(key, label);
     }
-    const sorted = [...seen].sort((a, b) => {
-      const aUrgent = irrigateCrops.has(a) ? 0 : 1;
-      const bUrgent = irrigateCrops.has(b) ? 0 : 1;
-      return aUrgent - bUrgent;
-    });
-    return sorted;
-  }, [sectors]);
+    return [...seen.entries()]
+      .sort(([a], [b]) => {
+        const aU = irrigateKeys.has(a) ? 0 : 1;
+        const bU = irrigateKeys.has(b) ? 0 : 1;
+        return aU - bU;
+      })
+      .map(([key, label]) => ({ key, label }));
+  }, [sectors, tabMode]);
 
-  const initialTab = searchParams.get("crop") && cropTabs.includes(searchParams.get("crop")!)
-    ? searchParams.get("crop")!
-    : cropTabs[0] ?? null;
+  const paramKey = tabMode === "plot" ? "plot" : "crop";
+  const initialTab = (() => {
+    const p = searchParams.get(paramKey);
+    return p && tabs.some((t) => t.key === p) ? p : tabs[0]?.key ?? null;
+  })();
   const [activeTab, setActiveTab] = useState<string | null>(initialTab);
-  const currentTab = activeTab && cropTabs.includes(activeTab) ? activeTab : cropTabs[0] ?? null;
+  const currentTab = activeTab && tabs.some((t) => t.key === activeTab) ? activeTab : tabs[0]?.key ?? null;
 
-  const tabSectors = useMemo(
-    () => sortSectors(sectors.filter((s) => (s.crop_type ?? "other") === currentTab)),
-    [sectors, currentTab],
-  );
+  const tabSectors = useMemo(() => {
+    const filtered = sectors.filter((s) => {
+      const key = tabMode === "plot" ? (s.plot_id || s.plot_name) : (s.crop_type ?? "other");
+      return key === currentTab;
+    });
+    return sortSectors(filtered);
+  }, [sectors, currentTab, tabMode]);
 
-  function handleTabClick(ct: string) {
-    setActiveTab(ct);
+  function handleTabClick(key: string) {
+    setActiveTab(key);
     const params = new URLSearchParams(searchParams.toString());
-    params.set("crop", ct);
+    params.set(paramKey, key);
     router.replace(`?${params.toString()}`, { scroll: false });
   }
 
@@ -67,19 +80,22 @@ export function SectorGrid({ sectors, farmId }: SectorGridProps) {
   return (
     <section className="px-4 pt-5 pb-6 sm:px-8 lg:px-11">
       {/* Tab bar */}
-      {cropTabs.length > 0 && (
+      {tabs.length > 0 && (
         <div className="flex items-baseline gap-7 mb-4 relative overflow-x-auto pb-[1px]" role="tablist">
-          {cropTabs.map((ct) => {
-            const label = CROP_LABELS[ct] ?? ct;
-            const count = sectors.filter((s) => s.crop_type === ct).length;
-            const irrigate = sectors.filter((s) => s.crop_type === ct && s.action === "irrigate").length;
-            const active = ct === currentTab;
+          {tabs.map(({ key, label }) => {
+            const tabSecs = sectors.filter((s) => {
+              const k = tabMode === "plot" ? (s.plot_id || s.plot_name) : (s.crop_type ?? "other");
+              return k === key;
+            });
+            const count = tabSecs.length;
+            const irrigate = tabSecs.filter((s) => s.action === "irrigate").length;
+            const active = key === currentTab;
             return (
               <button
-                key={ct}
+                key={key}
                 role="tab"
                 aria-selected={active}
-                onClick={() => handleTabClick(ct)}
+                onClick={() => handleTabClick(key)}
                 className={`flex items-baseline gap-2 pb-1.5 border-b-2 font-serif tracking-[-0.01em] transition-colors ${
                   active
                     ? "border-terra text-ink text-[22px] font-semibold"

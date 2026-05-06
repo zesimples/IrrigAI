@@ -323,6 +323,8 @@ export interface SectorSummary {
   sector_id: string;
   sector_name: string;
   crop_type: string;
+  plot_id: string;
+  plot_name: string;
   current_stage: string | null;
   action: RecommendationAction | null;
   confidence_score: number | null;

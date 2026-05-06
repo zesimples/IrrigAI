@@ -18,6 +18,8 @@ class SectorSummary(BaseModel):
     sector_id: str
     sector_name: str
     crop_type: str
+    plot_id: str = ""
+    plot_name: str = ""
     current_stage: str | None = None
     action: str | None = None
     irrigation_depth_mm: float | None = None

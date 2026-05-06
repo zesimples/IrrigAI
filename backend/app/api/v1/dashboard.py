@@ -111,6 +111,7 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
         await db.execute(select(Plot).where(Plot.farm_id == farm_id))
     ).scalars().all()
 
+    plot_name_by_id: dict[str, str] = {p.id: p.name for p in plots}
     sectors: list[Sector] = []
     for plot in plots:
         s = (
@@ -200,6 +201,8 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
             sector_id=sid,
             sector_name=sector.name,
             crop_type=sector.crop_type,
+            plot_id=sector.plot_id,
+            plot_name=plot_name_by_id.get(sector.plot_id, ""),
             current_stage=sector.current_phenological_stage,
             action=latest_rec.action if latest_rec else None,
             irrigation_depth_mm=latest_rec.irrigation_depth_mm if latest_rec else None,

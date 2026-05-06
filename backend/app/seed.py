@@ -69,7 +69,7 @@ PROBE_CONQ_S25  = "959/7044"   # Turno 4 (S25) Amendoal Novo — almond
 # ---------------------------------------------------------------------------
 # Herdade das Amendoas do Lago
 #   CASTELOS NORTE (project 964), FALCÃO (project 963), VALEMOURA (project 1162)
-#   Rusty probes — soil moisture (VWC), depths to be confirmed; using [20,40,60]
+#   Rusty probes — soil moisture (VWC), 5 channels at 30/60/90/120/150cm
 # ---------------------------------------------------------------------------
 # CASTELOS NORTE
 PROBE_ADL_CN_S1 = "964/9124"   # S1 Non Pareil — Rusty 06, serial 0120AB0A
@@ -492,6 +492,10 @@ def seed(engine) -> None:
             )
             session.add(agronomist)
 
+        test_user = session.execute(
+            select(User).where(User.email == "you@irrigai.dev")
+        ).scalar_one()
+
         session.flush()
 
         # Farm
@@ -502,7 +506,7 @@ def seed(engine) -> None:
             location_lon=-7.54,
             region="Alentejo",
             timezone="Europe/Lisbon",
-            owner_id=grower.id,
+            owner_id=test_user.id,
         )
         session.add(farm)
         session.flush()
@@ -1028,9 +1032,9 @@ def seed(engine) -> None:
             session.flush()
             print("  Existing Conqueiros data cleared.")
 
-        # Reuse same owner/agronomist as Esporão
-        grower = session.execute(
-            select(User).where(User.email == "joao.silva@demo.irrigai.pt")
+        # Reuse same owner as Esporão
+        test_user = session.execute(
+            select(User).where(User.email == "you@irrigai.dev")
         ).scalar_one()
 
         # Almond and olive templates
@@ -1060,7 +1064,7 @@ def seed(engine) -> None:
             location_lon=-7.45,
             region="Alentejo",
             timezone="Europe/Lisbon",
-            owner_id=grower.id,
+            owner_id=test_user.id,
         )
         session.add(farm_conq)
         session.flush()
@@ -1554,7 +1558,7 @@ def seed(engine) -> None:
             session.add(probe)
             session.flush()
 
-            for depth_cm in [20, 40, 60]:
+            for depth_cm in [30, 60, 90, 120, 150]:
                 session.add(ProbeDepth(
                     id=str(uuid.uuid4()),
                     probe_id=probe.id,
