@@ -26,6 +26,7 @@ interface ProbeChartProps {
   depths: DepthReadings[];
   referenceLines: ReferenceLines;
   events?: ProbeDetectedEvent[];
+  hoveredEventId?: string | null;
   interval?: string;
 }
 
@@ -47,7 +48,7 @@ function fmtTick(ts: number) {
   return format(new Date(ts), "dd/MM HH:mm");
 }
 
-export function ProbeChart({ depths, referenceLines, events }: ProbeChartProps) {
+export function ProbeChart({ depths, referenceLines, events, hoveredEventId }: ProbeChartProps) {
   const data = buildChartData(depths);
 
   if (data.length === 0) {
@@ -105,20 +106,27 @@ export function ProbeChart({ depths, referenceLines, events }: ProbeChartProps) 
             label={{ value: "PMP", fontSize: 11, fill: "#dc2626", position: "insideBottomRight" }}
           />
         )}
-        {events?.map((event) => (
-          <ReferenceLine
-            key={event.id}
-            x={new Date(event.timestamp).getTime()}
-            stroke={event.kind === "rain" ? "#0284c7" : event.kind === "irrigation" ? "#059669" : "#d97706"}
-            strokeDasharray="4 4"
-            label={{
-              value: event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "H2O?",
-              fontSize: 10,
-              fill: event.kind === "rain" ? "#0284c7" : event.kind === "irrigation" ? "#059669" : "#d97706",
-              position: "insideTop",
-            }}
-          />
-        ))}
+        {events?.map((event) => {
+          const hovered = hoveredEventId === event.id;
+          const color = event.kind === "rain" ? "#0284c7" : event.kind === "irrigation" ? "#059669" : "#d97706";
+          return (
+            <ReferenceLine
+              key={event.id}
+              x={new Date(event.timestamp).getTime()}
+              stroke={color}
+              strokeDasharray={hovered ? undefined : "4 4"}
+              strokeWidth={hovered ? 2 : 1}
+              strokeOpacity={hovered ? 1 : 0.6}
+              label={{
+                value: event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : `+${(event.delta_vwc * 100).toFixed(1)}%`,
+                fontSize: hovered ? 11 : 10,
+                fontWeight: hovered ? 600 : 400,
+                fill: color,
+                position: "insideTop",
+              }}
+            />
+          );
+        })}
         {depths.map((d, idx) => (
           <Line
             key={d.depth_cm}

@@ -47,6 +47,7 @@ export function ProbeReadingsInline({
   const [refLines, setRefLines] = useState<ReferenceLines | null>(null);
 
   const [chartView, setChartView] = useState<"depths" | "sum">("depths");
+  const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
 
   const [editing, setEditing] = useState(false);
   const [ccInput, setCcInput] = useState("");
@@ -186,6 +187,7 @@ export function ProbeReadingsInline({
                   depths={data.depths}
                   referenceLines={activeRefLines}
                   events={data.events ?? []}
+                  hoveredEventId={hoveredEventId}
                   interval={interval}
                 />
               ) : (
@@ -193,10 +195,15 @@ export function ProbeReadingsInline({
                   depths={data.depths}
                   referenceLines={activeRefLines}
                   events={data.events ?? []}
+                  hoveredEventId={hoveredEventId}
                 />
               )}
 
-              <DetectedEvents events={data.events ?? []} />
+              <DetectedEvents
+                events={data.events ?? []}
+                hoveredEventId={hoveredEventId}
+                onHover={setHoveredEventId}
+              />
 
               {/* CC / PMP row */}
               <div className="flex flex-wrap items-center gap-3 rounded-md border border-rule-soft bg-card px-4 py-3">
@@ -396,52 +403,73 @@ export function ProbeReadingsInline({
   );
 }
 
-function DetectedEvents({ events }: { events: ProbeDetectedEvent[] }) {
-  if (events.length === 0) {
-    return (
-      <div className="rounded-md border border-rule-soft bg-card px-4 py-3">
-        <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
-          Rega / chuva detectada
-        </p>
-        <p className="mt-1 text-[12.5px] text-ink-3">
-          Sem aumentos rápidos de humidade no período seleccionado.
-        </p>
-      </div>
-    );
-  }
+function DetectedEvents({ events, hoveredEventId, onHover }: {
+  events: ProbeDetectedEvent[];
+  hoveredEventId: string | null;
+  onHover: (id: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
 
   return (
-    <div className="rounded-md border border-rule-soft bg-card px-4 py-3">
-      <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
-        Rega / chuva detectada
-      </p>
-      <ul className="mt-2 divide-y divide-rule-soft">
-        {events.map((event) => (
-          <li key={event.id} className="py-2 first:pt-0 last:pb-0">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${event.kind === "rain" ? "bg-[#0284c7]/10 text-[#0284c7]" : event.kind === "irrigation" ? "bg-olive/10 text-olive" : "bg-[#c9a34a]/10 text-[#c9a34a]"}`}>
-                {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Sem registo"}
-              </span>
-              <span className="font-mono text-[11px] text-ink-3">
-                {new Date(event.timestamp).toLocaleString("pt-PT", {
-                  day: "2-digit",
-                  month: "2-digit",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
-              <span className="font-mono text-[11px] text-ink-3">
-                conf. {event.confidence}
-              </span>
-            </div>
-            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
-              {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {(event.delta_vwc * 100).toFixed(1)}%.
-              {event.rainfall_mm != null ? ` Chuva: ${event.rainfall_mm.toFixed(1)} mm.` : ""}
-              {event.irrigation_mm != null ? ` Rega: ${event.irrigation_mm.toFixed(1)} mm.` : ""}
+    <div className="rounded-md border border-rule-soft bg-card">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-4 py-3 text-left"
+      >
+        <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+          Rega / chuva detectada
+        </span>
+        <span className="flex items-center gap-2 shrink-0">
+          {events.length > 0 && (
+            <span className="font-mono text-[10px] text-ink-3">{events.length}</span>
+          )}
+          <ChevronDown className={`h-3.5 w-3.5 text-ink-3 transition-transform duration-200 ${open ? "" : "-rotate-90"}`} />
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-rule-soft px-4 pb-3 pt-2">
+          {events.length === 0 ? (
+            <p className="text-[12.5px] text-ink-3">
+              Sem aumentos rápidos de humidade no período seleccionado.
             </p>
-          </li>
-        ))}
-      </ul>
+          ) : (
+            <ul className="divide-y divide-rule-soft">
+              {events.map((event) => (
+                <li
+                  key={event.id}
+                  className={`py-2 first:pt-0 last:pb-0 rounded transition-colors ${hoveredEventId === event.id ? "bg-paper-in" : ""}`}
+                  onMouseEnter={() => onHover(event.id)}
+                  onMouseLeave={() => onHover(null)}
+                >
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${event.kind === "rain" ? "bg-[#0284c7]/10 text-[#0284c7]" : event.kind === "irrigation" ? "bg-olive/10 text-olive" : "bg-[#c9a34a]/10 text-[#c9a34a]"}`}>
+                      {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Sem registo"}
+                    </span>
+                    <span className="font-mono text-[11px] text-ink-3">
+                      {new Date(event.timestamp).toLocaleString("pt-PT", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    <span className="font-mono text-[11px] text-ink-3">
+                      conf. {event.confidence}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
+                    {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {(event.delta_vwc * 100).toFixed(1)}%.
+                    {event.rainfall_mm != null ? ` Chuva: ${event.rainfall_mm.toFixed(1)} mm.` : ""}
+                    {event.irrigation_mm != null ? ` Rega: ${event.irrigation_mm.toFixed(1)} mm.` : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
