@@ -1391,8 +1391,8 @@ def seed(engine) -> None:
             session.flush()
             print("  Existing Amendoas do Lago data cleared.")
 
-        grower = session.execute(
-            select(User).where(User.email == "joao.silva@demo.irrigai.pt")
+        test_user = session.execute(
+            select(User).where(User.email == "you@irrigai.dev")
         ).scalar_one()
 
         almond_tmpl = session.execute(
@@ -1413,7 +1413,7 @@ def seed(engine) -> None:
             location_lon=-7.839,
             region="Alentejo",
             timezone="Europe/Lisbon",
-            owner_id=grower.id,
+            owner_id=test_user.id,
         )
         session.add(farm_adl)
         session.flush()
