@@ -485,18 +485,11 @@ class IrrigationAssistant:
         )
 
     def render_structured(self, interpretation: AgronomicInterpretation) -> str:
-        actions = "; ".join(interpretation.recommended_actions[:3])
-        evidence = "; ".join(f"{e.source}: {e.value}" for e in interpretation.evidence[:3])
-        parts = [
-            interpretation.summary,
-            f"Conselho: {interpretation.irrigation_advice}",
-            f"Confiança: {interpretation.confidence_score:.0%} — {interpretation.confidence_explanation}",
-        ]
-        if actions:
-            parts.append(f"Acções: {actions}")
-        if evidence:
-            parts.append(f"Evidência: {evidence}")
-        return "\n".join(parts)
+        parts = [interpretation.summary]
+        advice = interpretation.irrigation_advice
+        if advice and advice not in interpretation.summary:
+            parts.append(advice)
+        return "\n\n".join(p for p in parts if p)
 
     def _default_evidence(self, context: dict | list | None) -> list[AgronomicEvidence]:
         if not isinstance(context, dict):
