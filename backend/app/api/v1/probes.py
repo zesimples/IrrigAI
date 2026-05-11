@@ -181,14 +181,22 @@ async def get_probe_readings(
     # Downsampling step
     downsample_h = _parse_interval(interval)
 
+    # Group by depth_cm to handle duplicate ProbeDepth records at the same depth
+    from collections import defaultdict
+    depths_by_cm: dict[int, list] = defaultdict(list)
+    for d in depths:
+        depths_by_cm[d.depth_cm].append(d)
+
     depth_results: list[DepthReadings] = []
     event_source_depths: list[DepthReadings] = []
-    for depth in sorted(depths, key=lambda d: d.depth_cm):
+    for depth_cm_val in sorted(depths_by_cm):
+        depth_group = depths_by_cm[depth_cm_val]
+        depth_ids = [d.id for d in depth_group]
         rows = (
             await db.execute(
                 select(ProbeReading)
                 .where(
-                    ProbeReading.probe_depth_id == depth.id,
+                    ProbeReading.probe_depth_id.in_(depth_ids),
                     ProbeReading.timestamp >= since,
                     ProbeReading.timestamp <= until,
                     ProbeReading.unit == "vwc_m3m3",
@@ -197,20 +205,26 @@ async def get_probe_readings(
             )
         ).scalars().all()
 
+        # Deduplicate by timestamp (last write wins) when multiple depth records exist
+        seen_ts: dict = {}
+        for r in rows:
+            seen_ts[r.timestamp] = r
+        merged_rows = sorted(seen_ts.values(), key=lambda r: r.timestamp)
+
         points = [
             TimeSeriesPoint(
                 timestamp=r.timestamp,
                 vwc=r.calibrated_value if r.calibrated_value is not None else r.raw_value,
                 quality=r.quality_flag,
             )
-            for r in rows
+            for r in merged_rows
         ]
-        event_source_depths.append(DepthReadings(depth_cm=depth.depth_cm, readings=points))
+        event_source_depths.append(DepthReadings(depth_cm=depth_cm_val, readings=points))
 
         if downsample_h and points:
             points = _downsample(points, downsample_h)
 
-        depth_results.append(DepthReadings(depth_cm=depth.depth_cm, readings=points))
+        depth_results.append(DepthReadings(depth_cm=depth_cm_val, readings=points))
 
     # Reference lines from the sector's plot
     sector = await db.get(Sector, probe.sector_id)
