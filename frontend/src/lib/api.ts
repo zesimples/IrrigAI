@@ -13,6 +13,7 @@ import type {
   Plot,
   PlotCreate,
   Probe,
+  ProbeReadingsDiagnosticsResponse,
   ProbeReadingsResponse,
   Recommendation,
   RecommendationDetail,
@@ -184,6 +185,21 @@ export const probesApi = {
     if (params.interval) qs.set("interval", params.interval);
     const query = qs.toString();
     return get<ProbeReadingsResponse>(`/probes/${id}/readings${query ? `?${query}` : ""}`);
+  },
+  readingsDiagnostics: (
+    id: string,
+    params: {
+      since?: string;
+      until?: string;
+    } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.since) qs.set("since", params.since);
+    if (params.until) qs.set("until", params.until);
+    const query = qs.toString();
+    return get<ProbeReadingsDiagnosticsResponse>(
+      `/probes/${id}/readings/diagnostics${query ? `?${query}` : ""}`,
+    );
   },
 };
 

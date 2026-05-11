@@ -243,6 +243,52 @@ export interface ProbeReadingsResponse {
   events: ProbeDetectedEvent[];
 }
 
+export interface ProbeReadingGap {
+  start: string;
+  end: string;
+  duration_minutes: number;
+  expected_missing_readings: number;
+}
+
+export type ProbeDiagnosticsStatus = "ok" | "partial" | "stale" | "no_data";
+
+export interface ProbeDepthDiagnostics {
+  depth_cm: number;
+  sensor_type: string;
+  unit: string | null;
+  reading_count: number;
+  first_reading_at: string | null;
+  last_reading_at: string | null;
+  latest_quality: string | null;
+  quality_counts: Record<string, number>;
+  median_interval_minutes: number | null;
+  expected_interval_minutes: number | null;
+  max_gap_minutes: number | null;
+  gap_threshold_minutes: number | null;
+  gap_count: number;
+  gaps: ProbeReadingGap[];
+  coverage_pct: number | null;
+  freshness_hours: number | null;
+  status: ProbeDiagnosticsStatus;
+  notes: string[];
+}
+
+export interface ProbeReadingsDiagnosticsResponse {
+  probe_id: string;
+  external_id: string;
+  since: string;
+  until: string;
+  probe_last_reading_at: string | null;
+  depth_count: number;
+  total_readings: number;
+  overall_status: ProbeDiagnosticsStatus;
+  expected_interval_minutes: number | null;
+  max_gap_minutes: number | null;
+  gap_count: number;
+  suggested_backfill_hours: number;
+  depths: ProbeDepthDiagnostics[];
+}
+
 // ── Recommendation ────────────────────────────────────────────────────────────
 
 export interface Recommendation {

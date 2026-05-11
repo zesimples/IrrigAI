@@ -1,3 +1,6 @@
+import math
+import statistics
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,10 +12,13 @@ from app.engine.water_event_detector import detect_water_events
 from app.models import Plot, Probe, ProbeDepth, ProbeReading, Sector
 from app.schemas.probe import (
     DepthReadings,
+    ProbeDepthDiagnostics,
     ProbeCreate,
     ProbeDetail,
     ProbeDepthOut,
     ProbeOut,
+    ProbeReadingGap,
+    ProbeReadingsDiagnosticsResponse,
     ProbeReadingsResponse,
     ProbeUpdate,
     ReferenceLines,
@@ -47,6 +53,77 @@ async def get_probe(probe_id: str, db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/probes/{probe_id}/readings/diagnostics", response_model=ProbeReadingsDiagnosticsResponse)
+async def get_probe_readings_diagnostics(
+    probe_id: str,
+    since: datetime | None = Query(None, description="ISO timestamp, defaults to 7d ago"),
+    until: datetime | None = Query(None, description="ISO timestamp, defaults to now"),
+    db: AsyncSession = Depends(get_db),
+):
+    probe = await db.get(Probe, probe_id)
+    if not probe:
+        raise HTTPException(404, detail="Probe not found")
+
+    now = datetime.now(UTC)
+    since = _ensure_utc(since or (now - timedelta(days=7)))
+    until = _ensure_utc(until or now)
+    if since >= until:
+        raise HTTPException(400, detail="since must be before until")
+
+    depths = (
+        await db.execute(
+            select(ProbeDepth)
+            .where(ProbeDepth.probe_id == probe_id)
+            .order_by(ProbeDepth.depth_cm)
+        )
+    ).scalars().all()
+
+    depth_diagnostics: list[ProbeDepthDiagnostics] = []
+    for depth in depths:
+        rows = (
+            await db.execute(
+                select(ProbeReading)
+                .where(
+                    ProbeReading.probe_depth_id == depth.id,
+                    ProbeReading.timestamp >= since,
+                    ProbeReading.timestamp <= until,
+                )
+                .order_by(ProbeReading.timestamp)
+            )
+        ).scalars().all()
+        depth_diagnostics.append(_build_depth_diagnostics(depth, rows, until))
+
+    total_readings = sum(d.reading_count for d in depth_diagnostics)
+    gap_count = sum(d.gap_count for d in depth_diagnostics)
+    expected_intervals = [
+        d.expected_interval_minutes
+        for d in depth_diagnostics
+        if d.expected_interval_minutes is not None
+    ]
+    max_gaps = [d.max_gap_minutes for d in depth_diagnostics if d.max_gap_minutes is not None]
+
+    overall_status = _overall_diagnostics_status(depth_diagnostics)
+    suggested_backfill_hours = _suggested_backfill_hours(depth_diagnostics)
+
+    return ProbeReadingsDiagnosticsResponse(
+        probe_id=probe_id,
+        external_id=probe.external_id,
+        since=since,
+        until=until,
+        probe_last_reading_at=probe.last_reading_at,
+        depth_count=len(depths),
+        total_readings=total_readings,
+        overall_status=overall_status,
+        expected_interval_minutes=round(statistics.median(expected_intervals), 1)
+        if expected_intervals
+        else None,
+        max_gap_minutes=round(max(max_gaps), 1) if max_gaps else None,
+        gap_count=gap_count,
+        suggested_backfill_hours=suggested_backfill_hours,
+        depths=depth_diagnostics,
+    )
+
+
 @router.get("/probes/{probe_id}/readings", response_model=ProbeReadingsResponse)
 async def get_probe_readings(
     probe_id: str,
@@ -66,10 +143,8 @@ async def get_probe_readings(
     until = until or now
 
     # Normalize tz
-    if since.tzinfo is None:
-        since = since.replace(tzinfo=UTC)
-    if until.tzinfo is None:
-        until = until.replace(tzinfo=UTC)
+    since = _ensure_utc(since)
+    until = _ensure_utc(until)
 
     # Depth filter
     depth_filter: set[int] | None = None
@@ -177,6 +252,12 @@ async def update_probe(probe_id: str, body: ProbeUpdate, db: AsyncSession = Depe
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _ensure_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _parse_interval(interval: str | None) -> float | None:
     """Return interval in hours, or None for no downsampling."""
     if interval is None:
@@ -210,3 +291,186 @@ def _downsample(points: list[TimeSeriesPoint], interval_h: float) -> list[TimeSe
         result.append(current_bucket[-1])
 
     return result
+
+
+def _build_depth_diagnostics(
+    depth: ProbeDepth,
+    rows: list[ProbeReading],
+    until: datetime,
+) -> ProbeDepthDiagnostics:
+    if not rows:
+        return ProbeDepthDiagnostics(
+            depth_cm=depth.depth_cm,
+            sensor_type=depth.sensor_type,
+            reading_count=0,
+            gap_count=0,
+            status="no_data",
+            notes=["No stored readings for this depth in the selected window."],
+        )
+
+    timestamps = [_ensure_utc(row.timestamp) for row in rows]
+    deltas_min = [
+        (timestamps[idx] - timestamps[idx - 1]).total_seconds() / 60
+        for idx in range(1, len(timestamps))
+        if timestamps[idx] > timestamps[idx - 1]
+    ]
+    median_interval = statistics.median(deltas_min) if deltas_min else None
+    expected_interval = _expected_interval_minutes(deltas_min)
+    gap_threshold = expected_interval * 1.75 if expected_interval else None
+    gaps = _reading_gaps(timestamps, expected_interval, gap_threshold)
+    max_gap = max(deltas_min) if deltas_min else None
+    freshness_hours = (until - timestamps[-1]).total_seconds() / 3600
+    coverage = _coverage_pct(timestamps, expected_interval)
+    quality_counts = Counter(row.quality_flag for row in rows)
+    unit = Counter(row.unit for row in rows).most_common(1)[0][0]
+    notes = _diagnostic_notes(
+        rows=rows,
+        gaps=gaps,
+        coverage_pct=coverage,
+        freshness_hours=freshness_hours,
+        expected_interval=expected_interval,
+    )
+    status = _depth_status(
+        gaps=gaps,
+        coverage_pct=coverage,
+        freshness_hours=freshness_hours,
+        expected_interval=expected_interval,
+    )
+
+    return ProbeDepthDiagnostics(
+        depth_cm=depth.depth_cm,
+        sensor_type=depth.sensor_type,
+        unit=unit,
+        reading_count=len(rows),
+        first_reading_at=timestamps[0],
+        last_reading_at=timestamps[-1],
+        latest_quality=rows[-1].quality_flag,
+        quality_counts=dict(quality_counts),
+        median_interval_minutes=round(median_interval, 1) if median_interval else None,
+        expected_interval_minutes=round(expected_interval, 1) if expected_interval else None,
+        max_gap_minutes=round(max_gap, 1) if max_gap else None,
+        gap_threshold_minutes=round(gap_threshold, 1) if gap_threshold else None,
+        gap_count=len(gaps),
+        gaps=gaps[:20],
+        coverage_pct=round(coverage, 1) if coverage is not None else None,
+        freshness_hours=round(freshness_hours, 2),
+        status=status,
+        notes=notes,
+    )
+
+
+def _expected_interval_minutes(deltas_min: list[float]) -> float | None:
+    if not deltas_min:
+        return None
+    rounded = [max(1, int(round(delta / 15) * 15)) for delta in deltas_min if delta > 0]
+    if not rounded:
+        return None
+    counts = Counter(rounded)
+    mode, mode_count = counts.most_common(1)[0]
+    if mode_count >= max(2, len(rounded) * 0.25):
+        return float(mode)
+    return float(statistics.median(rounded))
+
+
+def _reading_gaps(
+    timestamps: list[datetime],
+    expected_interval: float | None,
+    gap_threshold: float | None,
+) -> list[ProbeReadingGap]:
+    if expected_interval is None or gap_threshold is None:
+        return []
+
+    gaps: list[ProbeReadingGap] = []
+    for idx in range(1, len(timestamps)):
+        duration_min = (timestamps[idx] - timestamps[idx - 1]).total_seconds() / 60
+        if duration_min > gap_threshold:
+            expected_missing = max(1, int(round(duration_min / expected_interval)) - 1)
+            gaps.append(
+                ProbeReadingGap(
+                    start=timestamps[idx - 1],
+                    end=timestamps[idx],
+                    duration_minutes=round(duration_min, 1),
+                    expected_missing_readings=expected_missing,
+                )
+            )
+    return gaps
+
+
+def _coverage_pct(
+    timestamps: list[datetime],
+    expected_interval: float | None,
+) -> float | None:
+    if expected_interval is None or len(timestamps) < 2:
+        return None
+    span_min = (timestamps[-1] - timestamps[0]).total_seconds() / 60
+    if span_min <= 0:
+        return None
+    expected_count = math.floor(span_min / expected_interval) + 1
+    if expected_count <= 0:
+        return None
+    return min(100.0, len(timestamps) / expected_count * 100)
+
+
+def _depth_status(
+    gaps: list[ProbeReadingGap],
+    coverage_pct: float | None,
+    freshness_hours: float,
+    expected_interval: float | None,
+) -> str:
+    stale_threshold_h = 6.0
+    if expected_interval is not None:
+        stale_threshold_h = max(6.0, expected_interval / 60 * 2.5)
+    if freshness_hours > stale_threshold_h:
+        return "stale"
+    if gaps or (coverage_pct is not None and coverage_pct < 90):
+        return "partial"
+    return "ok"
+
+
+def _diagnostic_notes(
+    rows: list[ProbeReading],
+    gaps: list[ProbeReadingGap],
+    coverage_pct: float | None,
+    freshness_hours: float,
+    expected_interval: float | None,
+) -> list[str]:
+    notes: list[str] = []
+    if expected_interval is not None:
+        notes.append(f"Estimated provider cadence is about {expected_interval:.0f} minutes.")
+    if gaps:
+        longest = max(gaps, key=lambda gap: gap.duration_minutes)
+        notes.append(
+            f"Detected {len(gaps)} storage gap(s); longest gap is {longest.duration_minutes:.0f} minutes."
+        )
+    if coverage_pct is not None and coverage_pct < 90:
+        notes.append(f"Coverage is {coverage_pct:.0f}% versus expected cadence.")
+    if freshness_hours > 6:
+        notes.append(f"Latest stored reading is {freshness_hours:.1f} hours before the query end.")
+    invalid_or_suspect = sum(1 for row in rows if row.quality_flag != "ok")
+    if invalid_or_suspect:
+        notes.append(f"{invalid_or_suspect} reading(s) are marked suspect or invalid.")
+    if not notes:
+        notes.append("Stored readings are continuous for the estimated cadence.")
+    return notes
+
+
+def _overall_diagnostics_status(depths: list[ProbeDepthDiagnostics]) -> str:
+    if not depths or all(depth.status == "no_data" for depth in depths):
+        return "no_data"
+    if any(depth.status == "stale" for depth in depths):
+        return "stale"
+    if any(depth.status in {"partial", "no_data"} for depth in depths):
+        return "partial"
+    return "ok"
+
+
+def _suggested_backfill_hours(depths: list[ProbeDepthDiagnostics]) -> int:
+    max_gap_h = 0.0
+    for depth in depths:
+        for gap in depth.gaps:
+            max_gap_h = max(max_gap_h, gap.duration_minutes / 60)
+        if depth.freshness_hours is not None:
+            max_gap_h = max(max_gap_h, depth.freshness_hours)
+    if max_gap_h <= 0:
+        return 24
+    return min(168, max(24, math.ceil(max_gap_h + 6)))

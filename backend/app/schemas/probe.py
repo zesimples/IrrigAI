@@ -90,3 +90,47 @@ class ProbeReadingsResponse(BaseModel):
     depths: list[DepthReadings]
     reference_lines: ReferenceLines
     events: list[ProbeDetectedEvent] = Field(default_factory=list)
+
+
+class ProbeReadingGap(BaseModel):
+    start: datetime
+    end: datetime
+    duration_minutes: float
+    expected_missing_readings: int
+
+
+class ProbeDepthDiagnostics(BaseModel):
+    depth_cm: int
+    sensor_type: str
+    unit: str | None = None
+    reading_count: int
+    first_reading_at: datetime | None = None
+    last_reading_at: datetime | None = None
+    latest_quality: str | None = None
+    quality_counts: dict[str, int] = Field(default_factory=dict)
+    median_interval_minutes: float | None = None
+    expected_interval_minutes: float | None = None
+    max_gap_minutes: float | None = None
+    gap_threshold_minutes: float | None = None
+    gap_count: int
+    gaps: list[ProbeReadingGap] = Field(default_factory=list)
+    coverage_pct: float | None = None
+    freshness_hours: float | None = None
+    status: Literal["ok", "partial", "stale", "no_data"]
+    notes: list[str] = Field(default_factory=list)
+
+
+class ProbeReadingsDiagnosticsResponse(BaseModel):
+    probe_id: str
+    external_id: str
+    since: datetime
+    until: datetime
+    probe_last_reading_at: datetime | None = None
+    depth_count: int
+    total_readings: int
+    overall_status: Literal["ok", "partial", "stale", "no_data"]
+    expected_interval_minutes: float | None = None
+    max_gap_minutes: float | None = None
+    gap_count: int
+    suggested_backfill_hours: int
+    depths: list[ProbeDepthDiagnostics]
