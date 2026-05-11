@@ -16,7 +16,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.pipeline import build_sector_context, build_weather_context, build_irrigation_context
 from app.engine.probe_interpreter import interpret_probes
-from app.models import Alert, Farm, Plot, Recommendation, RecommendationReason, Sector
+from app.models import (
+    Alert,
+    DetectedWaterEvent,
+    Farm,
+    IrrigationSystem,
+    Plot,
+    Probe,
+    ProbeDepth,
+    ProbeReading,
+    ProviderIngestionRun,
+    Recommendation,
+    RecommendationReason,
+    Sector,
+    SectorCropProfile,
+    WeatherForecast,
+    WeatherObservation,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -374,3 +390,367 @@ class AssistantContextBuilder:
     def to_json(self, ctx: SectorAssistantContext | FarmAssistantContext) -> str:
         """Serialise context to JSON string for injection into LLM prompt."""
         return json.dumps(asdict(ctx), ensure_ascii=False, default=str, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Structured agronomic context for LLM grounding
+# ---------------------------------------------------------------------------
+
+async def get_probe_diagnostics(probe_id: str, db: AsyncSession) -> dict:
+    """Per-probe diagnostics: depth freshness, latest readings, ingestion telemetry."""
+    probe = await db.get(Probe, probe_id)
+    if probe is None:
+        return {"error": "probe_not_found"}
+
+    depths = (
+        await db.execute(select(ProbeDepth).where(ProbeDepth.probe_id == probe_id))
+    ).scalars().all()
+    depth_info: list[dict] = []
+    for d in sorted(depths, key=lambda x: x.depth_cm):
+        depth_info.append({
+            "depth_cm": d.depth_cm,
+            "sensor_type": d.sensor_type,
+            "last_reading_at": d.last_reading_at.isoformat() if d.last_reading_at else None,
+            "last_quality_flag": d.last_quality_flag,
+            "last_unit": d.last_unit,
+            "readings_count_total": d.readings_count_total,
+            "data_status": d.data_status,
+        })
+
+    # Most recent ingestion run for this probe
+    last_run = (
+        await db.execute(
+            select(ProviderIngestionRun)
+            .where(ProviderIngestionRun.probe_id == probe_id)
+            .order_by(ProviderIngestionRun.started_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    last_run_info = None
+    if last_run is not None:
+        last_run_info = {
+            "provider": last_run.provider,
+            "started_at": last_run.started_at.isoformat(),
+            "finished_at": last_run.finished_at.isoformat() if last_run.finished_at else None,
+            "status": last_run.status,
+            "latency_ms": last_run.latency_ms,
+            "inserted": last_run.inserted,
+            "skipped_duplicate": last_run.skipped_duplicate,
+            "skipped_unknown_depth": last_run.skipped_unknown_depth,
+            "flagged_invalid": last_run.flagged_invalid,
+            "flagged_suspect": last_run.flagged_suspect,
+            "error_message": last_run.error_message,
+        }
+
+    return {
+        "probe_id": probe.id,
+        "external_id": probe.external_id,
+        "health_status": probe.health_status,
+        "last_reading_at": probe.last_reading_at.isoformat() if probe.last_reading_at else None,
+        "depths": depth_info,
+        "last_ingestion_run": last_run_info,
+    }
+
+
+async def get_sector_water_events(
+    sector_id: str, db: AsyncSession, days: int = 14
+) -> list[dict]:
+    """Return persisted water events for a sector over the last N days."""
+    since = datetime.now(UTC) - timedelta(days=days)
+    rows = (
+        await db.execute(
+            select(DetectedWaterEvent)
+            .where(
+                DetectedWaterEvent.sector_id == sector_id,
+                DetectedWaterEvent.timestamp >= since,
+            )
+            .order_by(DetectedWaterEvent.timestamp.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "probe_id": r.probe_id,
+            "timestamp": r.timestamp.isoformat(),
+            "kind": r.kind,
+            "confidence": r.confidence,
+            "score": round(r.score, 3),
+            "depths_cm": list(r.depths_cm or []),
+            "delta_vwc": round(r.delta_vwc, 4),
+            "rainfall_mm": r.rainfall_mm,
+            "irrigation_mm": r.irrigation_mm,
+            "status": r.status,
+            "message": r.message,
+        }
+        for r in rows
+    ]
+
+
+async def get_sector_water_balance(sector_id: str, db: AsyncSession) -> dict:
+    """Return the most recent recommendation's water-balance snapshot."""
+    rec = (
+        await db.execute(
+            select(Recommendation)
+            .where(Recommendation.sector_id == sector_id)
+            .order_by(Recommendation.generated_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if rec is None:
+        return {"available": False}
+    snap = rec.inputs_snapshot or {}
+    return {
+        "available": True,
+        "generated_at": rec.generated_at.isoformat(),
+        "depletion_mm": snap.get("depletion_mm"),
+        "taw_mm": snap.get("taw_mm"),
+        "raw_mm": snap.get("raw_mm"),
+        "swc_current": snap.get("swc_current"),
+        "et0_mm": snap.get("et0_mm"),
+        "kc": snap.get("kc"),
+        "rainfall_mm": snap.get("rainfall_mm"),
+        "forecast_rain_next_48h": snap.get("forecast_rain_next_48h"),
+    }
+
+
+async def get_weather_summary(
+    farm_id: str, db: AsyncSession, obs_days: int = 7, fc_days: int = 3
+) -> dict:
+    """Recent observations + short-term forecast for a farm."""
+    now = datetime.now(UTC)
+    obs_since = now - timedelta(days=obs_days)
+    obs = (
+        await db.execute(
+            select(WeatherObservation)
+            .where(
+                WeatherObservation.farm_id == farm_id,
+                WeatherObservation.timestamp >= obs_since,
+            )
+            .order_by(WeatherObservation.timestamp.desc())
+            .limit(obs_days * 4)
+        )
+    ).scalars().all()
+    fc = (
+        await db.execute(
+            select(WeatherForecast)
+            .where(WeatherForecast.farm_id == farm_id)
+            .order_by(WeatherForecast.forecast_date)
+            .limit(fc_days)
+        )
+    ).scalars().all()
+    return {
+        "recent_observations": [
+            {
+                "timestamp": o.timestamp.isoformat(),
+                "temperature_max_c": o.temperature_max_c,
+                "temperature_min_c": o.temperature_min_c,
+                "humidity_pct": o.humidity_pct,
+                "rainfall_mm": o.rainfall_mm,
+                "et0_mm": o.et0_mm,
+            }
+            for o in obs
+        ],
+        "forecast": [
+            {
+                "date": f.forecast_date.isoformat(),
+                "temperature_max_c": f.temperature_max_c,
+                "temperature_min_c": f.temperature_min_c,
+                "rainfall_mm": f.rainfall_mm,
+                "rainfall_probability_pct": f.rainfall_probability_pct,
+                "et0_mm": f.et0_mm,
+            }
+            for f in fc
+        ],
+    }
+
+
+async def get_recommendation_history(
+    sector_id: str, db: AsyncSession, limit: int = 5
+) -> list[dict]:
+    """Return the most recent recommendations for a sector."""
+    rows = (
+        await db.execute(
+            select(Recommendation)
+            .where(Recommendation.sector_id == sector_id)
+            .order_by(Recommendation.generated_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "generated_at": r.generated_at.isoformat(),
+            "action": r.action,
+            "irrigation_depth_mm": r.irrigation_depth_mm,
+            "irrigation_runtime_min": r.irrigation_runtime_min,
+            "confidence_score": r.confidence_score,
+            "confidence_level": r.confidence_level,
+            "is_accepted": r.is_accepted,
+        }
+        for r in rows
+    ]
+
+
+async def build_structured_agronomic_context(
+    sector_id: str, db: AsyncSession
+) -> dict:
+    """Build a complete agronomic context dict for LLM grounding.
+
+    Returns a JSON-serialisable dict covering every data surface the LLM is
+    allowed to reason over.  Each call hits the DB directly — callers should
+    cache when re-using inside a single conversation turn.
+    """
+    sector = await db.get(Sector, sector_id)
+    if sector is None:
+        return {"error": "sector_not_found", "sector_id": sector_id}
+
+    plot = await db.get(Plot, sector.plot_id) if sector.plot_id else None
+    farm = await db.get(Farm, plot.farm_id) if plot else None
+
+    crop_profile = (
+        await db.execute(
+            select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
+        )
+    ).scalar_one_or_none()
+    irrigation_system = (
+        await db.execute(
+            select(IrrigationSystem).where(IrrigationSystem.sector_id == sector_id)
+        )
+    ).scalar_one_or_none()
+
+    # Probes + per-depth diagnostics
+    probes = (
+        await db.execute(select(Probe).where(Probe.sector_id == sector_id))
+    ).scalars().all()
+    probe_diagnostics: list[dict] = []
+    latest_readings: list[dict] = []
+    for probe in probes:
+        diag = await get_probe_diagnostics(probe.id, db)
+        probe_diagnostics.append(diag)
+        # Pull the latest VWC reading per depth for the last 48h
+        for d in diag.get("depths", []):
+            if d.get("last_reading_at") is None:
+                continue
+            latest_readings.append({
+                "probe_id": probe.id,
+                "probe_external_id": probe.external_id,
+                "depth_cm": d["depth_cm"],
+                "last_reading_at": d["last_reading_at"],
+                "quality_flag": d["last_quality_flag"],
+                "data_status": d["data_status"],
+            })
+
+    water_events = await get_sector_water_events(sector_id, db, days=14)
+    weather = await get_weather_summary(farm.id if farm else "", db) if farm else {
+        "recent_observations": [], "forecast": []
+    }
+    water_balance = await get_sector_water_balance(sector_id, db)
+    recs = await get_recommendation_history(sector_id, db)
+
+    # Data quality scoring across all probes
+    fresh_depths = sum(
+        1 for d in probe_diagnostics for x in d.get("depths", [])
+        if x.get("data_status") == "ok"
+    )
+    total_depths = sum(len(d.get("depths", [])) for d in probe_diagnostics)
+    stale_depths = sum(
+        1 for d in probe_diagnostics for x in d.get("depths", [])
+        if x.get("data_status") in ("stale", "no_data")
+    )
+
+    known_limitations: list[str] = []
+    if not probes:
+        known_limitations.append("Sector has no probes — no direct soil moisture signal.")
+    if total_depths and stale_depths == total_depths:
+        known_limitations.append("All probe depths are stale; reasoning relies on water balance only.")
+    if irrigation_system is None:
+        known_limitations.append("Irrigation system is not configured — applied-mm conversions use defaults.")
+    if crop_profile is None:
+        known_limitations.append("No sector crop profile attached — Kc and root depth fall back to defaults.")
+    if not weather.get("recent_observations"):
+        known_limitations.append("No recent weather observations available for this farm.")
+    if not water_balance.get("available"):
+        known_limitations.append("No water-balance snapshot has been generated yet for this sector.")
+
+    confidence_inputs = {
+        "fresh_depths": fresh_depths,
+        "total_depths": total_depths,
+        "stale_depths": stale_depths,
+        "has_weather": bool(weather.get("recent_observations")),
+        "has_forecast": bool(weather.get("forecast")),
+        "has_water_balance": water_balance.get("available", False),
+        "active_water_events_14d": sum(1 for e in water_events if e["status"] == "active"),
+        "irrigation_system_configured": irrigation_system is not None,
+        "crop_profile_configured": crop_profile is not None,
+    }
+
+    return {
+        "sector": {
+            "id": sector.id,
+            "name": sector.name,
+            "crop_type": sector.crop_type,
+            "variety": sector.variety,
+            "area_ha": sector.area_ha,
+            "current_phenological_stage": sector.current_phenological_stage,
+            "irrigation_strategy": sector.irrigation_strategy,
+            "deficit_factor": sector.deficit_factor,
+        },
+        "farm": (
+            {
+                "id": farm.id,
+                "name": farm.name,
+                "region": farm.region,
+                "timezone": farm.timezone,
+                "location_lat": farm.location_lat,
+                "location_lon": farm.location_lon,
+            }
+            if farm else None
+        ),
+        "crop": (
+            {
+                "crop_type": crop_profile.crop_type,
+                "mad": crop_profile.mad,
+                "root_depth_mature_m": crop_profile.root_depth_mature_m,
+                "root_depth_young_m": crop_profile.root_depth_young_m,
+                "stages": crop_profile.stages,
+                "is_customized": crop_profile.is_customized,
+            }
+            if crop_profile else None
+        ),
+        "soil": (
+            {
+                "field_capacity": plot.field_capacity,
+                "wilting_point": plot.wilting_point,
+                "soil_texture": plot.soil_texture,
+                "stone_content_pct": plot.stone_content_pct,
+            }
+            if plot else None
+        ),
+        "irrigation_system": (
+            {
+                "system_type": irrigation_system.system_type,
+                "application_rate_mm_h": irrigation_system.application_rate_mm_h,
+                "efficiency": irrigation_system.efficiency,
+                "distribution_uniformity": irrigation_system.distribution_uniformity,
+                "max_runtime_hours": irrigation_system.max_runtime_hours,
+            }
+            if irrigation_system else None
+        ),
+        "probe_summary": {
+            "data_quality": {
+                "fresh_depths": fresh_depths,
+                "stale_depths": stale_depths,
+                "total_depths": total_depths,
+            },
+            "depths": [d for diag in probe_diagnostics for d in diag.get("depths", [])],
+            "latest_readings": latest_readings,
+            "diagnostics": probe_diagnostics,
+        },
+        "water_events": water_events,
+        "weather": weather,
+        "water_balance": water_balance,
+        "recommendation_history": recs,
+        "known_limitations": known_limitations,
+        "confidence_inputs": confidence_inputs,
+    }

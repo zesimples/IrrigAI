@@ -10,7 +10,10 @@ import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.context_builder import AssistantContextBuilder
+from app.ai.context_builder import (
+    AssistantContextBuilder,
+    build_structured_agronomic_context,
+)
 from app.ai.openai_client import MockChatClient, OpenAIChatClient
 from app.ai import prompt_templates
 from app.ai.probe_signal import compute_probe_signal_stats
@@ -147,10 +150,28 @@ class IrrigationAssistant:
         db: AsyncSession,
         sector_id: str | None = None,
     ) -> str:
-        """Free-form chat about the farm or a specific sector."""
+        """Free-form chat about the farm or a specific sector.
+
+        When a sector_id is available we attach the full structured agronomic
+        context (probes, water events, weather, history, limitations) so the
+        LLM can cite evidence rather than hallucinate.
+        """
         if sector_id:
-            ctx = await self.context_builder.build_sector_context(sector_id, db)
-            context_json = self.context_builder.to_json(ctx)
+            base_ctx = await self.context_builder.build_sector_context(sector_id, db)
+            base_json = self.context_builder.to_json(base_ctx)
+            try:
+                structured = await build_structured_agronomic_context(sector_id, db)
+                structured_json = json.dumps(
+                    structured, ensure_ascii=False, default=str, indent=2
+                )
+                context_json = (
+                    base_json
+                    + "\n\n# STRUCTURED AGRONOMIC CONTEXT (cite by JSON path)\n"
+                    + structured_json
+                )
+            except Exception:
+                # Structured context is best-effort; never break chat.
+                context_json = base_json
         else:
             ctx = await self.context_builder.build_farm_context(farm_id, db)
             context_json = self.context_builder.to_json(ctx)
@@ -158,5 +179,14 @@ class IrrigationAssistant:
         system_prompt = prompt_templates.CHAT_QA_PT.format(
             context_json=context_json,
             user_message=user_message,
+        )
+        # Instruct the model to cite evidence keys from the structured context.
+        system_prompt = (
+            system_prompt
+            + "\n\nNota: quando a STRUCTURED AGRONOMIC CONTEXT estiver disponível, "
+            + "fundamenta cada afirmação com referência ao caminho JSON exacto "
+            + "(p.ex. probe_summary.latest_readings, weather.forecast, water_events) "
+            + "e identifica explicitamente os campos em known_limitations quando "
+            + "responderes sobre fiabilidade."
         )
         return await self.client.complete(system_prompt, user_message, max_tokens=700)

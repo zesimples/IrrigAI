@@ -81,6 +81,12 @@ class IngestionSummary(BaseModel):
     probe_external_id: str | None = None
     inserted: int = 0
     skipped_duplicate: int = 0
+    skipped_unknown_depth: int = 0
+    skipped_null: int = 0
+    skipped_sentinel: int = 0
     flagged_invalid: int = 0
     flagged_suspect: int = 0
     errors: int = 0
+    provider_records_seen: int = 0
+    provider_records_parsed: int = 0
+    run_id: str | None = None
