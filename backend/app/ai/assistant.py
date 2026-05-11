@@ -485,11 +485,48 @@ class IrrigationAssistant:
         )
 
     def render_structured(self, interpretation: AgronomicInterpretation) -> str:
-        parts = [interpretation.summary]
-        advice = interpretation.irrigation_advice
-        if advice and advice not in interpretation.summary:
-            parts.append(advice)
-        return "\n\n".join(p for p in parts if p)
+        _SRC_LABEL: dict[str, str] = {
+            "water_balance": "Água no solo",
+            "evapotranspiration": "Consumo da cultura",
+            "probe_live": "Qualidade dos dados",
+            "probe_summary.data_quality": "Qualidade dos dados",
+            "probe_summary": "Qualidade dos dados",
+            "probe_signal": "Leituras da sonda",
+            "weather.forecast": "Previsão do tempo",
+            "weather": "Previsão do tempo",
+            "alert": "Atenção",
+            "water_events": "Eventos de rega/chuva",
+            "recommendation_history": "Histórico",
+            "known_limitations": "Limitações",
+        }
+
+        lines: list[str] = []
+        used: set[str] = set()
+
+        for ev in interpretation.evidence[:6]:
+            label = next(
+                (lbl for key, lbl in _SRC_LABEL.items() if ev.source.startswith(key)),
+                ev.source.replace("_", " ").replace(".", " ").title(),
+            )
+            if label not in used:
+                lines.append(f"• {label}: {ev.value}")
+                used.add(label)
+
+        if not lines:
+            lines.append(f"• {interpretation.summary}")
+
+        if interpretation.risk_level in ("high", "critical") and "Atenção" not in used:
+            msg = interpretation.missing_data[0] if interpretation.missing_data else interpretation.irrigation_advice
+            lines.append(f"• Atenção: {msg}")
+
+        if interpretation.confidence_score < 0.60:
+            pct = round(interpretation.confidence_score * 100)
+            lines.append(
+                f"• Baixa confiança: A confiança na recomendação é de {pct}%"
+                f" — {interpretation.confidence_explanation}"
+            )
+
+        return "\n".join(lines)
 
     def _default_evidence(self, context: dict | list | None) -> list[AgronomicEvidence]:
         if not isinstance(context, dict):
