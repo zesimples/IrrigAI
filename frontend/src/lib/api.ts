@@ -241,7 +241,7 @@ export const probesApi = {
 };
 
 export const waterEventsApi = {
-  confirm: (id: string, body: { notes?: string } = {}) =>
+  confirm: (id: string, body: { notes?: string; kind?: string } = {}) =>
     post<DetectedWaterEventOut>(`/water-events/${id}/confirm`, body),
   reject: (id: string, body: { notes?: string } = {}) =>
     post<DetectedWaterEventOut>(`/water-events/${id}/reject`, body),

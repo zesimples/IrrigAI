@@ -219,6 +219,7 @@ class DetectedWaterEventOut(BaseModel):
 
 class WaterEventConfirmBody(BaseModel):
     notes: str | None = None
+    kind: Literal["irrigation", "rain", "unlogged", "unknown"] | None = None
 
 
 AnyDict = dict[str, Any]

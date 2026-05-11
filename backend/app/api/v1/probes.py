@@ -388,6 +388,8 @@ async def confirm_water_event(
     event.confirmed_at = datetime.now(UTC)
     if body.notes:
         event.notes = body.notes
+    if body.kind:
+        event.kind = body.kind
     await db.commit()
     await db.refresh(event)
     return DetectedWaterEventOut.model_validate(event)

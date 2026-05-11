@@ -419,8 +419,9 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
   const [open, setOpen] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
 
-  async function updateEvent(event: ProbeDetectedEvent, action: "confirm" | "reject") {
-    setActionId(`${action}:${event.id}`);
+  async function updateEvent(event: ProbeDetectedEvent, action: "confirm" | "reject", kind?: string) {
+    const key = kind ? `confirm:${kind}:${event.id}` : `${action}:${event.id}`;
+    setActionId(key);
     try {
       let persistedId = event.id;
       if (event.id.startsWith("wetting-")) {
@@ -433,7 +434,7 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
         persistedId = match.id;
       }
       if (action === "confirm") {
-        await waterEventsApi.confirm(persistedId);
+        await waterEventsApi.confirm(persistedId, kind ? { kind } : {});
       } else {
         await waterEventsApi.reject(persistedId);
       }
@@ -512,11 +513,19 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
                       <div className="mt-2 flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => updateEvent(event, "confirm")}
+                          onClick={() => updateEvent(event, "confirm", "irrigation")}
                           disabled={actionId != null}
-                          className="rounded-md border border-olive/20 bg-olive/10 px-2.5 py-1 font-mono text-[10.5px] text-olive disabled:opacity-50"
+                          className={`rounded-md border px-2.5 py-1 font-mono text-[10.5px] text-olive disabled:opacity-50 ${event.kind === "irrigation" ? "border-olive/50 bg-olive/15" : "border-olive/20 bg-olive/10"}`}
                         >
-                          {actionId === `confirm:${event.id}` ? "A guardar..." : event.kind === "rain" ? "Confirmar chuva" : "Confirmar rega"}
+                          {actionId === `confirm:irrigation:${event.id}` ? "A guardar..." : "Confirmar rega"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateEvent(event, "confirm", "rain")}
+                          disabled={actionId != null}
+                          className={`rounded-md border px-2.5 py-1 font-mono text-[10.5px] text-[#0284c7] disabled:opacity-50 ${event.kind === "rain" ? "border-[#0284c7]/50 bg-[#0284c7]/15" : "border-[#0284c7]/20 bg-[#0284c7]/10"}`}
+                        >
+                          {actionId === `confirm:rain:${event.id}` ? "A guardar..." : "Confirmar chuva"}
                         </button>
                         <button
                           type="button"
