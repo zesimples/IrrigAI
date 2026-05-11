@@ -202,6 +202,7 @@ export function ProbeReadingsInline({
 
               <DetectedEvents
                 events={visibleEvents}
+                probeId={probeId}
                 hoveredEventId={hoveredEventId}
                 onHover={setHoveredEventId}
                 onEventUpdated={refetch}
@@ -405,8 +406,9 @@ export function ProbeReadingsInline({
   );
 }
 
-function DetectedEvents({ events, hoveredEventId, onHover, onEventUpdated }: {
+function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdated }: {
   events: ProbeDetectedEvent[];
+  probeId: string;
   hoveredEventId: string | null;
   onHover: (id: string | null) => void;
   onEventUpdated: () => void | Promise<void>;
@@ -414,13 +416,23 @@ function DetectedEvents({ events, hoveredEventId, onHover, onEventUpdated }: {
   const [open, setOpen] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
 
-  async function updateEvent(eventId: string, action: "confirm" | "reject") {
-    setActionId(`${action}:${eventId}`);
+  async function updateEvent(event: ProbeDetectedEvent, action: "confirm" | "reject") {
+    setActionId(`${action}:${event.id}`);
     try {
+      let persistedId = event.id;
+      if (event.id.startsWith("wetting-")) {
+        // Temp event — persist first, then find the matching row by timestamp+kind
+        const persisted = await probesApi.refreshWaterEvents(probeId);
+        const match = persisted.find(
+          (e) => e.kind === event.kind && Math.abs(new Date(e.timestamp).getTime() - new Date(event.timestamp).getTime()) < 60_000
+        );
+        if (!match) { await onEventUpdated(); return; }
+        persistedId = match.id;
+      }
       if (action === "confirm") {
-        await waterEventsApi.confirm(eventId);
+        await waterEventsApi.confirm(persistedId);
       } else {
-        await waterEventsApi.reject(eventId);
+        await waterEventsApi.reject(persistedId);
       }
       await onEventUpdated();
     } finally {
@@ -455,7 +467,6 @@ function DetectedEvents({ events, hoveredEventId, onHover, onEventUpdated }: {
           ) : (
             <ul className="divide-y divide-rule-soft">
               {events.map((event) => {
-                const canModerate = !event.id.startsWith("wetting-");
                 return (
                   <li
                     key={event.id}
@@ -494,11 +505,11 @@ function DetectedEvents({ events, hoveredEventId, onHover, onEventUpdated }: {
                       {event.rainfall_mm != null ? ` Chuva: ${event.rainfall_mm.toFixed(1)} mm.` : ""}
                       {event.irrigation_mm != null ? ` Rega: ${event.irrigation_mm.toFixed(1)} mm.` : ""}
                     </p>
-                    {canModerate && event.status !== "confirmed" && event.status !== "rejected" && (
+                    {event.status !== "confirmed" && event.status !== "rejected" && (
                       <div className="mt-2 flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => updateEvent(event.id, "confirm")}
+                          onClick={() => updateEvent(event, "confirm")}
                           disabled={actionId != null}
                           className="rounded-md border border-olive/20 bg-olive/10 px-2.5 py-1 font-mono text-[10.5px] text-olive disabled:opacity-50"
                         >
@@ -506,18 +517,13 @@ function DetectedEvents({ events, hoveredEventId, onHover, onEventUpdated }: {
                         </button>
                         <button
                           type="button"
-                          onClick={() => updateEvent(event.id, "reject")}
+                          onClick={() => updateEvent(event, "reject")}
                           disabled={actionId != null}
                           className="rounded-md border border-terra/20 bg-terra/10 px-2.5 py-1 font-mono text-[10.5px] text-terra disabled:opacity-50"
                         >
                           {actionId === `reject:${event.id}` ? "A guardar..." : "Falso positivo"}
                         </button>
                       </div>
-                    )}
-                    {!canModerate && (
-                      <p className="mt-2 font-mono text-[10.5px] text-ink-3">
-                        Evento temporário. Recalcular para guardar e confirmar.
-                      </p>
                     )}
                   </li>
                 );
