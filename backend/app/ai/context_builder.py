@@ -754,3 +754,195 @@ async def build_structured_agronomic_context(
         "known_limitations": known_limitations,
         "confidence_inputs": confidence_inputs,
     }
+
+
+async def build_sector_change_context(
+    sector_id: str,
+    db: AsyncSession,
+    window_hours: int = 72,
+) -> dict:
+    """Build a compact before/after context for LLM change analysis."""
+    window_hours = max(24, min(window_hours, 168))
+    now = datetime.now(UTC)
+    since = now - timedelta(hours=window_hours)
+    split = now - timedelta(hours=window_hours / 2)
+
+    current = await build_structured_agronomic_context(sector_id, db)
+    if current.get("error"):
+        return current
+
+    probes = (
+        await db.execute(select(Probe).where(Probe.sector_id == sector_id))
+    ).scalars().all()
+
+    probe_changes: list[dict] = []
+    for probe in probes:
+        depths = (
+            await db.execute(select(ProbeDepth).where(ProbeDepth.probe_id == probe.id))
+        ).scalars().all()
+        for depth in sorted(depths, key=lambda d: d.depth_cm):
+            rows = (
+                await db.execute(
+                    select(ProbeReading)
+                    .where(
+                        ProbeReading.probe_depth_id == depth.id,
+                        ProbeReading.timestamp >= since,
+                        ProbeReading.timestamp <= now,
+                        ProbeReading.unit == "vwc_m3m3",
+                    )
+                    .order_by(ProbeReading.timestamp)
+                )
+            ).scalars().all()
+            if not rows:
+                probe_changes.append({
+                    "probe_id": probe.id,
+                    "probe_external_id": probe.external_id,
+                    "depth_cm": depth.depth_cm,
+                    "status": "no_readings_in_window",
+                    "data_status": depth.data_status,
+                })
+                continue
+
+            previous_values = [_reading_value(r) for r in rows if _ensure_utc(r.timestamp) < split]
+            recent_values = [_reading_value(r) for r in rows if _ensure_utc(r.timestamp) >= split]
+            previous_values = [v for v in previous_values if v is not None]
+            recent_values = [v for v in recent_values if v is not None]
+            first_value = _reading_value(rows[0])
+            last_value = _reading_value(rows[-1])
+
+            probe_changes.append({
+                "probe_id": probe.id,
+                "probe_external_id": probe.external_id,
+                "depth_cm": depth.depth_cm,
+                "reading_count": len(rows),
+                "first_reading_at": _ensure_utc(rows[0].timestamp).isoformat(),
+                "last_reading_at": _ensure_utc(rows[-1].timestamp).isoformat(),
+                "first_vwc": round(first_value, 4) if first_value is not None else None,
+                "last_vwc": round(last_value, 4) if last_value is not None else None,
+                "delta_vwc": round(last_value - first_value, 4)
+                if first_value is not None and last_value is not None
+                else None,
+                "previous_half_avg_vwc": round(sum(previous_values) / len(previous_values), 4)
+                if previous_values else None,
+                "recent_half_avg_vwc": round(sum(recent_values) / len(recent_values), 4)
+                if recent_values else None,
+                "quality_counts": _quality_counts(rows),
+                "data_status": depth.data_status,
+            })
+
+    water_events = (
+        await db.execute(
+            select(DetectedWaterEvent)
+            .where(
+                DetectedWaterEvent.sector_id == sector_id,
+                DetectedWaterEvent.timestamp >= since,
+            )
+            .order_by(DetectedWaterEvent.timestamp.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+
+    recs = (
+        await db.execute(
+            select(Recommendation)
+            .where(Recommendation.sector_id == sector_id)
+            .order_by(Recommendation.generated_at.desc())
+            .limit(2)
+        )
+    ).scalars().all()
+    latest_rec = recs[0] if recs else None
+    previous_rec = recs[1] if len(recs) > 1 else None
+
+    farm_id = current.get("farm", {}).get("id") if current.get("farm") else None
+    weather_observations: list[dict] = []
+    if farm_id:
+        obs = (
+            await db.execute(
+                select(WeatherObservation)
+                .where(
+                    WeatherObservation.farm_id == farm_id,
+                    WeatherObservation.timestamp >= since,
+                )
+                .order_by(WeatherObservation.timestamp.desc())
+                .limit(20)
+            )
+        ).scalars().all()
+        weather_observations = [
+            {
+                "timestamp": o.timestamp.isoformat(),
+                "rainfall_mm": o.rainfall_mm,
+                "et0_mm": o.et0_mm,
+                "temperature_max_c": o.temperature_max_c,
+            }
+            for o in obs
+        ]
+
+    return {
+        "analysis_type": "sector_change_analysis",
+        "window_hours": window_hours,
+        "generated_at": now.isoformat(),
+        "sector": current.get("sector"),
+        "current_context_summary": {
+            "probe_data_quality": current.get("probe_summary", {}).get("data_quality"),
+            "water_balance": current.get("water_balance"),
+            "known_limitations": current.get("known_limitations", []),
+        },
+        "probe_changes": probe_changes,
+        "water_event_changes": [
+            {
+                "id": e.id,
+                "timestamp": e.timestamp.isoformat(),
+                "kind": e.kind,
+                "status": e.status,
+                "confidence": e.confidence,
+                "score": round(e.score, 3),
+                "depths_cm": list(e.depths_cm or []),
+                "delta_vwc": round(e.delta_vwc, 4),
+                "rainfall_mm": e.rainfall_mm,
+                "irrigation_mm": e.irrigation_mm,
+                "message": e.message,
+            }
+            for e in water_events
+        ],
+        "recommendation_change": {
+            "latest": _recommendation_change_row(latest_rec),
+            "previous": _recommendation_change_row(previous_rec),
+        },
+        "weather_changes": {
+            "observations": weather_observations,
+            "forecast": current.get("weather", {}).get("forecast", []),
+        },
+        "known_limitations": current.get("known_limitations", []),
+    }
+
+
+def _ensure_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _reading_value(reading: ProbeReading) -> float | None:
+    value = reading.calibrated_value if reading.calibrated_value is not None else reading.raw_value
+    return float(value) if value is not None else None
+
+
+def _quality_counts(rows: list[ProbeReading]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row.quality_flag] = counts.get(row.quality_flag, 0) + 1
+    return counts
+
+
+def _recommendation_change_row(rec: Recommendation | None) -> dict | None:
+    if rec is None:
+        return None
+    return {
+        "id": rec.id,
+        "generated_at": rec.generated_at.isoformat(),
+        "action": rec.action,
+        "irrigation_depth_mm": rec.irrigation_depth_mm,
+        "irrigation_runtime_min": rec.irrigation_runtime_min,
+        "confidence_score": rec.confidence_score,
+        "confidence_level": rec.confidence_level,
+        "is_accepted": rec.is_accepted,
+        "inputs_snapshot": rec.inputs_snapshot or {},
+    }

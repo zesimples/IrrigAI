@@ -325,6 +325,34 @@ export interface DetectedWaterEventOut {
   updated_at: string;
 }
 
+// ── AI Structured Output ─────────────────────────────────────────────────────
+
+export interface AgronomicEvidence {
+  source: string;
+  value: string;
+}
+
+export interface AgronomicInterpretation {
+  summary: string;
+  risk_level: "low" | "medium" | "high";
+  irrigation_advice: string;
+  evidence: AgronomicEvidence[];
+  missing_data: string[];
+  confidence_score: number;
+  confidence_explanation: string;
+  recommended_actions: string[];
+}
+
+export interface AITextResponse {
+  reply?: string;
+  explanation?: string;
+  summary?: string;
+  diagnosis?: string;
+  interpretation?: string;
+  analysis?: string;
+  structured?: AgronomicInterpretation | null;
+}
+
 // ── Provider Ingestion Runs ──────────────────────────────────────────────────
 
 export interface IngestionRunOut {

@@ -29,3 +29,10 @@ class AgronomicInterpretation(BaseModel):
     confidence_score: float = Field(ge=0.0, le=1.0)
     confidence_explanation: str
     recommended_actions: list[str] = Field(default_factory=list)
+
+
+class StructuredAIResponse(BaseModel):
+    """Backward-compatible wrapper for string UI plus structured evidence."""
+
+    text: str
+    structured: AgronomicInterpretation

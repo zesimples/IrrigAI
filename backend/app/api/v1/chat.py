@@ -9,6 +9,7 @@ from app.ai.context_builder import AssistantContextBuilder
 from app.ai.openai_client import get_chat_client
 from app.config import get_settings
 from app.database import get_db
+from app.schemas.ai import AgronomicInterpretation
 
 router = APIRouter(tags=["chat"])
 
@@ -39,6 +40,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+    structured: AgronomicInterpretation | None = None
 
 
 class ExplainRequest(BaseModel):
@@ -47,10 +49,12 @@ class ExplainRequest(BaseModel):
 
 class ExplainResponse(BaseModel):
     explanation: str
+    structured: AgronomicInterpretation | None = None
 
 
 class SummaryResponse(BaseModel):
     summary: str
+    structured: AgronomicInterpretation | None = None
 
 
 class QuestionsResponse(BaseModel):
@@ -59,10 +63,21 @@ class QuestionsResponse(BaseModel):
 
 class DiagnosisResponse(BaseModel):
     diagnosis: str
+    structured: AgronomicInterpretation | None = None
 
 
 class InterpretationResponse(BaseModel):
     interpretation: str
+    structured: AgronomicInterpretation | None = None
+
+
+class ChangeAnalysisRequest(BaseModel):
+    window_hours: int = 72
+
+
+class ChangeAnalysisResponse(BaseModel):
+    analysis: str
+    structured: AgronomicInterpretation
 
 
 # ---------------------------------------------------------------------------
@@ -78,15 +93,16 @@ async def farm_chat(
 ):
     """Free-form conversational chat about the farm or a specific sector."""
     try:
-        reply = await assistant.chat(
+        structured = await assistant.chat_structured(
             farm_id=farm_id,
             user_message=body.message,
             db=db,
             sector_id=body.sector_id,
         )
+        reply = assistant.render_structured(structured)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return ChatResponse(reply=reply)
+    return ChatResponse(reply=reply, structured=structured)
 
 
 @router.post("/sectors/{sector_id}/explain", response_model=ExplainResponse)
@@ -102,12 +118,13 @@ async def explain_sector_recommendation(
     that will be incorporated into the AI analysis.
     """
     try:
-        explanation = await assistant.explain_recommendation(
+        structured = await assistant.explain_recommendation_structured(
             sector_id=sector_id, db=db, user_notes=body.user_notes
         )
+        explanation = assistant.render_structured(structured)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return ExplainResponse(explanation=explanation)
+    return ExplainResponse(explanation=explanation, structured=structured)
 
 
 @router.post("/farms/{farm_id}/summary", response_model=SummaryResponse)
@@ -118,10 +135,11 @@ async def farm_daily_summary(
 ):
     """Produce a natural-language daily status summary for the farm."""
     try:
-        summary = await assistant.summarize_farm(farm_id=farm_id, db=db)
+        structured = await assistant.summarize_farm_structured(farm_id=farm_id, db=db)
+        summary = assistant.render_structured(structured)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return SummaryResponse(summary=summary)
+    return SummaryResponse(summary=summary, structured=structured)
 
 
 @router.post("/farms/{farm_id}/questions", response_model=QuestionsResponse)
@@ -146,10 +164,11 @@ async def diagnose_sector(
 ):
     """Root-cause diagnosis: explain WHY a sector is in its current hydric state."""
     try:
-        diagnosis = await assistant.diagnose_sector(sector_id=sector_id, db=db)
+        structured = await assistant.diagnose_sector_structured(sector_id=sector_id, db=db)
+        diagnosis = assistant.render_structured(structured)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return DiagnosisResponse(diagnosis=diagnosis)
+    return DiagnosisResponse(diagnosis=diagnosis, structured=structured)
 
 
 @router.post("/probes/{probe_id}/interpret", response_model=InterpretationResponse)
@@ -160,10 +179,31 @@ async def interpret_probe(
 ):
     """Interpret time-series probe signal patterns (flatline, drainage, etc.)."""
     try:
-        interpretation = await assistant.interpret_probe_patterns(probe_id=probe_id, db=db)
+        structured = await assistant.interpret_probe_patterns_structured(probe_id=probe_id, db=db)
+        interpretation = assistant.render_structured(structured)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return InterpretationResponse(interpretation=interpretation)
+    return InterpretationResponse(interpretation=interpretation, structured=structured)
+
+
+@router.post("/sectors/{sector_id}/change-analysis", response_model=ChangeAnalysisResponse)
+async def sector_change_analysis(
+    sector_id: str,
+    body: ChangeAnalysisRequest = ChangeAnalysisRequest(),
+    db: AsyncSession = Depends(get_db),
+    assistant: IrrigationAssistant = Depends(get_assistant),
+):
+    """Explain what changed in a sector over the selected recent window."""
+    try:
+        structured = await assistant.analyze_sector_changes(
+            sector_id=sector_id,
+            db=db,
+            window_hours=body.window_hours,
+        )
+        analysis = assistant.render_structured(structured)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return ChangeAnalysisResponse(analysis=analysis, structured=structured)
 
 
 @router.post("/alerts/{alert_id}/explain", response_model=ExplainResponse)
@@ -174,7 +214,8 @@ async def explain_alert(
 ):
     """Explain an active alert in natural language."""
     try:
-        explanation = await assistant.explain_anomaly(alert_id=alert_id, db=db)
+        structured = await assistant.explain_anomaly_structured(alert_id=alert_id, db=db)
+        explanation = assistant.render_structured(structured)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return ExplainResponse(explanation=explanation)
+    return ExplainResponse(explanation=explanation, structured=structured)

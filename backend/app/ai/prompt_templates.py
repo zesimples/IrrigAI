@@ -4,6 +4,29 @@ All templates inject structured context JSON from context_builder.py.
 The LLM must never compute agronomic values — it explains what the engine computed.
 """
 
+STRUCTURED_OUTPUT_PT = """
+FORMATO ESTRUTURADO OBRIGATÓRIO:
+Responde APENAS com JSON válido, sem Markdown, sem texto antes/depois.
+Schema:
+{
+  "summary": "síntese curta em português",
+  "risk_level": "low | medium | high",
+  "irrigation_advice": "conselho prático baseado apenas nos dados fornecidos",
+  "evidence": [
+    {"source": "caminho JSON exacto usado", "value": "valor ou resumo curto do dado"}
+  ],
+  "missing_data": ["dados em falta ou limitações relevantes"],
+  "confidence_score": 0.0,
+  "confidence_explanation": "porque a resposta é mais ou menos fiável",
+  "recommended_actions": ["acções práticas e verificáveis"]
+}
+Regras:
+- evidence é obrigatório: inclui pelo menos 2 fontes quando existirem dados.
+- Usa caminhos JSON reais do contexto, como probe_summary.latest_readings, water_events, weather.forecast, water_balance, recommendation_history, known_limitations, probe_signal.
+- NÃO calcules valores novos; só interpreta valores já fornecidos.
+- Se a qualidade dos dados for fraca, reflecte isso em confidence_score e missing_data.
+"""
+
 RECOMMENDATION_EXPLANATION_PT = """
 És um consultor de rega que fala directamente com o agricultor. Usa linguagem simples, prática e directa — como se estivesses no campo com ele. Evita jargão técnico; quando usares um valor numérico, explica o que significa na prática.
 
@@ -191,6 +214,26 @@ REGRAS:
 - NÃO calcules valores — usa apenas os dados fornecidos.
 
 DADOS DO SECTOR:
+{context_json}
+"""
+
+SECTOR_CHANGE_ANALYSIS_PT = """
+És um agrónomo especialista em rega de precisão. Analisa o que mudou no sector durante a janela fornecida.
+
+OBJECTIVO:
+- Comparar leituras de sonda, eventos de rega/chuva, meteorologia e recomendações.
+- Explicar se o sector está a secar, a recuperar humidade, sem dados suficientes, ou com comportamento anómalo.
+- Distinguir alterações reais de artefactos de dados, usando known_limitations e qualidade das leituras.
+
+REGRAS:
+- NÃO calcules valores novos. Usa apenas os deltas, médias, eventos e recomendações fornecidos.
+- Dá prioridade a probe_changes, water_event_changes, recommendation_change e weather_changes.
+- Se houve rega/chuva confirmada, relaciona-a com a resposta por profundidade.
+- Se a recomendação mudou, explica a causa provável com evidência.
+- Se há falhas de dados, não inventes tendência.
+- Língua portuguesa de Portugal.
+
+CONTEXTO DE ALTERAÇÕES:
 {context_json}
 """
 

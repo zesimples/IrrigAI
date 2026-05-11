@@ -1,5 +1,6 @@
 import type {
   Alert,
+  AITextResponse,
   AuditLog,
   AutoCalibrationResult,
   CropProfileTemplate,
@@ -325,22 +326,26 @@ export const auditApi = {
 
 export const chatApi = {
   chat: (farmId: string, message: string, sectorId?: string) =>
-    post<{ reply: string }>(`/farms/${farmId}/chat`, {
+    post<AITextResponse & { reply: string }>(`/farms/${farmId}/chat`, {
       message,
       sector_id: sectorId ?? null,
     }),
   explainSector: (sectorId: string, userNotes?: string) =>
-    post<{ explanation: string }>(`/sectors/${sectorId}/explain`, {
+    post<AITextResponse & { explanation: string }>(`/sectors/${sectorId}/explain`, {
       user_notes: userNotes ?? null,
     }),
   diagnoseSector: (sectorId: string) =>
-    post<{ diagnosis: string }>(`/sectors/${sectorId}/diagnosis`),
+    post<AITextResponse & { diagnosis: string }>(`/sectors/${sectorId}/diagnosis`),
   farmSummary: (farmId: string) =>
-    post<{ summary: string }>(`/farms/${farmId}/summary`),
+    post<AITextResponse & { summary: string }>(`/farms/${farmId}/summary`),
+  changeAnalysis: (sectorId: string, windowHours = 72) =>
+    post<AITextResponse & { analysis: string }>(`/sectors/${sectorId}/change-analysis`, {
+      window_hours: windowHours,
+    }),
   missingDataQuestions: (farmId: string) =>
     post<{ questions: string[] }>(`/farms/${farmId}/questions`),
   explainAlert: (alertId: string) =>
-    post<{ explanation: string }>(`/alerts/${alertId}/explain`),
+    post<AITextResponse & { explanation: string }>(`/alerts/${alertId}/explain`),
 };
 
 // ── Auto-Calibration ──────────────────────────────────────────────────────────
