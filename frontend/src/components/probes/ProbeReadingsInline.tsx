@@ -171,7 +171,10 @@ export function ProbeReadingsInline({
               view={chartView}
               onSinceChange={setSinceHours}
               onIntervalChange={setInterval}
-              onViewChange={setChartView}
+              onViewChange={(v) => {
+                setChartView(v);
+                if (v === "sum" && interval === "") setInterval("1h");
+              }}
             />
           </div>
 

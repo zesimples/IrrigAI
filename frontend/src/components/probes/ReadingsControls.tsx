@@ -73,16 +73,21 @@ export function ReadingsControls({
       <div>
         <p className="mb-1 font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">Resolução</p>
         <div className="flex flex-wrap gap-1">
-          {INTERVALS.map((iv) => (
-            <Button
-              key={iv.value}
-              size="sm"
-              variant={interval === iv.value ? "primary" : "secondary"}
-              onClick={() => onIntervalChange(iv.value)}
-            >
-              {iv.label}
-            </Button>
-          ))}
+          {INTERVALS.map((iv) => {
+            const brutoDisabled = iv.value === "" && view === "sum";
+            return (
+              <Button
+                key={iv.value}
+                size="sm"
+                variant={interval === iv.value ? "primary" : "secondary"}
+                onClick={() => onIntervalChange(iv.value)}
+                disabled={brutoDisabled}
+                title={brutoDisabled ? "Bruto não disponível na vista Soma" : undefined}
+              >
+                {iv.label}
+              </Button>
+            );
+          })}
         </div>
       </div>
     </div>
