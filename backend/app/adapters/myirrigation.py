@@ -140,6 +140,7 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
 
         self._token: str | None = None
         self._token_expires_at: datetime | None = None
+        self.last_probe_parse_stats: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Public domain helpers
@@ -296,6 +297,7 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
         Returns [] on any error (safe for scheduler loops).
         """
         _project_id, device_id = _parse_external_id(probe_external_id)
+        self.last_probe_parse_stats = _empty_probe_parse_stats()
 
         try:
             raw = await self._post_form_json(
@@ -310,7 +312,8 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
             logger.exception("MyIrrigation: failed to fetch data for device %s", device_id)
             return []
 
-        readings = _parse_device_readings(raw, probe_external_id)
+        readings, parse_stats = _parse_device_readings_with_stats(raw, probe_external_id)
+        self.last_probe_parse_stats = parse_stats
         logger.debug(
             "MyIrrigation device %s: %d readings from %s to %s",
             device_id, len(readings),
@@ -467,6 +470,14 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
 # ---------------------------------------------------------------------------
 
 def _parse_device_readings(raw: dict | list, probe_external_id: str) -> list[ProbeReadingDTO]:
+    readings, _stats = _parse_device_readings_with_stats(raw, probe_external_id)
+    return readings
+
+
+def _parse_device_readings_with_stats(
+    raw: dict | list,
+    probe_external_id: str,
+) -> tuple[list[ProbeReadingDTO], dict[str, int]]:
     """Parse the MyIrrigation columnar device data response into ProbeReadingDTOs.
 
     Response shape:
@@ -475,15 +486,17 @@ def _parse_device_readings(raw: dict | list, probe_external_id: str) -> list[Pro
     Only "Suction" (cBar) sensors at known depths are extracted.
     Negative values (e.g. -252) are stored as-is and flagged invalid by ingestion.
     """
+    stats = _empty_probe_parse_stats()
+
     if isinstance(raw, dict) and "data" in raw:
         data = raw["data"]
     elif isinstance(raw, dict):
         data = raw
     else:
-        return []
+        return [], stats
 
     if not isinstance(data, dict):
-        return []
+        return [], stats
 
     sensors: list[dict] = data.get("sensors") or []
     values_map: dict[str, dict] = data.get("values") or {}
@@ -495,7 +508,7 @@ def _parse_device_readings(raw: dict | list, probe_external_id: str) -> list[Pro
     ]
     if not soil_sensors:
         logger.debug("MyIrrigation %s: no soil sensors in response", probe_external_id)
-        return []
+        return [], stats
 
     readings: list[ProbeReadingDTO] = []
 
@@ -507,18 +520,23 @@ def _parse_device_readings(raw: dict | list, probe_external_id: str) -> list[Pro
 
         sensor_values = values_map.get(sensor_id)
         if not isinstance(sensor_values, dict):
+            stats["skipped_unknown_sensor"] += 1
             continue
 
         for ts_str, raw_val in sensor_values.items():
+            stats["raw_points_seen"] += 1
             if raw_val is None:
+                stats["skipped_null"] += 1
                 continue
             try:
                 value = float(raw_val)
             except (TypeError, ValueError):
+                stats["skipped_non_numeric"] += 1
                 continue
 
             # iMetos "no data" sentinels for Watermark (cBar) sensors
             if unit_key == "soil_tension_cbar" and (value <= -200 or value >= 253):
+                stats["skipped_sentinel"] += 1
                 continue
 
             # Normalise VWC: iMetos TDT probes report vol% (e.g. 23.3).
@@ -530,8 +548,10 @@ def _parse_device_readings(raw: dict | list, probe_external_id: str) -> list[Pro
 
             ts = _unix_ms_to_datetime(ts_str)
             if ts is None:
+                stats["skipped_invalid_timestamp"] += 1
                 continue
 
+            stats["parsed_points"] += 1
             readings.append(
                 ProbeReadingDTO(
                     probe_external_id=probe_external_id,
@@ -544,7 +564,19 @@ def _parse_device_readings(raw: dict | list, probe_external_id: str) -> list[Pro
                 )
             )
 
-    return sorted(readings, key=lambda r: (r.depth_cm, r.timestamp))
+    return sorted(readings, key=lambda r: (r.depth_cm, r.timestamp)), stats
+
+
+def _empty_probe_parse_stats() -> dict[str, int]:
+    return {
+        "raw_points_seen": 0,
+        "parsed_points": 0,
+        "skipped_null": 0,
+        "skipped_sentinel": 0,
+        "skipped_invalid_timestamp": 0,
+        "skipped_unknown_sensor": 0,
+        "skipped_non_numeric": 0,
+    }
 
 
 def _parse_weather_observations(

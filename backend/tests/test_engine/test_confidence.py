@@ -1,7 +1,9 @@
 """Unit tests for confidence scoring."""
 
-import pytest
 from unittest.mock import MagicMock
+
+from app.engine.confidence import score
+from app.engine.types import DepthStatus
 
 
 def make_ctx(
@@ -31,6 +33,7 @@ def make_probes(has_data=True, hours_since=1.0, all_depths_ok=True, is_calibrate
     rz.has_data = has_data
     rz.hours_since_any_reading = hours_since
     rz.all_depths_ok = all_depths_ok
+    rz.depth_statuses = []
 
     probes = MagicMock()
     probes.rootzone = rz
@@ -43,9 +46,6 @@ def make_weather(hours_since_obs=2.0):
     w = MagicMock()
     w.hours_since_observation = hours_since_obs
     return w
-
-
-from app.engine.confidence import score
 
 
 class TestPerfectData:
@@ -79,6 +79,23 @@ class TestPenalties:
         fresh = score(make_ctx(), make_probes(hours_since=1.0), make_weather())
         stale = score(make_ctx(), make_probes(hours_since=10.0), make_weather())
         assert stale.score < fresh.score
+
+    def test_per_depth_quality_penalises_missing_depths(self):
+        fresh = make_probes(hours_since=1.0)
+        fresh.rootzone.depth_statuses = [
+            DepthStatus(20, [], 0.24, 1.0, "ok"),
+            DepthStatus(40, [], 0.22, 1.0, "ok"),
+        ]
+
+        partial = make_probes(hours_since=1.0)
+        partial.rootzone.depth_statuses = [
+            DepthStatus(20, [], 0.24, 1.0, "ok"),
+            DepthStatus(40, [], None, None, "missing"),
+        ]
+
+        assert score(make_ctx(), partial, make_weather()).score < score(
+            make_ctx(), fresh, make_weather()
+        ).score
 
     def test_uncalibrated_probes_penalises(self):
         cal = score(make_ctx(), make_probes(is_calibrated=True), make_weather())

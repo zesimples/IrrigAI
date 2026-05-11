@@ -225,6 +225,8 @@ async def ingest_probe_readings(
     provider_first_ts: datetime | None = None
     provider_last_ts: datetime | None = None
     probe_db_id: str | None = None
+    parse_stats: dict | None = None
+    has_parse_stats = False
 
     try:
         await provider.authenticate()
@@ -233,7 +235,15 @@ async def ingest_probe_readings(
             since=since,
             until=until,
         )
-        summary.provider_records_seen = len(readings)
+        parse_stats = getattr(provider, "last_probe_parse_stats", None)
+        has_parse_stats = isinstance(parse_stats, dict)
+        if has_parse_stats:
+            summary.provider_records_seen = int(parse_stats.get("raw_points_seen", len(readings)) or 0)
+            summary.provider_records_parsed = int(parse_stats.get("parsed_points", len(readings)) or 0)
+            summary.skipped_null = int(parse_stats.get("skipped_null", 0) or 0)
+            summary.skipped_sentinel = int(parse_stats.get("skipped_sentinel", 0) or 0)
+        else:
+            summary.provider_records_seen = len(readings)
 
         if not readings:
             return summary
@@ -308,7 +318,8 @@ async def ingest_probe_readings(
                     summary.skipped_duplicate += 1
                     continue
 
-                summary.provider_records_parsed += 1
+                if not has_parse_stats:
+                    summary.provider_records_parsed += 1
 
                 # Calibrated value
                 calibrated = (r.raw_value * pd_record.calibration_factor) + pd_record.calibration_offset
@@ -419,6 +430,7 @@ async def ingest_probe_readings(
             provider_last_timestamp=provider_last_ts,
             summary=summary,
             error_message=error_message,
+            metadata={"provider_parse_stats": parse_stats} if has_parse_stats else None,
         )
         summary.run_id = run_id
 
@@ -640,6 +652,18 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
                             provider_name=settings.PROBE_PROVIDER,
                         )
                         probe_total += summary.inserted
+                        if summary.inserted > 0:
+                            try:
+                                from app.services.water_event_service import detect_and_persist_water_events
+
+                                await detect_and_persist_water_events(
+                                    probe_id=probe.id,
+                                    db=db,
+                                    since=probe_since,
+                                    until=now,
+                                )
+                            except Exception:
+                                logger.exception("Water event refresh failed for probe %s", probe.external_id)
                     except Exception as exc:
                         probe_error = str(exc)
                         logger.exception("Ingestion failed for probe %s", probe.external_id)

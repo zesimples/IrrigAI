@@ -78,6 +78,7 @@ class ProbeDetectedEvent(BaseModel):
     timestamp: datetime
     kind: Literal["irrigation", "rain", "unlogged", "unknown"]
     confidence: Literal["low", "medium", "high"]
+    status: Literal["active", "confirmed", "rejected"] = "active"
     depths_cm: list[int]
     delta_vwc: float
     rainfall_mm: float | None = None

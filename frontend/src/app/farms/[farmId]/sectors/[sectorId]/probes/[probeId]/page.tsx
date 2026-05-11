@@ -10,6 +10,7 @@ import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { CROP_LABELS } from "@/lib/cropConfig";
+import { probesApi, waterEventsApi } from "@/lib/api";
 import type { ProbeDetectedEvent } from "@/types";
 
 interface Props {
@@ -21,18 +22,30 @@ export default function ProbeDetailPage({ params }: Props) {
   const [sinceHours, setSinceHours] = useState(72);
   const [interval, setInterval] = useState("");
   const [chartView, setChartView] = useState<"depths" | "sum">("depths");
+  const [refreshingEvents, setRefreshingEvents] = useState(false);
 
   const since = useMemo(() => subHours(new Date(), sinceHours).toISOString(), [sinceHours]);
 
-  const { data, loading, error } = useProbeReadings({
+  const { data, loading, error, refetch } = useProbeReadings({
     probeId,
     since,
     interval: interval || undefined,
   });
+  const visibleEvents = (data?.events ?? []).filter((event) => event.status !== "rejected");
 
   const { data: sectorStatus } = useSectorStatus(sectorId);
   const cropLabel = CROP_LABELS[sectorStatus?.crop_type ?? ""] ?? sectorStatus?.crop_type ?? "…";
   const sectorLabel = sectorStatus?.sector_name ?? "…";
+
+  async function refreshWaterEvents() {
+    setRefreshingEvents(true);
+    try {
+      await probesApi.refreshWaterEvents(probeId, { since });
+      await refetch();
+    } finally {
+      setRefreshingEvents(false);
+    }
+  }
 
   return (
     <div className="min-h-screen">
@@ -79,14 +92,14 @@ export default function ProbeDetailPage({ params }: Props) {
                 <ProbeChart
                   depths={data.depths}
                   referenceLines={data.reference_lines}
-                  events={data.events ?? []}
+                  events={visibleEvents}
                   interval={interval}
                 />
               ) : (
                 <ProbeSumChart
                   depths={data.depths}
                   referenceLines={data.reference_lines}
-                  events={data.events ?? []}
+                  events={visibleEvents}
                 />
               )
             ) : (
@@ -100,10 +113,20 @@ export default function ProbeDetailPage({ params }: Props) {
         {data && data.depths.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle>Rega / chuva detectada</CardTitle>
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>Rega / chuva detectada</CardTitle>
+                <button
+                  type="button"
+                  onClick={refreshWaterEvents}
+                  disabled={refreshingEvents}
+                  className="rounded-md border border-rule bg-paper px-3 py-1.5 text-[11.5px] text-ink-2 hover:bg-paper-in disabled:opacity-40"
+                >
+                  {refreshingEvents ? "A recalcular..." : "Recalcular"}
+                </button>
+              </div>
             </CardHeader>
             <CardBody>
-              <DetectedEvents events={data.events ?? []} />
+              <DetectedEvents events={visibleEvents} onEventUpdated={refetch} />
             </CardBody>
           </Card>
         )}
@@ -169,7 +192,29 @@ export default function ProbeDetailPage({ params }: Props) {
   );
 }
 
-function DetectedEvents({ events }: { events: ProbeDetectedEvent[] }) {
+function DetectedEvents({
+  events,
+  onEventUpdated,
+}: {
+  events: ProbeDetectedEvent[];
+  onEventUpdated: () => void | Promise<void>;
+}) {
+  const [actionId, setActionId] = useState<string | null>(null);
+
+  async function updateEvent(eventId: string, action: "confirm" | "reject") {
+    setActionId(`${action}:${eventId}`);
+    try {
+      if (action === "confirm") {
+        await waterEventsApi.confirm(eventId);
+      } else {
+        await waterEventsApi.reject(eventId);
+      }
+      await onEventUpdated();
+    } finally {
+      setActionId(null);
+    }
+  }
+
   if (events.length === 0) {
     return (
       <p className="text-[12.5px] text-ink-3">
@@ -180,34 +225,67 @@ function DetectedEvents({ events }: { events: ProbeDetectedEvent[] }) {
 
   return (
     <ul className="divide-y divide-rule-soft">
-      {events.map((event) => (
-        <li key={event.id} className="py-3 first:pt-0 last:pb-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${event.kind === "rain" ? "bg-[#0284c7]/10 text-[#0284c7]" : event.kind === "irrigation" ? "bg-olive/10 text-olive" : "bg-[#c9a34a]/10 text-[#c9a34a]"}`}>
-              {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Sem registo"}
-            </span>
-            <span className="font-mono text-[11px] text-ink-3">
-              {new Date(event.timestamp).toLocaleString("pt-PT", {
-                day: "2-digit",
-                month: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-            <span className="font-mono text-[11px] text-ink-3">conf. {event.confidence}</span>
-            {event.score != null && (
-              <span className="font-mono text-[11px] text-ink-3">
-                score {(event.score * 100).toFixed(0)}%
+      {events.map((event) => {
+        const canModerate = !event.id.startsWith("wetting-");
+        return (
+          <li key={event.id} className="py-3 first:pt-0 last:pb-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${event.kind === "rain" ? "bg-[#0284c7]/10 text-[#0284c7]" : event.kind === "irrigation" ? "bg-olive/10 text-olive" : "bg-[#c9a34a]/10 text-[#c9a34a]"}`}>
+                {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Sem registo"}
               </span>
+              <span className="font-mono text-[11px] text-ink-3">
+                {new Date(event.timestamp).toLocaleString("pt-PT", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+              <span className="font-mono text-[11px] text-ink-3">conf. {event.confidence}</span>
+              {event.status && event.status !== "active" && (
+                <span className="font-mono text-[11px] text-ink-3">
+                  {event.status === "confirmed" ? "confirmado" : "rejeitado"}
+                </span>
+              )}
+              {event.score != null && (
+                <span className="font-mono text-[11px] text-ink-3">
+                  score {(event.score * 100).toFixed(0)}%
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
+              {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {(event.delta_vwc * 100).toFixed(1)}%.
+              {event.rainfall_mm != null ? ` Chuva: ${event.rainfall_mm.toFixed(1)} mm.` : ""}
+              {event.irrigation_mm != null ? ` Rega: ${event.irrigation_mm.toFixed(1)} mm.` : ""}
+            </p>
+            {canModerate && event.status !== "confirmed" && event.status !== "rejected" && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => updateEvent(event.id, "confirm")}
+                  disabled={actionId != null}
+                  className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 disabled:opacity-50"
+                >
+                  {actionId === `confirm:${event.id}` ? "A guardar..." : event.kind === "rain" ? "Confirmar chuva" : "Confirmar rega"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateEvent(event.id, "reject")}
+                  disabled={actionId != null}
+                  className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 disabled:opacity-50"
+                >
+                  {actionId === `reject:${event.id}` ? "A guardar..." : "Falso positivo"}
+                </button>
+              </div>
             )}
-          </div>
-          <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
-            {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {(event.delta_vwc * 100).toFixed(1)}%.
-            {event.rainfall_mm != null ? ` Chuva: ${event.rainfall_mm.toFixed(1)} mm.` : ""}
-            {event.irrigation_mm != null ? ` Rega: ${event.irrigation_mm.toFixed(1)} mm.` : ""}
-          </p>
-        </li>
-      ))}
+            {!canModerate && (
+              <p className="mt-2 font-mono text-[10.5px] text-slate-400">
+                Evento temporário. Recalcular para guardar e confirmar.
+              </p>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

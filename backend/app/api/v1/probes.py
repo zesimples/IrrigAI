@@ -219,22 +219,10 @@ async def get_probe_readings(
     pwp = plot.wilting_point if plot else None
     optimal = [round(pwp + (fc - pwp) * 0.4, 3), round(pwp + (fc - pwp) * 0.8, 3)] if fc and pwp else None
 
-    # Prefer persisted events if we have them in the requested window; otherwise
-    # run the detector inline and persist the result.
+    # Read-only: event persistence happens after ingestion or via explicit refresh.
     persisted = await list_persisted_water_events(
         probe_id=probe_id, db=db, since=since, until=until, limit=200
     )
-    if not persisted:
-        try:
-            persisted = await detect_and_persist_water_events(
-                probe_id=probe_id, db=db, since=since, until=until
-            )
-            if persisted:
-                await db.commit()
-        except Exception:
-            # Detection should never break the readings endpoint.
-            await db.rollback()
-            persisted = []
     events = [_persisted_to_event_schema(e) for e in persisted]
     # Sort newest-last to match historic in-memory ordering by timestamp.
     events.sort(key=lambda e: e.timestamp)
@@ -344,6 +332,32 @@ async def list_probe_water_events(
     if until is not None and until.tzinfo is None:
         until = until.replace(tzinfo=UTC)
     rows = await list_persisted_water_events(probe_id, db, since=since, until=until, limit=limit)
+    return [DetectedWaterEventOut.model_validate(r) for r in rows]
+
+
+@router.post("/probes/{probe_id}/water-events/refresh", response_model=list[DetectedWaterEventOut])
+async def refresh_probe_water_events(
+    probe_id: str,
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Explicitly run detection and persist water events for a probe."""
+    probe = await db.get(Probe, probe_id)
+    if not probe:
+        raise HTTPException(404, detail="Probe not found")
+    if since is not None:
+        since = _ensure_utc(since)
+    if until is not None:
+        until = _ensure_utc(until)
+
+    rows = await detect_and_persist_water_events(
+        probe_id=probe_id,
+        db=db,
+        since=since,
+        until=until,
+    )
+    await db.commit()
     return [DetectedWaterEventOut.model_validate(r) for r in rows]
 
 
@@ -620,6 +634,7 @@ def _persisted_to_event_schema(event: "DetectedWaterEvent"):
         timestamp=event.timestamp,
         kind=event.kind,  # type: ignore[arg-type]
         confidence=event.confidence,  # type: ignore[arg-type]
+        status=event.status,  # type: ignore[arg-type]
         depths_cm=list(event.depths_cm or []),
         delta_vwc=event.delta_vwc,
         rainfall_mm=event.rainfall_mm,

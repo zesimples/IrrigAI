@@ -221,6 +221,7 @@ export interface ProbeDetectedEvent {
   timestamp: string;
   kind: ProbeDetectedEventKind;
   confidence: ConfidenceLevel;
+  status?: DetectedWaterEventStatus;
   depths_cm: number[];
   delta_vwc: number;
   rainfall_mm: number | null;

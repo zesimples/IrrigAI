@@ -8,7 +8,7 @@ import { useProbeReadings } from "@/hooks/useProbeReadings";
 import { ProbeChart } from "@/components/probes/ProbeChart";
 import { ProbeSumChart } from "@/components/probes/ProbeSumChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
-import { sectorsApi, probesApi } from "@/lib/api";
+import { sectorsApi, probesApi, waterEventsApi } from "@/lib/api";
 import type { ProbeDetectedEvent, ReferenceLines } from "@/types";
 
 interface ProbeReadingsInlineProps {
@@ -57,11 +57,12 @@ export function ProbeReadingsInline({
 
   const since = useMemo(() => subHours(new Date(), sinceHours).toISOString(), [sinceHours]);
 
-  const { data, loading, error } = useProbeReadings({
+  const { data, loading, error, refetch } = useProbeReadings({
     probeId,
     since,
     interval: interval || undefined,
   });
+  const visibleEvents = (data?.events ?? []).filter((event) => event.status !== "rejected");
 
   const activeRefLines = refLines ?? data?.reference_lines ?? { field_capacity: null, wilting_point: null };
 
@@ -186,7 +187,7 @@ export function ProbeReadingsInline({
                 <ProbeChart
                   depths={data.depths}
                   referenceLines={activeRefLines}
-                  events={data.events ?? []}
+                  events={visibleEvents}
                   hoveredEventId={hoveredEventId}
                   interval={interval}
                 />
@@ -194,15 +195,16 @@ export function ProbeReadingsInline({
                 <ProbeSumChart
                   depths={data.depths}
                   referenceLines={activeRefLines}
-                  events={data.events ?? []}
+                  events={visibleEvents}
                   hoveredEventId={hoveredEventId}
                 />
               )}
 
               <DetectedEvents
-                events={data.events ?? []}
+                events={visibleEvents}
                 hoveredEventId={hoveredEventId}
                 onHover={setHoveredEventId}
+                onEventUpdated={refetch}
               />
 
               {/* CC / PMP row */}
@@ -403,12 +405,28 @@ export function ProbeReadingsInline({
   );
 }
 
-function DetectedEvents({ events, hoveredEventId, onHover }: {
+function DetectedEvents({ events, hoveredEventId, onHover, onEventUpdated }: {
   events: ProbeDetectedEvent[];
   hoveredEventId: string | null;
   onHover: (id: string | null) => void;
+  onEventUpdated: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [actionId, setActionId] = useState<string | null>(null);
+
+  async function updateEvent(eventId: string, action: "confirm" | "reject") {
+    setActionId(`${action}:${eventId}`);
+    try {
+      if (action === "confirm") {
+        await waterEventsApi.confirm(eventId);
+      } else {
+        await waterEventsApi.reject(eventId);
+      }
+      await onEventUpdated();
+    } finally {
+      setActionId(null);
+    }
+  }
 
   return (
     <div className="rounded-md border border-rule-soft bg-card">
@@ -436,41 +454,74 @@ function DetectedEvents({ events, hoveredEventId, onHover }: {
             </p>
           ) : (
             <ul className="divide-y divide-rule-soft">
-              {events.map((event) => (
-                <li
-                  key={event.id}
-                  className={`py-2 first:pt-0 last:pb-0 rounded transition-colors ${hoveredEventId === event.id ? "bg-paper-in" : ""}`}
-                  onMouseEnter={() => onHover(event.id)}
-                  onMouseLeave={() => onHover(null)}
-                >
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${event.kind === "rain" ? "bg-[#0284c7]/10 text-[#0284c7]" : event.kind === "irrigation" ? "bg-olive/10 text-olive" : "bg-[#c9a34a]/10 text-[#c9a34a]"}`}>
-                      {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Sem registo"}
-                    </span>
-                    <span className="font-mono text-[11px] text-ink-3">
-                      {new Date(event.timestamp).toLocaleString("pt-PT", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                    <span className="font-mono text-[11px] text-ink-3">
-                      conf. {event.confidence}
-                    </span>
-                    {event.score != null && (
-                      <span className="font-mono text-[11px] text-ink-3">
-                        score {(event.score * 100).toFixed(0)}%
+              {events.map((event) => {
+                const canModerate = !event.id.startsWith("wetting-");
+                return (
+                  <li
+                    key={event.id}
+                    className={`py-2 first:pt-0 last:pb-0 rounded transition-colors ${hoveredEventId === event.id ? "bg-paper-in" : ""}`}
+                    onMouseEnter={() => onHover(event.id)}
+                    onMouseLeave={() => onHover(null)}
+                  >
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${event.kind === "rain" ? "bg-[#0284c7]/10 text-[#0284c7]" : event.kind === "irrigation" ? "bg-olive/10 text-olive" : "bg-[#c9a34a]/10 text-[#c9a34a]"}`}>
+                        {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Sem registo"}
                       </span>
+                      <span className="font-mono text-[11px] text-ink-3">
+                        {new Date(event.timestamp).toLocaleString("pt-PT", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      <span className="font-mono text-[11px] text-ink-3">
+                        conf. {event.confidence}
+                      </span>
+                      {event.status && event.status !== "active" && (
+                        <span className="font-mono text-[11px] text-ink-3">
+                          {event.status === "confirmed" ? "confirmado" : "rejeitado"}
+                        </span>
+                      )}
+                      {event.score != null && (
+                        <span className="font-mono text-[11px] text-ink-3">
+                          score {(event.score * 100).toFixed(0)}%
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
+                      {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {(event.delta_vwc * 100).toFixed(1)}%.
+                      {event.rainfall_mm != null ? ` Chuva: ${event.rainfall_mm.toFixed(1)} mm.` : ""}
+                      {event.irrigation_mm != null ? ` Rega: ${event.irrigation_mm.toFixed(1)} mm.` : ""}
+                    </p>
+                    {canModerate && event.status !== "confirmed" && event.status !== "rejected" && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updateEvent(event.id, "confirm")}
+                          disabled={actionId != null}
+                          className="rounded-md border border-olive/20 bg-olive/10 px-2.5 py-1 font-mono text-[10.5px] text-olive disabled:opacity-50"
+                        >
+                          {actionId === `confirm:${event.id}` ? "A guardar..." : event.kind === "rain" ? "Confirmar chuva" : "Confirmar rega"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateEvent(event.id, "reject")}
+                          disabled={actionId != null}
+                          className="rounded-md border border-terra/20 bg-terra/10 px-2.5 py-1 font-mono text-[10.5px] text-terra disabled:opacity-50"
+                        >
+                          {actionId === `reject:${event.id}` ? "A guardar..." : "Falso positivo"}
+                        </button>
+                      </div>
                     )}
-                  </div>
-                  <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
-                    {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {(event.delta_vwc * 100).toFixed(1)}%.
-                    {event.rainfall_mm != null ? ` Chuva: ${event.rainfall_mm.toFixed(1)} mm.` : ""}
-                    {event.irrigation_mm != null ? ` Rega: ${event.irrigation_mm.toFixed(1)} mm.` : ""}
-                  </p>
-                </li>
-              ))}
+                    {!canModerate && (
+                      <p className="mt-2 font-mono text-[10.5px] text-ink-3">
+                        Evento temporário. Recalcular para guardar e confirmar.
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

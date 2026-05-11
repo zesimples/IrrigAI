@@ -213,6 +213,18 @@ export const probesApi = {
       `/probes/${id}/water-events${query ? `?${query}` : ""}`,
     );
   },
+  refreshWaterEvents: (
+    id: string,
+    params: { since?: string; until?: string } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.since) qs.set("since", params.since);
+    if (params.until) qs.set("until", params.until);
+    const query = qs.toString();
+    return post<DetectedWaterEventOut[]>(
+      `/probes/${id}/water-events/refresh${query ? `?${query}` : ""}`,
+    );
+  },
   ingestionRuns: (
     id: string,
     params: { since?: string; until?: string; limit?: number } = {},

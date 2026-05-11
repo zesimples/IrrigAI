@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING
 
 from app.engine.types import (
     ConfidenceResult,
+    DepthStatus,
     ProbeSnapshot,
+    RootzoneStatus,
     SectorContext,
     WeatherContext,
 )
@@ -42,16 +44,16 @@ def score(
 
     # --- Probe data quality ---
     rz = probes.rootzone
+    depth_statuses = getattr(rz, "depth_statuses", None)
+    has_depth_quality = isinstance(depth_statuses, list) and len(depth_statuses) > 0
     if not rz.has_data:
         _pen(conf, penalties, warnings, "No probe data", 0.25)
         conf -= 0.25
+    elif has_depth_quality:
+        conf -= _apply_depth_quality_penalties(rz, penalties, warnings)
     elif rz.hours_since_any_reading is not None and rz.hours_since_any_reading > PROBE_STALE_H:
         _pen(conf, penalties, warnings, f"Probe data stale ({rz.hours_since_any_reading:.1f}h)", 0.25)
         conf -= 0.25
-
-    if not rz.all_depths_ok and rz.has_data:
-        _pen(conf, penalties, warnings, "Some probe depths missing/suspect", 0.10)
-        conf -= 0.10
 
     if not probes.is_calibrated:
         _pen(conf, penalties, warnings, "Probes uncalibrated", 0.10)
@@ -156,6 +158,69 @@ def _pen(
     """Record a penalty without mutating conf (caller does that)."""
     penalties.append((reason, amount))
     warnings.append(f"-{amount:.2f}: {reason}")
+
+
+def _apply_depth_quality_penalties(
+    rz: RootzoneStatus,
+    penalties: list,
+    warnings: list,
+) -> float:
+    """Penalize confidence from actual per-depth probe quality, not a boolean."""
+    depths = rz.depth_statuses
+    total_depths = len(depths)
+    if total_depths == 0:
+        return 0.0
+
+    missing = [d for d in depths if d.quality in {"missing", "no_data"} or d.latest_vwc is None]
+    stale = [
+        d for d in depths
+        if d not in missing and (
+            d.quality in {"stale", "partial"}
+            or (d.hours_since_last is not None and d.hours_since_last > PROBE_STALE_H)
+        )
+    ]
+    suspect = [d for d in depths if d.quality in {"suspect", "invalid"}]
+    uncalibrated = [d for d in depths if d.quality == "needs_vwc_calibration"]
+    usable = [d for d in depths if _depth_is_usable(d)]
+
+    penalty_total = 0.0
+
+    if missing:
+        amount = min(0.18, 0.06 * len(missing))
+        _pen(penalty_total, penalties, warnings, f"{len(missing)} probe depth(s) missing", amount)
+        penalty_total += amount
+
+    if stale:
+        amount = min(0.15, 0.05 * len(stale))
+        _pen(penalty_total, penalties, warnings, f"{len(stale)} probe depth(s) stale/partial", amount)
+        penalty_total += amount
+
+    if suspect:
+        amount = min(0.14, 0.07 * len(suspect))
+        _pen(penalty_total, penalties, warnings, f"{len(suspect)} probe depth(s) suspect/invalid", amount)
+        penalty_total += amount
+
+    if uncalibrated:
+        amount = min(0.20, 0.08 * len(uncalibrated))
+        _pen(penalty_total, penalties, warnings, f"{len(uncalibrated)} cBar depth(s) need VWC calibration", amount)
+        penalty_total += amount
+
+    usable_ratio = len(usable) / total_depths
+    if total_depths >= 2 and usable_ratio < 0.67:
+        _pen(penalty_total, penalties, warnings, f"Only {len(usable)}/{total_depths} probe depth(s) usable", 0.10)
+        penalty_total += 0.10
+
+    return penalty_total
+
+
+def _depth_is_usable(depth: DepthStatus) -> bool:
+    if depth.latest_vwc is None:
+        return False
+    if depth.quality in {"missing", "no_data", "stale", "suspect", "invalid", "needs_vwc_calibration"}:
+        return False
+    if depth.hours_since_last is not None and depth.hours_since_last > PROBE_STALE_H:
+        return False
+    return True
 
 
 def _has_severity(anomalies: list, severity: str) -> bool:
