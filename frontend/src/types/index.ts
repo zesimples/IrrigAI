@@ -243,6 +243,72 @@ export interface ProbeReadingsResponse {
   events: ProbeDetectedEvent[];
 }
 
+// ── Persisted Water Events ────────────────────────────────────────────────────
+
+export type DetectedWaterEventStatus = "active" | "confirmed" | "rejected";
+
+export interface DetectedWaterEventOut {
+  id: string;
+  probe_id: string;
+  sector_id: string;
+  farm_id: string | null;
+  timestamp: string;
+  kind: ProbeDetectedEventKind;
+  confidence: ConfidenceLevel;
+  score: number;
+  probability_irrigation: number;
+  probability_rain: number;
+  probability_unlogged: number;
+  source_match_score: number;
+  depth_sequence_score: number;
+  signal_strength_score: number;
+  sensor_quality_score: number;
+  depths_cm: number[];
+  delta_vwc: number;
+  rainfall_mm: number | null;
+  irrigation_mm: number | null;
+  matched_irrigation_event_id: string | null;
+  matched_weather_observation_id: string | null;
+  status: DetectedWaterEventStatus;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  notes: string | null;
+  message: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Provider Ingestion Runs ──────────────────────────────────────────────────
+
+export interface IngestionRunOut {
+  id: string;
+  farm_id: string;
+  probe_id: string | null;
+  probe_external_id: string | null;
+  provider: string;
+  source_type: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  latency_ms: number | null;
+  requested_since: string | null;
+  requested_until: string | null;
+  provider_first_timestamp: string | null;
+  provider_last_timestamp: string | null;
+  provider_records_seen: number;
+  provider_records_parsed: number;
+  skipped_null: number;
+  skipped_sentinel: number;
+  skipped_unknown_depth: number;
+  skipped_duplicate: number;
+  inserted: number;
+  flagged_invalid: number;
+  flagged_suspect: number;
+  error_message: string | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+}
+
 // ── Recommendation ────────────────────────────────────────────────────────────
 
 export interface Recommendation {

@@ -22,6 +22,8 @@ from app.models.alert import Alert
 from app.models.audit_log import AuditLog
 from app.models.sector_override import SectorOverride
 from app.models.provider_sync_log import ProviderSyncLog
+from app.models.provider_ingestion_run import ProviderIngestionRun
+from app.models.detected_water_event import DetectedWaterEvent
 
 __all__ = [
     "CropProfileTemplate",
@@ -45,4 +47,6 @@ __all__ = [
     "AuditLog",
     "SectorOverride",
     "ProviderSyncLog",
+    "ProviderIngestionRun",
+    "DetectedWaterEvent",
 ]

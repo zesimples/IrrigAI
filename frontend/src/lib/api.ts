@@ -4,9 +4,11 @@ import type {
   AutoCalibrationResult,
   CropProfileTemplate,
   DashboardResponse,
+  DetectedWaterEventOut,
   Farm,
   FarmCreate,
   GDDStatus,
+  IngestionRunOut,
   IrrigationEvent,
   IrrigationSystemCreate,
   PaginatedResponse,
@@ -185,6 +187,39 @@ export const probesApi = {
     const query = qs.toString();
     return get<ProbeReadingsResponse>(`/probes/${id}/readings${query ? `?${query}` : ""}`);
   },
+  waterEvents: (
+    id: string,
+    params: { since?: string; until?: string; limit?: number } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.since) qs.set("since", params.since);
+    if (params.until) qs.set("until", params.until);
+    if (params.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return get<DetectedWaterEventOut[]>(
+      `/probes/${id}/water-events${query ? `?${query}` : ""}`,
+    );
+  },
+  ingestionRuns: (
+    id: string,
+    params: { since?: string; until?: string; limit?: number } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.since) qs.set("since", params.since);
+    if (params.until) qs.set("until", params.until);
+    if (params.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return get<IngestionRunOut[]>(
+      `/probes/${id}/ingestion-runs${query ? `?${query}` : ""}`,
+    );
+  },
+};
+
+export const waterEventsApi = {
+  confirm: (id: string, body: { notes?: string } = {}) =>
+    post<DetectedWaterEventOut>(`/water-events/${id}/confirm`, body),
+  reject: (id: string, body: { notes?: string } = {}) =>
+    post<DetectedWaterEventOut>(`/water-events/${id}/reject`, body),
 };
 
 // ── Recommendations ───────────────────────────────────────────────────────────

@@ -1,4 +1,6 @@
-from sqlalchemy import Float, ForeignKey, Integer, String
+from datetime import datetime
+
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +19,19 @@ class ProbeDepth(Base, TimestampMixin):
     )
     calibration_offset: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     calibration_factor: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+
+    # Per-depth freshness / sync state — populated by the ingestion service
+    last_reading_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_quality_flag: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    readings_count_total: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_gap_detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    data_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unknown", server_default="unknown",
+        comment="'ok' | 'partial' | 'stale' | 'no_data' | 'unknown'",
+    )
 
     # Relationships
     probe: Mapped["Probe"] = relationship("Probe", back_populates="depths")  # noqa: F821

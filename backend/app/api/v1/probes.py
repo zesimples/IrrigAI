@@ -6,9 +6,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.engine.water_event_detector import detect_water_events
-from app.models import Plot, Probe, ProbeDepth, ProbeReading, Sector
+from app.models import (
+    DetectedWaterEvent,
+    Plot,
+    Probe,
+    ProbeDepth,
+    ProbeReading,
+    ProviderIngestionRun,
+    Sector,
+)
 from app.schemas.probe import (
     DepthReadings,
+    DetectedWaterEventOut,
+    IngestionRunOut,
     ProbeCreate,
     ProbeDetail,
     ProbeDepthOut,
@@ -17,6 +27,11 @@ from app.schemas.probe import (
     ProbeUpdate,
     ReferenceLines,
     TimeSeriesPoint,
+    WaterEventConfirmBody,
+)
+from app.services.water_event_service import (
+    detect_and_persist_water_events,
+    list_persisted_water_events,
 )
 
 router = APIRouter(tags=["probes"])
@@ -128,14 +143,38 @@ async def get_probe_readings(
     fc = plot.field_capacity if plot else None
     pwp = plot.wilting_point if plot else None
     optimal = [round(pwp + (fc - pwp) * 0.4, 3), round(pwp + (fc - pwp) * 0.8, 3)] if fc and pwp else None
-    events = await detect_water_events(
-        db=db,
-        sector=sector,
-        plot=plot,
-        depths=event_source_depths,
-        since=since,
-        until=until,
+
+    # Prefer persisted events if we have them in the requested window; otherwise
+    # run the detector inline and persist the result.
+    persisted = await list_persisted_water_events(
+        probe_id=probe_id, db=db, since=since, until=until, limit=200
     )
+    if not persisted:
+        try:
+            persisted = await detect_and_persist_water_events(
+                probe_id=probe_id, db=db, since=since, until=until
+            )
+            if persisted:
+                await db.commit()
+        except Exception:
+            # Detection should never break the readings endpoint.
+            await db.rollback()
+            persisted = []
+    events = [_persisted_to_event_schema(e) for e in persisted]
+    # Sort newest-last to match historic in-memory ordering by timestamp.
+    events.sort(key=lambda e: e.timestamp)
+
+    # Fallback: if we have no persisted events at all but the engine would still
+    # produce inline events (e.g. seeded but never persisted), surface those.
+    if not events:
+        events = await detect_water_events(
+            db=db,
+            sector=sector,
+            plot=plot,
+            depths=event_source_depths,
+            since=since,
+            until=until,
+        )
 
     return ProbeReadingsResponse(
         probe_id=probe_id,
@@ -171,6 +210,102 @@ async def update_probe(probe_id: str, body: ProbeUpdate, db: AsyncSession = Depe
     await db.commit()
     await db.refresh(probe)
     return ProbeOut.model_validate(probe)
+
+
+# ---------------------------------------------------------------------------
+# Ingestion runs
+# ---------------------------------------------------------------------------
+
+@router.get("/probes/{probe_id}/ingestion-runs", response_model=list[IngestionRunOut])
+async def list_probe_ingestion_runs(
+    probe_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the most recent ProviderIngestionRun rows for a probe."""
+    probe = await db.get(Probe, probe_id)
+    if not probe:
+        raise HTTPException(404, detail="Probe not found")
+
+    stmt = (
+        select(ProviderIngestionRun)
+        .where(ProviderIngestionRun.probe_id == probe_id)
+        .order_by(ProviderIngestionRun.started_at.desc())
+        .limit(limit)
+    )
+    if since is not None:
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=UTC)
+        stmt = stmt.where(ProviderIngestionRun.started_at >= since)
+    if until is not None:
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=UTC)
+        stmt = stmt.where(ProviderIngestionRun.started_at <= until)
+
+    rows = (await db.execute(stmt)).scalars().all()
+    return [IngestionRunOut.model_validate(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Persisted water events
+# ---------------------------------------------------------------------------
+
+@router.get("/probes/{probe_id}/water-events", response_model=list[DetectedWaterEventOut])
+async def list_probe_water_events(
+    probe_id: str,
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return persisted DetectedWaterEvent rows for a probe."""
+    probe = await db.get(Probe, probe_id)
+    if not probe:
+        raise HTTPException(404, detail="Probe not found")
+    if since is not None and since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    if until is not None and until.tzinfo is None:
+        until = until.replace(tzinfo=UTC)
+    rows = await list_persisted_water_events(probe_id, db, since=since, until=until, limit=limit)
+    return [DetectedWaterEventOut.model_validate(r) for r in rows]
+
+
+@router.post("/water-events/{event_id}/confirm", response_model=DetectedWaterEventOut)
+async def confirm_water_event(
+    event_id: str,
+    body: WaterEventConfirmBody = WaterEventConfirmBody(),
+    db: AsyncSession = Depends(get_db),
+):
+    event = await db.get(DetectedWaterEvent, event_id)
+    if event is None:
+        raise HTTPException(404, detail="Water event not found")
+    event.status = "confirmed"
+    event.confirmed_at = datetime.now(UTC)
+    if body.notes:
+        event.notes = body.notes
+    await db.commit()
+    await db.refresh(event)
+    return DetectedWaterEventOut.model_validate(event)
+
+
+@router.post("/water-events/{event_id}/reject", response_model=DetectedWaterEventOut)
+async def reject_water_event(
+    event_id: str,
+    body: WaterEventConfirmBody = WaterEventConfirmBody(),
+    db: AsyncSession = Depends(get_db),
+):
+    event = await db.get(DetectedWaterEvent, event_id)
+    if event is None:
+        raise HTTPException(404, detail="Water event not found")
+    event.status = "rejected"
+    event.confirmed_at = datetime.now(UTC)
+    if body.notes:
+        event.notes = body.notes
+    await db.commit()
+    await db.refresh(event)
+    return DetectedWaterEventOut.model_validate(event)
 
 
 # ---------------------------------------------------------------------------
@@ -210,3 +345,28 @@ def _downsample(points: list[TimeSeriesPoint], interval_h: float) -> list[TimeSe
         result.append(current_bucket[-1])
 
     return result
+
+
+def _persisted_to_event_schema(event: DetectedWaterEvent):
+    """Convert a persisted DetectedWaterEvent to the wire-format ProbeDetectedEvent."""
+    from app.schemas.probe import ProbeDetectedEvent
+
+    return ProbeDetectedEvent(
+        id=event.id,
+        timestamp=event.timestamp,
+        kind=event.kind,  # type: ignore[arg-type]
+        confidence=event.confidence,  # type: ignore[arg-type]
+        depths_cm=list(event.depths_cm or []),
+        delta_vwc=event.delta_vwc,
+        rainfall_mm=event.rainfall_mm,
+        irrigation_mm=event.irrigation_mm,
+        score=event.score,
+        probability_irrigation=event.probability_irrigation,
+        probability_rain=event.probability_rain,
+        probability_unlogged=event.probability_unlogged,
+        source_match_score=event.source_match_score,
+        depth_sequence_score=event.depth_sequence_score,
+        signal_strength_score=event.signal_strength_score,
+        sensor_quality_score=event.sensor_quality_score,
+        message=event.message,
+    )
