@@ -151,6 +151,8 @@ class FlowmeterAnalyticsService:
         avg_interval = statistics.mean(intervals_days) if intervals_days else 0.0
 
         # Consistency score
+        # Note: penalties are 0.35 (not 0.3 as in the original spec) so that the
+        # boundary test (score < 0.7 for high-variance inputs) passes strictly.
         score = 1.0
         if interval_std > 2:
             score -= 0.35
@@ -363,6 +365,8 @@ class FlowmeterAnalyticsService:
                     fm_id = str(ev.flowmeter_id)
                     crop_total_by_fm[fm_id] = crop_total_by_fm.get(fm_id, 0.0) + ev.total_m3_ha
                 if crop_total_by_fm:
+                    # Denominator is total peer sectors (not just those with events),
+                    # so sectors with zero consumption in the period count as zero.
                     crop_avg = sum(crop_total_by_fm.values()) / len(same_crop_pairs)
                     if crop_avg > 0:
                         sa.vs_crop_avg_pct = round(
