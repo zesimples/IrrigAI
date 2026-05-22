@@ -24,6 +24,9 @@ from app.models.sector_override import SectorOverride
 from app.models.provider_sync_log import ProviderSyncLog
 from app.models.provider_ingestion_run import ProviderIngestionRun
 from app.models.detected_water_event import DetectedWaterEvent
+from app.models.flowmeter import Flowmeter
+from app.models.flowmeter_reading import FlowmeterReading
+from app.models.irrigation_event_detected import IrrigationEventDetected
 
 __all__ = [
     "CropProfileTemplate",
@@ -49,4 +52,7 @@ __all__ = [
     "ProviderSyncLog",
     "ProviderIngestionRun",
     "DetectedWaterEvent",
+    "Flowmeter",
+    "FlowmeterReading",
+    "IrrigationEventDetected",
 ]

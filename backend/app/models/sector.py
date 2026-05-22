@@ -66,6 +66,9 @@ class Sector(Base, TimestampMixin):
     overrides: Mapped[list["SectorOverride"]] = relationship(  # noqa: F821
         "SectorOverride", back_populates="sector", cascade="all, delete-orphan"
     )
+    flowmeter: Mapped["Flowmeter | None"] = relationship(  # noqa: F821
+        "Flowmeter", back_populates="sector", uselist=False, cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Sector '{self.name}' [{self.crop_type}]>"
