@@ -37,7 +37,20 @@ def test_parse_returns_timestamp_value_pairs():
 
 
 def test_parse_returns_sorted_by_timestamp():
-    result = parse_flowmeter_data(_SAMPLE_RESPONSE, device_id=6980)
+    # Timestamps intentionally out of order to exercise the sort
+    raw = {
+        "data": {
+            "sensors": [{"id": "0_0_0", "sensor_type": "Water Meter", "units": "m3/ha"}],
+            "values": {
+                "0_0_0": {
+                    "1778805000000": 1.8,  # latest first
+                    "1778803200000": 0.0,
+                    "1778804100000": 0.0,
+                }
+            },
+        }
+    }
+    result = parse_flowmeter_data(raw, device_id=6980)
     timestamps = [r[0] for r in result]
     assert timestamps == sorted(timestamps)
 

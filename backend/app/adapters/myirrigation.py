@@ -576,9 +576,12 @@ def parse_flowmeter_data(raw: dict | None, device_id: int) -> list[tuple[datetim
     if not isinstance(raw, dict):
         return []
 
-    data = raw.get("data", raw)
-    if not isinstance(data, dict):
-        return []
+    if "data" in raw:
+        data = raw["data"]
+        if not isinstance(data, dict):
+            return []
+    else:
+        data = raw
 
     sensors: list[dict] = data.get("sensors") or []
     values_map: dict[str, dict] = data.get("values") or {}
