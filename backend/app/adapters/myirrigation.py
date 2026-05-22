@@ -567,6 +567,51 @@ def _parse_device_readings_with_stats(
     return sorted(readings, key=lambda r: (r.depth_cm, r.timestamp)), stats
 
 
+def parse_flowmeter_data(raw: dict | None, device_id: int) -> list[tuple[datetime, float]]:
+    """Extract (timestamp, value_m3_ha) pairs from a MyIrrigation device data response.
+
+    Looks for sensor_type == "Water Meter". Returns [] on any parse error.
+    Uses the same columnar format as probe readings.
+    """
+    if not isinstance(raw, dict):
+        return []
+
+    data = raw.get("data", raw)
+    if not isinstance(data, dict):
+        return []
+
+    sensors: list[dict] = data.get("sensors") or []
+    values_map: dict[str, dict] = data.get("values") or {}
+
+    water_meter = next(
+        (s for s in sensors if s.get("sensor_type", "").lower() == "water meter"),
+        None,
+    )
+    if water_meter is None:
+        logger.debug("MyIrrigation device %s: no Water Meter sensor in response", device_id)
+        return []
+
+    sensor_id = water_meter.get("id", "")
+    sensor_values = values_map.get(sensor_id)
+    if not isinstance(sensor_values, dict):
+        return []
+
+    results: list[tuple[datetime, float]] = []
+    for ts_str, raw_val in sensor_values.items():
+        if raw_val is None:
+            continue
+        try:
+            value = float(raw_val)
+        except (TypeError, ValueError):
+            continue
+        ts = _unix_ms_to_datetime(ts_str)
+        if ts is None:
+            continue
+        results.append((ts, value))
+
+    return sorted(results, key=lambda x: x[0])
+
+
 def _empty_probe_parse_stats() -> dict[str, int]:
     return {
         "raw_points_seen": 0,
