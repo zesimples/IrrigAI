@@ -7,7 +7,7 @@ All data is read from DB — no engine is re-run here.
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -16,6 +16,7 @@ from app.engine.types import DailyWeather
 from app.models import (
     Alert,
     Farm,
+    Flowmeter,
     IrrigationEvent,
     Plot,
     Probe,
@@ -258,6 +259,19 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
         for row in sync_log_rows
     ]
 
+    # Check if this farm has any active flowmeters
+    has_flowmeters_result = await db.execute(
+        select(
+            exists().where(
+                Flowmeter.is_active.is_(True),
+                Flowmeter.sector_id == Sector.id,
+                Sector.plot_id == Plot.id,
+                Plot.farm_id == farm_id,
+            )
+        )
+    )
+    has_flowmeters = bool(has_flowmeters_result.scalar())
+
     return DashboardResponse(
         farm=FarmOut(id=farm.id, name=farm.name, region=farm.region),
         date=today,
@@ -270,4 +284,5 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
         ),
         missing_data_prompts=missing_prompts,
         sync_status=sync_status,
+        has_flowmeters=has_flowmeters,
     )

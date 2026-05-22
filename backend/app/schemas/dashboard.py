@@ -66,3 +66,4 @@ class DashboardResponse(BaseModel):
     active_alerts_count: AlertCounts
     missing_data_prompts: list[str]
     sync_status: list[SyncStatusEntry] = []
+    has_flowmeters: bool = False
