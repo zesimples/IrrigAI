@@ -84,3 +84,52 @@ class FlowmeterDashboardResponse(BaseModel):
     total_m3_ha: float
     sectors: list[FlowmeterSectorDashboard]
     by_crop: dict[str, CropSummary]
+
+
+# ── AI Analysis schemas ──────────────────────────────────────────────────────
+
+class FlowmeterAnalysisRequest(BaseModel):
+    period_days: int = 7
+    language: str = "pt"
+    force_refresh: bool = False
+
+
+class FlowmeterCropStats(BaseModel):
+    total_m3_ha: float
+    avg_per_sector: float
+    avg_per_event: float
+    num_events: int
+
+
+class FlowmeterAnalysisStatistics(BaseModel):
+    total_m3_ha: float
+    total_events: int
+    sectors_with_data: int
+    sectors_without_data: int
+    by_crop: dict[str, FlowmeterCropStats]
+    stopped_sectors: list[str]
+    top_consumers: list[str]
+    trend: str
+    typical_start_hour: int | None
+
+
+class FlowmeterSectorStatistics(BaseModel):
+    total_m3_ha: float
+    num_events: int
+    avg_m3_ha_per_event: float
+    avg_interval_days: float | None
+    pattern: str
+    consistency_score: float
+    vs_crop_avg_pct: float | None
+    typical_start_hour: int | None
+    avg_duration_minutes: float | None
+
+
+class FlowmeterAnalysisResponse(BaseModel):
+    analysis: str
+    statistics: FlowmeterAnalysisStatistics
+
+
+class FlowmeterSectorAnalysisResponse(BaseModel):
+    analysis: str
+    statistics: FlowmeterSectorStatistics
