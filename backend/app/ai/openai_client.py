@@ -102,6 +102,20 @@ class MockChatClient:
                 "• Rega atingiu 30 cm mas não 60 cm: +0.04 m³/m³ aos 30 cm, +0.002 m³/m³ aos 60 cm após rega → rega não atingiu a profundidade total → aumentar tempo de rega ou verificar DU."
             )
 
+        if "caudalímetro" in prompt_lower or "consumo de água" in prompt_lower or "flowmeter" in prompt_lower:
+            if "setor" in prompt_lower or "sector" in prompt_lower:
+                return (
+                    "O setor aplica em média 17.4 m³/ha por evento de rega, com intervalos regulares de 2-3 dias. "
+                    "A consistência é alta — os volumes e intervalos variam pouco entre eventos. "
+                    "O consumo está ligeiramente acima da média dos setores da mesma cultura."
+                )
+            return (
+                "Nos últimos dias, a exploração aplicou um total significativo de água distribuído pelos setores ativos. "
+                "O amendoal consome mais por setor do que o olival, em linha com as necessidades hídicas das culturas. "
+                "Os setores com rega parada merecem verificação do estado do sistema. "
+                "O padrão operacional é estável, com a maioria das regas a iniciar nas primeiras horas da manhã."
+            )
+
         return (
             "Não tenho contexto suficiente para responder a essa pergunta. "
             "Por favor, forneça mais detalhes sobre o sector ou a questão."
