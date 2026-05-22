@@ -2,6 +2,8 @@
 """Flowmeter endpoints — sector-level readings/events and farm-level dashboard."""
 from __future__ import annotations
 
+import json as _json
+from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
@@ -14,18 +16,64 @@ from app.database import get_db
 from app.models import Farm, Flowmeter, FlowmeterReading, IrrigationEventDetected, Plot, Sector
 from app.schemas.flowmeter import (
     CropSummary,
+    FlowmeterAnalysisRequest,
+    FlowmeterAnalysisResponse,
+    FlowmeterAnalysisStatistics,
+    FlowmeterCropStats,
     FlowmeterDashboardResponse,
     FlowmeterEventsResponse,
     FlowmeterEventsSummary,
     FlowmeterOut,
     FlowmeterReadingPoint,
     FlowmeterReadingsResponse,
+    FlowmeterSectorAnalysisResponse,
     FlowmeterSectorDashboard,
+    FlowmeterSectorStatistics,
     IrrigationEventOut,
     SectorDailyBreakdown,
 )
 
 router = APIRouter(tags=["flowmeter"])
+
+
+def _build_farm_statistics(
+    analytics: "FarmFlowmeterAnalytics",
+) -> FlowmeterAnalysisStatistics:
+    return FlowmeterAnalysisStatistics(
+        total_m3_ha=analytics.total_m3_ha,
+        total_events=analytics.total_events,
+        sectors_with_data=analytics.total_sectors_with_data,
+        sectors_without_data=analytics.total_sectors_without_data,
+        by_crop={
+            crop: FlowmeterCropStats(
+                total_m3_ha=s.total_m3_ha,
+                avg_per_sector=s.avg_m3_ha_per_sector,
+                avg_per_event=s.avg_m3_ha_per_event,
+                num_events=s.total_events,
+            )
+            for crop, s in analytics.by_crop.items()
+        },
+        stopped_sectors=[s.sector_name for s in analytics.stopped_sectors],
+        top_consumers=[f"{r.sector_name} ({r.value:.1f} m³/ha)" for r in analytics.top_consumers],
+        trend=analytics.trend,
+        typical_start_hour=analytics.most_common_start_hour if analytics.start_hour_distribution else None,
+    )
+
+
+def _build_sector_statistics(
+    sa: "SectorFlowmeterAnalytics",
+) -> FlowmeterSectorStatistics:
+    return FlowmeterSectorStatistics(
+        total_m3_ha=sa.total_m3_ha,
+        num_events=sa.num_events,
+        avg_m3_ha_per_event=sa.avg_m3_ha_per_event,
+        avg_interval_days=sa.avg_interval_days,
+        pattern=sa.pattern,
+        consistency_score=sa.consistency_score,
+        vs_crop_avg_pct=sa.vs_crop_avg_pct,
+        typical_start_hour=sa.typical_start_hour,
+        avg_duration_minutes=sa.avg_duration_minutes,
+    )
 
 
 async def _get_flowmeter_or_404(sector_id: str, db: AsyncSession) -> Flowmeter:
@@ -277,3 +325,111 @@ async def get_flowmeter_dashboard(
         sectors=sectors_out,
         by_crop={k: CropSummary(**v) for k, v in by_crop.items()},
     )
+
+
+@router.post(
+    "/farms/{farm_id}/flowmeter-analysis",
+    response_model=FlowmeterAnalysisResponse,
+    tags=["flowmeter"],
+)
+async def farm_flowmeter_analysis(
+    farm_id: str,
+    body: FlowmeterAnalysisRequest = FlowmeterAnalysisRequest(),
+    db: AsyncSession = Depends(get_db),
+) -> FlowmeterAnalysisResponse:
+    """On-demand AI analysis of farm irrigation consumption.
+
+    Computes statistics from DB, calls the LLM, and caches the AI text for
+    2 hours. Pass force_refresh=true to bypass the cache.
+    """
+    from app.ai.flowmeter_prompts import get_farm_analysis_prompt
+    from app.ai.openai_client import get_chat_client
+    from app.config import get_settings
+    from app.services.flowmeter_analytics import FlowmeterAnalyticsService
+    from app.services.flowmeter_cache import get_analysis_cache, set_analysis_cache
+
+    settings = get_settings()
+
+    # Always compute fresh statistics (fast DB queries)
+    svc = FlowmeterAnalyticsService()
+    try:
+        analytics = await svc.compute_farm_analytics(
+            farm_id=farm_id, period_days=body.period_days, db=db
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    stats = _build_farm_statistics(analytics)
+
+    # Check cache for AI text
+    if not body.force_refresh:
+        cached_text = await get_analysis_cache("farm", farm_id, body.period_days)
+        if cached_text:
+            return FlowmeterAnalysisResponse(analysis=cached_text, statistics=stats)
+
+    # Build JSON context for LLM (exclude per-sector details to keep prompt short)
+    analytics_dict = asdict(analytics)
+    analytics_dict.pop("sectors", None)  # too verbose for farm-level prompt
+    analytics_json = _json.dumps(analytics_dict, ensure_ascii=False, default=str, indent=2)
+
+    prompt = get_farm_analysis_prompt(body.language).format(analytics_json=analytics_json)
+    user_message = f"Analisa o consumo de água da exploração nos últimos {body.period_days} dias."
+
+    client = get_chat_client(settings)
+    try:
+        analysis_text = await client.complete(prompt, user_message, max_tokens=800, temperature=0.3)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {exc}") from exc
+
+    await set_analysis_cache("farm", farm_id, body.period_days, analysis_text)
+
+    return FlowmeterAnalysisResponse(analysis=analysis_text, statistics=stats)
+
+
+@router.post(
+    "/sectors/{sector_id}/flowmeter-analysis",
+    response_model=FlowmeterSectorAnalysisResponse,
+    tags=["flowmeter"],
+)
+async def sector_flowmeter_analysis(
+    sector_id: str,
+    body: FlowmeterAnalysisRequest = FlowmeterAnalysisRequest(),
+    db: AsyncSession = Depends(get_db),
+) -> FlowmeterSectorAnalysisResponse:
+    """On-demand AI analysis of a single sector's irrigation consumption."""
+    from app.ai.flowmeter_prompts import get_sector_analysis_prompt
+    from app.ai.openai_client import get_chat_client
+    from app.config import get_settings
+    from app.services.flowmeter_analytics import FlowmeterAnalyticsService
+    from app.services.flowmeter_cache import get_analysis_cache, set_analysis_cache
+
+    settings = get_settings()
+
+    svc = FlowmeterAnalyticsService()
+    try:
+        sector_analytics = await svc.compute_sector_analytics(
+            sector_id=sector_id, period_days=body.period_days, db=db
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    stats = _build_sector_statistics(sector_analytics)
+
+    if not body.force_refresh:
+        cached_text = await get_analysis_cache("sector", sector_id, body.period_days)
+        if cached_text:
+            return FlowmeterSectorAnalysisResponse(analysis=cached_text, statistics=stats)
+
+    analytics_json = _json.dumps(asdict(sector_analytics), ensure_ascii=False, default=str, indent=2)
+    prompt = get_sector_analysis_prompt(body.language).format(analytics_json=analytics_json)
+    user_message = f"Analisa o consumo do setor '{sector_analytics.sector_name}' nos últimos {body.period_days} dias."
+
+    client = get_chat_client(settings)
+    try:
+        analysis_text = await client.complete(prompt, user_message, max_tokens=600, temperature=0.3)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {exc}") from exc
+
+    await set_analysis_cache("sector", sector_id, body.period_days, analysis_text)
+
+    return FlowmeterSectorAnalysisResponse(analysis=analysis_text, statistics=stats)
