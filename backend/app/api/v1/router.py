@@ -9,6 +9,7 @@ from app.api.v1 import (
     crop_profiles,
     dashboard,
     farms,
+    flowmeter,
     gdd,
     irrigation,
     overrides,
@@ -37,3 +38,4 @@ router.include_router(overrides.router)
 router.include_router(audit_log.router)
 router.include_router(auto_calibration.router)
 router.include_router(gdd.router)
+router.include_router(flowmeter.router)
