@@ -22,6 +22,7 @@ import { DecisionPanelEditorial } from "@/components/dashboard/editorial/Decisio
 import { SidebarCard } from "@/components/dashboard/editorial/SidebarCard";
 import { ImproveReliabilityCard } from "@/components/dashboard/editorial/ImproveReliabilityCard";
 import { recommendationsApi, sectorsApi } from "@/lib/api";
+import { FlowmeterInfoCard } from "@/components/flowmeter/FlowmeterInfoCard";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Zap } from "lucide-react";
 import Link from "next/link";
@@ -459,6 +460,9 @@ export default function SectorDetailPage({ params }: Props) {
                   probeExternalId={status.probes[0]?.external_id ?? null}
                 />
               )}
+
+              {/* Flowmeter cross-link */}
+              <FlowmeterInfoCard sectorId={sectorId} farmId={farmId} />
             </div>
 
             {/* Sidebar */}
