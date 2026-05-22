@@ -767,6 +767,49 @@ export interface FlowmeterDashboardResponse {
   by_crop: Record<string, CropSummary>;
 }
 
+// ── Flowmeter AI Analysis ─────────────────────────────────────────────────────
+
+export interface FlowmeterCropStats {
+  total_m3_ha: number;
+  avg_per_sector: number;
+  avg_per_event: number;
+  num_events: number;
+}
+
+export interface FlowmeterAnalysisStatistics {
+  total_m3_ha: number;
+  total_events: number;
+  sectors_with_data: number;
+  sectors_without_data: number;
+  by_crop: Record<string, FlowmeterCropStats>;
+  stopped_sectors: string[];
+  top_consumers: string[];
+  trend: string;
+  typical_start_hour: number | null;
+}
+
+export interface FlowmeterSectorStatistics {
+  total_m3_ha: number;
+  num_events: number;
+  avg_m3_ha_per_event: number;
+  avg_interval_days: number | null;
+  pattern: string;
+  consistency_score: number;
+  vs_crop_avg_pct: number | null;
+  typical_start_hour: number | null;
+  avg_duration_minutes: number | null;
+}
+
+export interface FlowmeterAnalysisResponse {
+  analysis: string;
+  statistics: FlowmeterAnalysisStatistics;
+}
+
+export interface FlowmeterSectorAnalysisResponse {
+  analysis: string;
+  statistics: FlowmeterSectorStatistics;
+}
+
 // ── GDD Status ────────────────────────────────────────────────────────────────
 
 export interface GDDStatus {

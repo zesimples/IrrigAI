@@ -8,10 +8,12 @@ import type {
   DetectedWaterEventOut,
   Farm,
   FarmCreate,
+  FlowmeterAnalysisResponse,
   FlowmeterDashboardResponse,
   FlowmeterEventsResponse,
   FlowmeterOut,
   FlowmeterReadingsResponse,
+  FlowmeterSectorAnalysisResponse,
   GDDStatus,
   IngestionRunOut,
   IrrigationEvent,
@@ -406,6 +408,19 @@ export const flowmeterApi = {
     get<FlowmeterDashboardResponse>(
       `/farms/${farmId}/flowmeter-dashboard?period=${period}`,
     ),
+
+  analysis: (
+    farmId: string,
+    params: { period_days: number; language?: string; force_refresh?: boolean },
+  ) => post<FlowmeterAnalysisResponse>(`/farms/${farmId}/flowmeter-analysis`, params),
+
+  sectorAnalysis: (
+    sectorId: string,
+    params: { period_days: number; language?: string; force_refresh?: boolean },
+  ) => post<FlowmeterSectorAnalysisResponse>(
+    `/sectors/${sectorId}/flowmeter-analysis`,
+    params,
+  ),
 };
 
 export { ApiError };
