@@ -122,6 +122,39 @@ async def _run_data_ingestion() -> None:
             raise
 
 
+async def _run_flowmeter_ingestion() -> None:
+    async with JobLock("flowmeter_ingestion", ttl=1_200) as acquired:
+        if not acquired:
+            scheduler_job_runs_total.labels("flowmeter_ingestion", "skipped").inc()
+            return
+
+        from app.database import get_db
+        from app.models import Farm
+        from app.services.flowmeter_ingestion import FlowmeterIngestionService
+        from sqlalchemy import select
+
+        logger.info("Scheduler: flowmeter ingestion at %s", datetime.now(UTC))
+        service = FlowmeterIngestionService()
+
+        try:
+            async for db in get_db():
+                try:
+                    farms = (await db.execute(select(Farm))).scalars().all()
+                    for farm in farms:
+                        try:
+                            await service.ingest_farm(farm.id, db)
+                        except Exception:
+                            logger.exception(
+                                "Flowmeter ingestion failed for farm %s", farm.id
+                            )
+                except Exception:
+                    logger.exception("Flowmeter ingestion job failed")
+            scheduler_job_runs_total.labels("flowmeter_ingestion", "success").inc()
+        except Exception:
+            scheduler_job_runs_total.labels("flowmeter_ingestion", "failure").inc()
+            raise
+
+
 def start_scheduler() -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is not None and _scheduler.running:
@@ -147,6 +180,13 @@ def start_scheduler() -> AsyncIOScheduler:
         _run_data_ingestion,
         trigger=IntervalTrigger(minutes=15),
         id="data_ingestion",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+    _scheduler.add_job(
+        _run_flowmeter_ingestion,
+        trigger=IntervalTrigger(minutes=20),
+        id="flowmeter_ingestion",
         replace_existing=True,
         misfire_grace_time=120,
     )
