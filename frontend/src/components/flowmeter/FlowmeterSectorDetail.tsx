@@ -11,6 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { flowmeterApi } from "@/lib/api";
+import { FlowmeterSectorAIAnalysis } from "./FlowmeterSectorAIAnalysis";
 import type {
   FlowmeterReadingPoint,
   IrrigationEventOut,
@@ -109,6 +110,9 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
           ))}
         </div>
       )}
+
+      {/* AI analysis for this sector */}
+      <FlowmeterSectorAIAnalysis sectorId={sectorId} period={period} />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { flowmeterApi } from "@/lib/api";
 import type { FlowmeterDashboardResponse } from "@/types";
 import { FlowmeterSectorTable } from "./FlowmeterSectorTable";
+import { FlowmeterAIAnalysis } from "./FlowmeterAIAnalysis";
 
 type Period = "7d" | "30d" | "season";
 
@@ -73,6 +74,9 @@ export function FlowmeterDashboard({ farmId }: Props) {
           ))}
         </div>
       </div>
+
+      {/* AI Analysis section — above sector table */}
+      <FlowmeterAIAnalysis farmId={farmId} period={period} />
 
       {error && (
         <div className="px-[18px] py-4 text-sm text-terra">{error}</div>
