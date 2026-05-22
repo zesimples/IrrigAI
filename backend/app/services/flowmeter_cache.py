@@ -35,7 +35,7 @@ async def get_analysis_cache(scope: str, entity_id: str, period_days: int) -> st
         key = f"flowmeter_analysis:{scope}:{entity_id}:{period_days}"
         return await r.get(key)
     except Exception:
-        logger.warning("Redis get failed for flowmeter_analysis cache — skipping cache")
+        logger.warning("Redis get failed for flowmeter_analysis cache — skipping cache", exc_info=True)
         return None
 
 
@@ -46,4 +46,4 @@ async def set_analysis_cache(scope: str, entity_id: str, period_days: int, value
         key = f"flowmeter_analysis:{scope}:{entity_id}:{period_days}"
         await r.set(key, value, ex=CACHE_TTL)
     except Exception:
-        logger.warning("Redis set failed for flowmeter_analysis cache — continuing without cache")
+        logger.warning("Redis set failed for flowmeter_analysis cache — continuing without cache", exc_info=True)

@@ -1,7 +1,7 @@
 # backend/app/schemas/flowmeter.py
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class FlowmeterOut(BaseModel):
@@ -89,7 +89,7 @@ class FlowmeterDashboardResponse(BaseModel):
 # ── AI Analysis schemas ──────────────────────────────────────────────────────
 
 class FlowmeterAnalysisRequest(BaseModel):
-    period_days: int = 7
+    period_days: int = Field(default=7, ge=1, le=365)
     language: str = "pt"
     force_refresh: bool = False
 
@@ -119,7 +119,7 @@ class FlowmeterSectorStatistics(BaseModel):
     avg_m3_ha_per_event: float
     avg_interval_days: float | None
     pattern: str
-    consistency_score: float
+    consistency_score: float = Field(..., ge=0.0, le=1.0)
     vs_crop_avg_pct: float | None
     typical_start_hour: int | None
     avg_duration_minutes: float | None
