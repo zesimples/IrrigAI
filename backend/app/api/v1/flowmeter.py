@@ -367,13 +367,18 @@ async def farm_flowmeter_analysis(
         if cached_text:
             return FlowmeterAnalysisResponse(analysis=cached_text, statistics=stats)
 
-    # Build JSON context for LLM (exclude per-sector details to keep prompt short)
+    # Build JSON context for LLM (exclude per-sector full details to keep prompt short;
+    # rankings like top_consumers/lowest_consumers are kept — 5 items each, useful context)
     analytics_dict = asdict(analytics)
-    analytics_dict.pop("sectors", None)  # too verbose for farm-level prompt
+    analytics_dict.pop("sectors", None)  # 49 full SectorFlowmeterAnalytics — too verbose
     analytics_json = _json.dumps(analytics_dict, ensure_ascii=False, default=str, indent=2)
 
     prompt = get_farm_analysis_prompt(body.language).format(analytics_json=analytics_json)
-    user_message = f"Analisa o consumo de água da exploração nos últimos {body.period_days} dias."
+    user_message = (
+        f"Analisa o consumo de água da exploração nos últimos {body.period_days} dias."
+        if body.language == "pt"
+        else f"Analyze the farm's water consumption over the last {body.period_days} days."
+    )
 
     client = get_chat_client(settings)
     try:
@@ -422,7 +427,11 @@ async def sector_flowmeter_analysis(
 
     analytics_json = _json.dumps(asdict(sector_analytics), ensure_ascii=False, default=str, indent=2)
     prompt = get_sector_analysis_prompt(body.language).format(analytics_json=analytics_json)
-    user_message = f"Analisa o consumo do setor '{sector_analytics.sector_name}' nos últimos {body.period_days} dias."
+    user_message = (
+        f"Analisa o consumo do setor '{sector_analytics.sector_name}' nos últimos {body.period_days} dias."
+        if body.language == "pt"
+        else f"Analyze sector '{sector_analytics.sector_name}' water consumption over the last {body.period_days} days."
+    )
 
     client = get_chat_client(settings)
     try:
