@@ -85,9 +85,9 @@ SECTOR DATA:
 """
 
 
-def get_farm_analysis_prompt(language: str) -> str:
+def get_farm_analysis_prompt(language: str = "pt") -> str:
     return FLOWMETER_FARM_ANALYSIS_PT if language == "pt" else FLOWMETER_FARM_ANALYSIS_EN
 
 
-def get_sector_analysis_prompt(language: str) -> str:
+def get_sector_analysis_prompt(language: str = "pt") -> str:
     return FLOWMETER_SECTOR_ANALYSIS_PT if language == "pt" else FLOWMETER_SECTOR_ANALYSIS_EN

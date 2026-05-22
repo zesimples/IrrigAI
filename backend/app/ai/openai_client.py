@@ -111,7 +111,7 @@ class MockChatClient:
                 )
             return (
                 "Nos últimos dias, a exploração aplicou um total significativo de água distribuído pelos setores ativos. "
-                "O amendoal consome mais por setor do que o olival, em linha com as necessidades hídicas das culturas. "
+                "O amendoal consome mais por setor do que o olival, em linha com as necessidades hídricas das culturas. "
                 "Os setores com rega parada merecem verificação do estado do sistema. "
                 "O padrão operacional é estável, com a maioria das regas a iniciar nas primeiras horas da manhã."
             )
