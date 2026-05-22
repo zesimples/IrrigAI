@@ -58,6 +58,12 @@ async def get_flowmeter_readings(
     since = since or (now - timedelta(days=7))
     until = until or now
 
+    # Ensure tz-aware for DB comparison
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=UTC)
+
     if interval == "15m":
         rows_result = await db.execute(
             select(FlowmeterReading)
@@ -114,6 +120,12 @@ async def get_flowmeter_events(
     since = since or (now - timedelta(days=7))
     until = until or now
 
+    # Ensure tz-aware for DB comparison
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=UTC)
+
     events_result = await db.execute(
         select(IrrigationEventDetected)
         .where(
@@ -158,7 +170,7 @@ async def get_flowmeter_dashboard(
             .join(Flowmeter, FlowmeterReading.flowmeter_id == Flowmeter.id)
             .join(Sector, Flowmeter.sector_id == Sector.id)
             .join(Plot, Sector.plot_id == Plot.id)
-            .where(Plot.farm_id == farm_id)
+            .where(Plot.farm_id == farm_id, Flowmeter.is_active.is_(True))
         )
         first_ts = first_ts_result.scalar_one_or_none()
         since = first_ts or (now - timedelta(days=365))
@@ -218,11 +230,10 @@ async def get_flowmeter_dashboard(
     for ev in all_events:
         events_by_fm.setdefault(ev.flowmeter_id, []).append(ev)
 
-    # Build date range for daily_breakdown
+    # Build inclusive date range from period_start to period_end
     date_range = [
-        (since + timedelta(days=i)).date()
-        for i in range(period_days + 1)
-        if (since + timedelta(days=i)).date() <= period_end
+        period_start + timedelta(days=i)
+        for i in range((period_end - period_start).days + 1)
     ]
 
     sectors_out: list[FlowmeterSectorDashboard] = []
