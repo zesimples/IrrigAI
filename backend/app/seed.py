@@ -108,6 +108,7 @@ PROBE_CONQ_O05  = "1597/3832"  # Turno 5 (S20) — olive
 import copy
 import math
 import random
+import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
@@ -1362,6 +1363,142 @@ def seed(engine, only_farms: set[str] | None = None) -> None:
                 session.add(pd)
 
             print(f"  [+] Sector '{sector.name}' | probe={probe_ext_id}")
+
+        # ── Flowmeter device maps ─────────────────────────────────────────────
+        _FM_AMENDOAL: dict[int, tuple[int, str | None]] = {
+            1: (6980, "E62300554"), 2: (7036, "0020349A"), 3: (7037, None),
+            4: (6982, "E62300556"), 5: (7005, "E62300579"), 6: (6981, "E62300555"),
+            7: (7006, "E62300580"), 8: (6977, "E62300551"), 9: (6979, "E62300553"),
+            10: (7168, None),       11: (7007, "E62300581"), 12: (7169, "002034CE"),
+            13: (7003, "E62300577"), 14: (7001, "E62300575"), 15: (6978, "E62300552"),
+            16: (6983, "E62300557"), 17: (7194, "E62300545"), 18: (7222, "E62300982"),
+            19: (7193, "E62300541"), 20: (7191, "E62300543"), 21: (7002, "E62300576"),
+            22: (7004, "E62300578"), 23: (7192, "E62300542"), 24: (7008, "E62300582"),
+            25: (7046, "031107A1"),  26: (7195, "E62300544"),
+        }
+        _FM_OLIVAL: dict[int, tuple[int, str | None]] = {
+            1: (7034, "0120A035"),  2: (6990, "E62300565"),  3: (6989, "E62300563"),
+            4: (6191, "E62000018"), 5: (6995, "E62300570"),  6: (6992, "E62300567"),
+            7: (6984, "E62300558"), 8: (7035, "002034C4"),   9: (6997, "E62300572"),
+            10: (6987, "E62300561"), 11: (6994, "E62300569"), 12: (7041, "0120A04A"),
+            13: (7009, "E62300564"), 14: (6988, "E62300562"), 15: (7040, "0120A04E"),
+            16: (6999, "E62300574"), 17: (6986, "E62300560"), 18: (6985, "E62300559"),
+            19: (6998, "E62300573"), 20: (7038, "203499"),    21: (6996, "E62300571"),
+            22: (6991, "E62300566"), 23: (6993, "E62300568"),
+        }
+
+        def _sector_num(name: str) -> int | None:
+            """Extract the sector number from names like 'Turno 1 (S02)' or 'S04 Olival'."""
+            m = re.search(r'S0*(\d+)', name, re.IGNORECASE)
+            return int(m.group(1)) if m else None
+
+        # Find which sector numbers already exist per plot
+        existing_amendoal = session.execute(
+            select(Sector).where(Sector.plot_id == plot_amendoal.id)
+        ).scalars().all()
+        existing_amendoal_nums = {_sector_num(s.name) for s in existing_amendoal} - {None}
+
+        existing_olival = session.execute(
+            select(Sector).where(Sector.plot_id == plot_olival.id)
+        ).scalars().all()
+        existing_olival_nums = {_sector_num(s.name) for s in existing_olival} - {None}
+
+        # Create missing almond sectors (flowmeter-only, no probe)
+        new_amendoal_sectors: list = []
+        for num in sorted(_FM_AMENDOAL):
+            if num in existing_amendoal_nums:
+                continue
+            s = Sector(
+                id=str(uuid.uuid4()),
+                plot_id=plot_amendoal.id,
+                name=f"S{num:02d} Amendoal",
+                crop_type="almond",
+                variety="Amendoeira",
+                irrigation_strategy="full_etc",
+                deficit_factor=1.0,
+                rainfall_effectiveness=0.8,
+            )
+            session.add(s)
+            new_amendoal_sectors.append(s)
+        session.flush()
+
+        # Create missing olive sectors (flowmeter-only, no probe)
+        new_olival_sectors: list = []
+        for num in sorted(_FM_OLIVAL):
+            if num in existing_olival_nums:
+                continue
+            s = Sector(
+                id=str(uuid.uuid4()),
+                plot_id=plot_olival.id,
+                name=f"S{num:02d} Olival",
+                crop_type="olive",
+                variety="Oliveira",
+                irrigation_strategy="full_etc",
+                deficit_factor=1.0,
+                rainfall_effectiveness=0.8,
+            )
+            session.add(s)
+            new_olival_sectors.append(s)
+        session.flush()
+
+        print(f"  Created {len(new_amendoal_sectors)} new Amendoal sectors, "
+              f"{len(new_olival_sectors)} new Olival sectors")
+
+        # ── Create Flowmeter rows for all 49 sectors ──────────────────────────
+        from app.models.flowmeter import Flowmeter as FlowmeterModel
+
+        # Re-load all sectors for both plots now that new ones are flushed
+        all_amendoal = session.execute(
+            select(Sector).where(Sector.plot_id == plot_amendoal.id)
+        ).scalars().all()
+        all_olival = session.execute(
+            select(Sector).where(Sector.plot_id == plot_olival.id)
+        ).scalars().all()
+
+        flowmeters_created = 0
+        for sector in all_amendoal:
+            num = _sector_num(sector.name)
+            if num not in _FM_AMENDOAL:
+                continue
+            # Skip if flowmeter already exists for this sector
+            existing = session.execute(
+                select(FlowmeterModel).where(FlowmeterModel.sector_id == sector.id)
+            ).scalar_one_or_none()
+            if existing:
+                continue
+            device_id, serial = _FM_AMENDOAL[num]
+            session.add(FlowmeterModel(
+                id=str(uuid.uuid4()),
+                sector_id=sector.id,
+                external_device_id=device_id,
+                serial_number=serial,
+                name=f"Caudalímetro S{num:02d} Amendoal",
+                is_active=True,
+            ))
+            flowmeters_created += 1
+
+        for sector in all_olival:
+            num = _sector_num(sector.name)
+            if num not in _FM_OLIVAL:
+                continue
+            existing = session.execute(
+                select(FlowmeterModel).where(FlowmeterModel.sector_id == sector.id)
+            ).scalar_one_or_none()
+            if existing:
+                continue
+            device_id, serial = _FM_OLIVAL[num]
+            session.add(FlowmeterModel(
+                id=str(uuid.uuid4()),
+                sector_id=sector.id,
+                external_device_id=device_id,
+                serial_number=serial,
+                name=f"Caudalímetro S{num:02d} Olival",
+                is_active=True,
+            ))
+            flowmeters_created += 1
+
+        session.flush()
+        print(f"  Created {flowmeters_created} flowmeters ✓")
 
         session.commit()
         print(f"  Conqueiros: 2 plots, {len(conq_sectors)} sectors seeded ✓")
