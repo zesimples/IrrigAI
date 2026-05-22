@@ -508,6 +508,7 @@ export interface DashboardResponse {
   active_alerts_count: AlertCounts;
   missing_data_prompts: string[];
   sync_status: ProviderSyncStatus[];
+  has_flowmeters?: boolean;
 }
 
 // ── Crop Profile ──────────────────────────────────────────────────────────────
@@ -684,6 +685,86 @@ export interface AutoCalibrationResult {
   suggestion_en: string;
   generated_at: string;
   dismissed: boolean;
+}
+
+// ── Flowmeter ─────────────────────────────────────────────────────────────────
+
+export interface FlowmeterOut {
+  id: string;
+  sector_id: string;
+  external_device_id: number;
+  serial_number: string | null;
+  name: string;
+  is_active: boolean;
+  last_reading_at: string | null;
+}
+
+export interface FlowmeterReadingPoint {
+  timestamp: string;
+  value: number;
+}
+
+export interface FlowmeterReadingsResponse {
+  flowmeter_id: string;
+  sector_name: string;
+  crop: string;
+  unit: string;
+  interval: string;
+  readings: FlowmeterReadingPoint[];
+}
+
+export interface IrrigationEventOut {
+  id: string;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  total_m3_ha: number;
+  date: string;
+}
+
+export interface FlowmeterEventsSummary {
+  total_events: number;
+  total_m3_ha: number;
+  avg_m3_ha_per_event: number;
+  period_days: number;
+}
+
+export interface FlowmeterEventsResponse {
+  events: IrrigationEventOut[];
+  summary: FlowmeterEventsSummary;
+}
+
+export interface SectorDailyBreakdown {
+  date: string;
+  m3_ha: number;
+}
+
+export interface FlowmeterSectorDashboard {
+  sector_id: string;
+  sector_name: string;
+  crop: string;
+  has_flowmeter: boolean;
+  total_m3_ha: number;
+  num_events: number;
+  last_irrigation: string | null;
+  last_event_m3_ha: number | null;
+  daily_breakdown: SectorDailyBreakdown[];
+}
+
+export interface CropSummary {
+  total_m3_ha: number;
+  num_sectors: number;
+  num_events: number;
+}
+
+export interface FlowmeterDashboardResponse {
+  farm_name: string;
+  period: string;
+  period_start: string;
+  period_end: string;
+  total_m3_ha: number;
+  sectors: FlowmeterSectorDashboard[];
+  by_crop: Record<string, CropSummary>;
 }
 
 // ── GDD Status ────────────────────────────────────────────────────────────────

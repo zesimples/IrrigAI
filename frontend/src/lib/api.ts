@@ -8,6 +8,10 @@ import type {
   DetectedWaterEventOut,
   Farm,
   FarmCreate,
+  FlowmeterDashboardResponse,
+  FlowmeterEventsResponse,
+  FlowmeterOut,
+  FlowmeterReadingsResponse,
   GDDStatus,
   IngestionRunOut,
   IrrigationEvent,
@@ -363,6 +367,45 @@ export const gddApi = {
   getFarm: (farmId: string) => get<GDDStatus[]>(`/farms/${farmId}/gdd-status`),
   confirm: (sectorId: string, stage?: string) =>
     post<{ confirmed: boolean; stage: string }>(`/sectors/${sectorId}/gdd-status/confirm`, { stage: stage ?? null }),
+};
+
+// ── Flowmeter ─────────────────────────────────────────────────────────────────
+
+export const flowmeterApi = {
+  getSector: (sectorId: string) =>
+    get<FlowmeterOut>(`/sectors/${sectorId}/flowmeter`),
+
+  readings: (
+    sectorId: string,
+    params: { since?: string; until?: string; interval?: "15m" | "1h" | "1d" } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.since) qs.set("since", params.since);
+    if (params.until) qs.set("until", params.until);
+    if (params.interval) qs.set("interval", params.interval);
+    const query = qs.toString();
+    return get<FlowmeterReadingsResponse>(
+      `/sectors/${sectorId}/flowmeter/readings${query ? `?${query}` : ""}`,
+    );
+  },
+
+  events: (
+    sectorId: string,
+    params: { since?: string; until?: string } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.since) qs.set("since", params.since);
+    if (params.until) qs.set("until", params.until);
+    const query = qs.toString();
+    return get<FlowmeterEventsResponse>(
+      `/sectors/${sectorId}/flowmeter/events${query ? `?${query}` : ""}`,
+    );
+  },
+
+  dashboard: (farmId: string, period: "7d" | "30d" | "season" = "7d") =>
+    get<FlowmeterDashboardResponse>(
+      `/farms/${farmId}/flowmeter-dashboard?period=${period}`,
+    ),
 };
 
 export { ApiError };

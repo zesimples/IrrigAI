@@ -14,6 +14,7 @@ import { Lede } from "@/components/dashboard/editorial/Lede";
 import { NumericStrip } from "@/components/dashboard/editorial/NumericStrip";
 import { SectorGrid } from "@/components/dashboard/editorial/SectorGrid";
 import type { ProviderSyncStatus } from "@/types";
+import { FarmTabBar } from "@/components/ui/FarmTabBar";
 
 interface Props {
   params: { farmId: string };
@@ -196,6 +197,8 @@ export default function FarmDashboardPage({ params }: Props) {
       </div>
 
       <SyncStatusBar entries={data.sync_status ?? []} />
+
+      {data?.has_flowmeters && <FarmTabBar farmId={farmId} />}
 
       {/* Sector grid with tabs */}
       {data.sectors_summary.length > 0 ? (
