@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,14 +83,19 @@ _MAX_ADAPTIVE_LOOKBACK_HOURS = 168
 
 
 def _adaptive_since(last_ts: datetime | None, default_lookback_hours: int, now: datetime) -> datetime:
-    from datetime import UTC, timedelta
     default_since = now - timedelta(hours=default_lookback_hours)
     if last_ts is None:
         return default_since
     ts = last_ts if last_ts.tzinfo else last_ts.replace(tzinfo=UTC)
     if ts >= default_since:
         return default_since
-    return max(ts - timedelta(minutes=5), now - timedelta(hours=_MAX_ADAPTIVE_LOOKBACK_HOURS))
+    # Gap detected — extend lookback to cover since last reading
+    extended = max(ts - timedelta(minutes=5), now - timedelta(hours=_MAX_ADAPTIVE_LOOKBACK_HOURS))
+    logger.info(
+        "FlowmeterIngestion: gap detected since %s, extending lookback to %s",
+        ts.isoformat(), extended.isoformat(),
+    )
+    return extended
 
 
 class FlowmeterIngestionService:
@@ -98,8 +103,6 @@ class FlowmeterIngestionService:
 
     async def ingest_farm(self, farm_id: str, db: AsyncSession) -> dict:
         """Run ingestion for all active flowmeters of a farm."""
-        from datetime import UTC
-
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
 
@@ -182,7 +185,7 @@ class FlowmeterIngestionService:
         from app.adapters.myirrigation import parse_flowmeter_data
         from app.models import FlowmeterReading
 
-        await adapter.authenticate()
+        # _post_form_json handles authentication internally (including token refresh)
         try:
             raw = await adapter._post_form_json(
                 f"/data/devices/{flowmeter.external_device_id}/data",
@@ -218,11 +221,13 @@ class FlowmeterIngestionService:
             .on_conflict_do_nothing(constraint="uq_flowmeter_reading_device_ts")
         )
         result = await db.execute(stmt)
-        inserted = result.rowcount if result.rowcount >= 0 else 0
+        inserted = result.rowcount if result.rowcount >= 0 else len(rows)
 
-        if inserted > 0:
-            latest_ts = max(ts for ts, _ in readings)
-            flowmeter.last_reading_at = latest_ts
+        # Always advance last_reading_at when the API returned data,
+        # regardless of how many rows were actually inserted vs. deduplicated.
+        # asyncpg returns -1 for rowcount on mixed ON CONFLICT batches.
+        latest_ts = max(ts for ts, _ in readings)
+        flowmeter.last_reading_at = latest_ts
 
         logger.debug(
             "FlowmeterIngestion device %s: %d/%d readings inserted",
@@ -283,6 +288,6 @@ class FlowmeterIngestionService:
                 )
             )
             result = await db.execute(stmt)
-            added += result.rowcount if result.rowcount >= 0 else 0
+            added += result.rowcount if result.rowcount >= 0 else 1
 
         return added
