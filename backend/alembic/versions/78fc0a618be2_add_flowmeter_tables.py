@@ -33,7 +33,8 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['sector_id'], ['sector.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_flowmeter_sector_id'), 'flowmeter', ['sector_id'], unique=True)
+    op.create_index(op.f('ix_flowmeter_sector_id'), 'flowmeter', ['sector_id'], unique=False)
+    op.create_index(op.f('ix_flowmeter_external_device_id'), 'flowmeter', ['external_device_id'], unique=False)
     op.create_table('flowmeter_reading',
     sa.Column('id', sa.UUID(as_uuid=False), nullable=False),
     sa.Column('flowmeter_id', sa.UUID(as_uuid=False), nullable=False),
@@ -208,6 +209,7 @@ def downgrade() -> None:
     op.drop_table('irrigation_event_detected')
     op.drop_index(op.f('ix_flowmeter_reading_flowmeter_id'), table_name='flowmeter_reading')
     op.drop_table('flowmeter_reading')
+    op.drop_index(op.f('ix_flowmeter_external_device_id'), table_name='flowmeter')
     op.drop_index(op.f('ix_flowmeter_sector_id'), table_name='flowmeter')
     op.drop_table('flowmeter')
     # ### end Alembic commands ###
