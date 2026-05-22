@@ -1,9 +1,7 @@
 # backend/tests/test_flowmeter/test_event_detector.py
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
-from app.services.flowmeter_ingestion import DetectedEvent, IrrigationEventDetector
+from app.services.flowmeter_ingestion import IrrigationEventDetector
 
 BASE_TIME = datetime(2026, 7, 15, 6, 0, 0, tzinfo=timezone.utc)
 
@@ -52,7 +50,7 @@ def test_all_zeros():
 
 
 def test_duration_is_correct():
-    # 6 readings × 15 min = start→end span of 75 min
+    # (6 - 1) × 15 min = start→end span of 75 min
     readings = _make_readings([0, 1.5, 2.0, 2.0, 2.0, 2.0, 1.5, 0])
     events = IrrigationEventDetector().detect_events(readings)
     assert len(events) == 1
@@ -72,3 +70,10 @@ def test_custom_threshold():
     events = IrrigationEventDetector().detect_events(readings, threshold_m3_ha=0.5)
     assert len(events) == 1
     assert events[0].num_readings == 2
+
+
+def test_value_exactly_at_threshold_does_not_open_event():
+    # value == threshold is NOT > threshold, so no event opens
+    readings = _make_readings([0, 0.5, 0.5, 0.5, 0])
+    events = IrrigationEventDetector().detect_events(readings, threshold_m3_ha=0.5)
+    assert len(events) == 0

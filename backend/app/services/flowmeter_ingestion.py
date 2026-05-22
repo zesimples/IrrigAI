@@ -7,13 +7,8 @@ probes, different device IDs) and detects irrigation events from the time-series
 from __future__ import annotations
 
 import logging
-import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +17,7 @@ logger = logging.getLogger(__name__)
 # Event detection
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(frozen=True)
 class DetectedEvent:
     start_time: datetime
     end_time: datetime
