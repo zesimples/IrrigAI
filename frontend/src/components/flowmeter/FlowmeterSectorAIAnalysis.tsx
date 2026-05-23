@@ -110,7 +110,15 @@ export function FlowmeterSectorAIAnalysis({ sectorId, period }: Props) {
 
           {/* Error */}
           {error && !loading && (
-            <p className="text-xs text-terra">{error}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-terra">{error}</p>
+              <button
+                onClick={() => runAnalysis(false)}
+                className="text-xs text-ink-3 hover:text-ink-1 underline"
+              >
+                Tentar novamente
+              </button>
+            </div>
           )}
 
           {/* Result */}
