@@ -82,7 +82,7 @@ export function FlowmeterAIAnalysis({ farmId, period }: Props) {
             letterSpacing: '-0.01em',
             lineHeight: 1.4,
           }}>
-            Posso analisar este consumo cruzando com o défice hídrico e a meteo da semana.{' '}
+            Posso analisar os padrões de consumo dos caudalímetros — eventos de rega, dotações por setor e desvios entre culturas.{' '}
             <em style={{ fontFamily: 'var(--font-instrument)', color: '#5a5048', fontStyle: 'italic' }}>
               Demora cerca de 30 segundos.
             </em>
