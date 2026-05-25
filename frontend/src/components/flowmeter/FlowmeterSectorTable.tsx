@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { FlowmeterSectorDashboard } from "@/types";
 import { flowmeterApi } from "@/lib/api";
 import { FlowmeterSectorRow } from "./FlowmeterSectorRow";
-import type { DeviationInfo } from "./FlowmeterSectorRow";
 
 type SortKey = "name" | "last_irrigation" | "total" | "events";
 type CropFilter = "all" | "almond" | "olive";
@@ -18,22 +17,17 @@ interface Props {
 export function FlowmeterSectorTable({ sectors, period, farmId }: Props) {
   const [cropFilter, setCropFilter] = useState<CropFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [deviationMap, setDeviationMap] = useState<Record<string, DeviationInfo>>({});
+  // Maps sector_id → deviation % (positive = above, negative = below, null key = no data)
+  const [deviationMap, setDeviationMap] = useState<Record<string, number>>({});
 
   // Fetch deviation data once on mount / farmId change
   useEffect(() => {
     flowmeterApi.deviations(farmId).then((data) => {
-      const map: Record<string, DeviationInfo> = {};
+      const map: Record<string, number> = {};
       for (const s of data.deviating) {
-        map[s.sector_id] = {
-          type: "deviation",
-          direction: s.direction,
-          deviation_pct: s.deviation_pct,
-        };
+        map[s.sector_id] = s.direction === "above" ? s.deviation_pct : -s.deviation_pct;
       }
-      for (const s of data.insufficient_data) {
-        map[s.sector_id] = { type: "insufficient" };
-      }
+      // insufficient_data sectors get no entry → row receives null
       setDeviationMap(map);
     }).catch(() => {
       // Silent fail — deviation badges are non-critical
@@ -96,7 +90,7 @@ export function FlowmeterSectorTable({ sectors, period, farmId }: Props) {
       {/* Column headers */}
       <div
         className="grid text-[10px] font-semibold text-ink-3 uppercase tracking-wide bg-surface-subtle border-b border-rule-soft"
-        style={{ gridTemplateColumns: "56px 80px 120px 110px 90px 72px 1fr 80px", padding: "6px 18px" }}
+        style={{ gridTemplateColumns: "92px 92px 106px 122px 116px 62px 1fr 176px", padding: "6px 18px" }}
       >
         <span>Setor</span>
         <span>Cultura</span>
@@ -113,12 +107,13 @@ export function FlowmeterSectorTable({ sectors, period, farmId }: Props) {
           <div className="px-[18px] py-1.5 text-[10px] font-semibold text-ink-3 uppercase tracking-wide bg-surface-subtle border-y border-rule-soft">
             Amendoal — {almonds.length} setores
           </div>
-          {almonds.map((s) => (
+          {almonds.map((s, i) => (
             <FlowmeterSectorRow
               key={s.sector_id}
               sector={s}
               period={period}
               deviation={deviationMap[s.sector_id] ?? null}
+              odd={i % 2 === 1}
             />
           ))}
         </>
@@ -129,12 +124,13 @@ export function FlowmeterSectorTable({ sectors, period, farmId }: Props) {
           <div className="px-[18px] py-1.5 text-[10px] font-semibold text-ink-3 uppercase tracking-wide bg-surface-subtle border-y border-rule-soft">
             Olival — {olives.length} setores
           </div>
-          {olives.map((s) => (
+          {olives.map((s, i) => (
             <FlowmeterSectorRow
               key={s.sector_id}
               sector={s}
               period={period}
               deviation={deviationMap[s.sector_id] ?? null}
+              odd={i % 2 === 1}
             />
           ))}
         </>

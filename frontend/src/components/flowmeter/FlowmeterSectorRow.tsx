@@ -4,91 +4,151 @@ import { useState } from "react";
 import type { FlowmeterSectorDashboard } from "@/types";
 import { FlowmeterSparkline } from "./FlowmeterSparkline";
 import { FlowmeterSectorDetail } from "./FlowmeterSectorDetail";
-
-export type DeviationInfo =
-  | { type: "deviation"; direction: "above" | "below"; deviation_pct: number }
-  | { type: "insufficient" }
-  | null;
+import { DeviationCell } from "./DeviationCell";
 
 interface Props {
   sector: FlowmeterSectorDashboard;
   period: "7d" | "30d" | "season";
-  deviation?: DeviationInfo;
-}
-
-function statusColor(lastIrrigation: string | null): string {
-  if (!lastIrrigation) return "#d1cfc9";
-  const daysAgo = (Date.now() - new Date(lastIrrigation).getTime()) / 86_400_000;
-  if (daysAgo > 7) return "#dc2626";
-  if (daysAgo > 3) return "#d97706";
-  return "#6b9e3a";
+  deviation: number | null;   // pre-computed % vs crop avg; null = no data
+  odd?: boolean;
 }
 
 function relativeDate(iso: string | null): string {
-  if (!iso) return "sem dados";
+  if (!iso) return "";
   const daysAgo = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (daysAgo === 0) return "hoje " + new Date(iso).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
-  if (daysAgo === 1) return "ontem " + new Date(iso).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+  if (daysAgo === 0) return "hoje";
+  if (daysAgo === 1) return "ontem";
   return `há ${daysAgo} dias`;
 }
 
-export function FlowmeterSectorRow({ sector, period, deviation }: Props) {
+const ALARM_THRESHOLD = 5;
+
+export function FlowmeterSectorRow({ sector, period, deviation, odd }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const dot = statusColor(sector.last_irrigation);
+  const hasData = sector.num_events > 0;
+  const isAlarm = deviation != null && Math.abs(deviation) > ALARM_THRESHOLD;
+  const above = deviation != null && deviation > 0;
 
   return (
     <>
       <div
-        className="grid items-center border-b border-rule-soft cursor-pointer hover:bg-surface-subtle transition-colors"
-        style={{ gridTemplateColumns: "56px 80px 120px 110px 90px 72px 1fr 80px", padding: "9px 18px" }}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '92px 92px 106px 122px 116px 62px 1fr 176px',
+          padding: '12px 18px',
+          gap: 8,
+          alignItems: 'center',
+          borderBottom: '1px solid #e8e0d0',
+          background: odd ? 'rgba(0,0,0,0.015)' : 'transparent',
+          opacity: hasData ? 1 : 0.65,
+          position: 'relative',
+          cursor: 'pointer',
+        }}
         onClick={() => setExpanded((v) => !v)}
         role="button"
         aria-expanded={expanded}
       >
-        <div className="flex items-center gap-1.5">
-          <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, background: dot }} />
-          <span className="text-sm font-semibold text-ink-1">{sector.sector_name}</span>
+        {/* Alarm wash — absolute, behind content */}
+        {isAlarm && (
+          <div style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 194,
+            background: above ? 'rgba(184,74,42,0.045)' : 'rgba(201,163,74,0.06)',
+            pointerEvents: 'none',
+          }} />
+        )}
+
+        {/* Sector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{
+            width: 7,
+            height: 7,
+            borderRadius: 999,
+            background: hasData ? '#b84a2a' : '#8a7f74',
+            flexShrink: 0,
+          }} />
+          <span style={{ fontFamily: 'var(--font-fraunces)', fontSize: 15, fontWeight: 600, color: '#2a2520', letterSpacing: '-0.01em' }}>
+            {sector.sector_name}
+          </span>
         </div>
-        <span className="text-xs text-ink-3 capitalize">
-          {sector.crop === "almond" ? "Amendoal" : "Olival"}
-        </span>
-        <span className="text-xs" style={{ color: dot === "#dc2626" ? "#dc2626" : dot === "#d97706" ? "#d97706" : "#374151" }}>
-          {relativeDate(sector.last_irrigation)}
-        </span>
-        <span className="text-sm font-semibold text-ink-1">
-          {sector.last_event_m3_ha != null ? (
-            <>{sector.last_event_m3_ha.toFixed(1)} <span className="text-xs font-normal text-ink-3">m³/ha</span></>
+
+        {/* Cultura */}
+        <div style={{ fontFamily: 'var(--font-instrument)', fontStyle: 'italic', fontSize: 13, color: '#5a5048' }}>
+          {sector.crop === 'almond' ? 'Amendoal' : 'Olival'}
+        </div>
+
+        {/* Último evento */}
+        <div>
+          {sector.last_irrigation ? (
+            <span style={{ fontFamily: 'var(--font-dm-sans, system-ui)', fontSize: 12.5, color: '#b84a2a', fontWeight: 500 }}>
+              {relativeDate(sector.last_irrigation)}
+            </span>
           ) : (
-            <span className="text-ink-3">—</span>
-          )}
-        </span>
-        <span className="text-sm font-semibold text-ink-1">
-          {sector.total_m3_ha > 0 ? sector.total_m3_ha.toFixed(1) : <span className="text-ink-3">—</span>}
-        </span>
-        <span className="text-sm text-ink-2">{sector.num_events}</span>
-        <FlowmeterSparkline
-          data={sector.daily_breakdown.slice(-7)}
-        />
-        {/* Deviation badge */}
-        <div className="flex items-center justify-end">
-          {deviation?.type === "deviation" && (
-            <span
-              className={[
-                "text-[11px] font-semibold tabular-nums",
-                deviation.direction === "above" ? "text-terra" : "text-amber-600",
-              ].join(" ")}
-            >
-              {deviation.direction === "above" ? "▲ +" : "▼ −"}
-              {Math.abs(deviation.deviation_pct).toFixed(1)}%
+            <span style={{ fontFamily: 'var(--font-fraunces)', fontStyle: 'italic', fontSize: 12.5, color: '#8a7f74' }}>
+              sem dados
             </span>
           )}
-          {deviation?.type === "insufficient" && (
-            <span className="text-[11px] text-ink-4" title="Dados insuficientes">
-              —
+        </div>
+
+        {/* Última dotação */}
+        <div>
+          {sector.last_event_m3_ha != null ? (
+            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5 }}>
+              <span style={{ fontFamily: 'var(--font-fraunces)', fontSize: 16, fontWeight: 600, color: '#2a2520', letterSpacing: '-0.01em' }}>
+                {sector.last_event_m3_ha.toFixed(1)}
+              </span>
+              <span style={{ fontFamily: 'var(--font-jetbrains, ui-monospace)', fontSize: 10, color: '#8a7f74' }}>m³/ha</span>
             </span>
+          ) : (
+            <span style={{ fontFamily: 'var(--font-fraunces)', fontStyle: 'italic', fontSize: 13, color: '#8a7f74' }}>—</span>
           )}
+        </div>
+
+        {/* Total período */}
+        <div>
+          {sector.total_m3_ha > 0 ? (
+            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5 }}>
+              <span style={{ fontFamily: 'var(--font-fraunces)', fontSize: 16, fontWeight: 500, color: '#2a2520', letterSpacing: '-0.01em' }}>
+                {sector.total_m3_ha.toFixed(1)}
+              </span>
+              <span style={{ fontFamily: 'var(--font-jetbrains, ui-monospace)', fontSize: 10, color: '#8a7f74' }}>m³/ha</span>
+            </span>
+          ) : (
+            <span style={{ fontFamily: 'var(--font-fraunces)', fontStyle: 'italic', fontSize: 13, color: '#8a7f74' }}>—</span>
+          )}
+        </div>
+
+        {/* Nº regas */}
+        <div style={{ fontFamily: 'var(--font-jetbrains, ui-monospace)', fontSize: 13, fontWeight: 500, color: sector.num_events > 0 ? '#2a2520' : '#8a7f74' }}>
+          {sector.num_events}
+        </div>
+
+        {/* Gráfico 7d */}
+        <div style={{ paddingRight: 24 }}>
+          <FlowmeterSparkline data={sector.daily_breakdown.slice(-7)} />
+        </div>
+
+        {/* Desvio */}
+        <div
+          style={{
+            paddingLeft: 14,
+            marginLeft: 6,
+            borderLeft: '1px solid #e8e0d0',
+            alignSelf: 'stretch',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            position: 'relative',
+            zIndex: 1,
+          }}
+        >
+          <DeviationCell deviation={deviation} threshold={ALARM_THRESHOLD} />
         </div>
       </div>
+
       {expanded && <FlowmeterSectorDetail sectorId={sector.sector_id} period={period} />}
     </>
   );
