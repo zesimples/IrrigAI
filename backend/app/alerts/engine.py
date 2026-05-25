@@ -197,6 +197,14 @@ class AlertEngine:
                 except Exception:
                     logger.exception("Alert check failed for sector %s", sector.id)
 
+        # Flowmeter deviation check (per-crop interior-event average comparison)
+        try:
+            from app.alerts.flowmeter_checker import FlowmeterAlertChecker
+            fm_alerts = await FlowmeterAlertChecker().check(farm_id, db)
+            new_alerts.extend(fm_alerts)
+        except Exception:
+            logger.exception("Flowmeter deviation check failed for farm %s", farm_id)
+
         await self.reconcile_alerts(farm_id, new_alerts, db)
         return new_alerts
 
