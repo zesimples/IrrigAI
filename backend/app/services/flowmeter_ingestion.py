@@ -153,7 +153,9 @@ class FlowmeterIngestionService:
                     flowmeter, since, now, adapter, db
                 )
                 total_inserted += inserted
-                if inserted > 0 and earliest_ts is not None and latest_ts is not None:
+                # Run detection whenever the API returned readings — the bounded window and
+                # ON CONFLICT DO NOTHING make this idempotent against duplicates.
+                if earliest_ts is not None and latest_ts is not None:
                     events_added = await self._detect_and_store_events(
                         flowmeter, earliest_ts, latest_ts, db
                     )
