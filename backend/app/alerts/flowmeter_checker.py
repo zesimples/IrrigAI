@@ -98,7 +98,7 @@ class FlowmeterAlertChecker:
                 continue
 
             crop_avg = result.crop_averages.get(sr.crop_type)
-            if not crop_avg:
+            if crop_avg is None:
                 continue
 
             deviation_pct = (sr.interior_avg - crop_avg) / crop_avg * 100
@@ -193,7 +193,7 @@ class FlowmeterAlertChecker:
                 continue
 
             crop_avg = result.crop_averages.get(sr.crop_type)
-            if not crop_avg:
+            if crop_avg is None:
                 continue
 
             deviation_pct = (sr.interior_avg - crop_avg) / crop_avg * 100
