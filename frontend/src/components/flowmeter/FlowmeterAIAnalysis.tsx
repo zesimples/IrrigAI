@@ -60,7 +60,7 @@ export function FlowmeterAIAnalysis({ farmId, period }: Props) {
         : "Campanha";
 
   return (
-    <div className="border border-rule-soft rounded-lg mx-4 my-3 overflow-hidden bg-white">
+    <div className="border border-rule-soft rounded-lg overflow-hidden bg-white">
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3 bg-surface-subtle cursor-pointer select-none"
