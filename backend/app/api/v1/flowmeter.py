@@ -21,6 +21,7 @@ from app.schemas.flowmeter import (
     FlowmeterAnalysisStatistics,
     FlowmeterCropStats,
     FlowmeterDashboardResponse,
+    FlowmeterDeviationsResponse,
     FlowmeterEventsResponse,
     FlowmeterEventsSummary,
     FlowmeterOut,
@@ -442,3 +443,21 @@ async def sector_flowmeter_analysis(
     await set_analysis_cache("sector", sector_id, body.period_days, analysis_text)
 
     return FlowmeterSectorAnalysisResponse(analysis=analysis_text, statistics=stats)
+
+
+@router.get("/farms/{farm_id}/flowmeter-deviations", response_model=FlowmeterDeviationsResponse)
+async def get_flowmeter_deviations(
+    farm_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return per-sector deviation summary vs crop interior-event averages (7-day window).
+
+    Pure computation — no LLM, no cache, no DB writes. Used by the inline
+    FlowmeterDeviationWarnings frontend component.
+    """
+    farm = await db.get(Farm, farm_id)
+    if farm is None:
+        raise HTTPException(404, detail="Farm not found")
+
+    from app.alerts.flowmeter_checker import FlowmeterAlertChecker
+    return await FlowmeterAlertChecker().compute_deviations(farm_id, db)
