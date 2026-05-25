@@ -27,3 +27,20 @@ async def test_deviations_endpoint_unknown_farm_returns_404(client: AsyncClient)
         "/api/v1/farms/00000000-0000-0000-0000-000000000000/flowmeter-deviations"
     )
     assert response.status_code == 404
+
+
+from app.services.flowmeter_cache import _make_cache_key
+
+
+def test_cache_key_includes_language():
+    key_pt = _make_cache_key("farm", "abc123", 7, "pt")
+    key_en = _make_cache_key("farm", "abc123", 7, "en")
+    assert key_pt != key_en
+
+
+def test_cache_key_format():
+    key = _make_cache_key("sector", "xyz", 30, "pt")
+    assert "sector" in key
+    assert "xyz" in key
+    assert "30" in key
+    assert "pt" in key

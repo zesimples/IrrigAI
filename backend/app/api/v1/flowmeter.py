@@ -364,7 +364,7 @@ async def farm_flowmeter_analysis(
 
     # Check cache for AI text
     if not body.force_refresh:
-        cached_text = await get_analysis_cache("farm", farm_id, body.period_days)
+        cached_text = await get_analysis_cache("farm", farm_id, body.period_days, language=body.language)
         if cached_text:
             return FlowmeterAnalysisResponse(analysis=cached_text, statistics=stats)
 
@@ -387,7 +387,7 @@ async def farm_flowmeter_analysis(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"AI analysis failed: {exc}") from exc
 
-    await set_analysis_cache("farm", farm_id, body.period_days, analysis_text)
+    await set_analysis_cache("farm", farm_id, body.period_days, language=body.language, value=analysis_text)
 
     return FlowmeterAnalysisResponse(analysis=analysis_text, statistics=stats)
 
@@ -422,7 +422,7 @@ async def sector_flowmeter_analysis(
     stats = _build_sector_statistics(sector_analytics)
 
     if not body.force_refresh:
-        cached_text = await get_analysis_cache("sector", sector_id, body.period_days)
+        cached_text = await get_analysis_cache("sector", sector_id, body.period_days, language=body.language)
         if cached_text:
             return FlowmeterSectorAnalysisResponse(analysis=cached_text, statistics=stats)
 
@@ -440,7 +440,7 @@ async def sector_flowmeter_analysis(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"AI analysis failed: {exc}") from exc
 
-    await set_analysis_cache("sector", sector_id, body.period_days, analysis_text)
+    await set_analysis_cache("sector", sector_id, body.period_days, language=body.language, value=analysis_text)
 
     return FlowmeterSectorAnalysisResponse(analysis=analysis_text, statistics=stats)
 

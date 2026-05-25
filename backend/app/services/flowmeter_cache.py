@@ -2,7 +2,9 @@
 """Redis-backed cache for flowmeter AI analysis text.
 
 Caches only the AI text string (not the statistics, which are computed fresh
-from DB on every request). Cache key: flowmeter_analysis:{scope}:{id}:{period_days}.
+from DB on every request).
+
+Cache key: flowmeter_analysis:{scope}:{id}:{period_days}:{language}
 TTL: 7200 s (2 hours). Errors are logged and silently ignored — the endpoint
 falls back to a live LLM call if Redis is unavailable.
 """
@@ -28,22 +30,27 @@ def _get_redis() -> aioredis.Redis:
     return _redis
 
 
-async def get_analysis_cache(scope: str, entity_id: str, period_days: int) -> str | None:
+def _make_cache_key(scope: str, entity_id: str, period_days: int, language: str) -> str:
+    """Build a deterministic cache key. All four dimensions must match for a cache hit."""
+    return f"flowmeter_analysis:{scope}:{entity_id}:{period_days}:{language}"
+
+
+async def get_analysis_cache(scope: str, entity_id: str, period_days: int, language: str = "pt") -> str | None:
     """Return cached AI text, or None if missing/expired/error."""
     try:
         r = _get_redis()
-        key = f"flowmeter_analysis:{scope}:{entity_id}:{period_days}"
+        key = _make_cache_key(scope, entity_id, period_days, language)
         return await r.get(key)
     except Exception:
         logger.warning("Redis get failed for flowmeter_analysis cache — skipping cache", exc_info=True)
         return None
 
 
-async def set_analysis_cache(scope: str, entity_id: str, period_days: int, value: str) -> None:
+async def set_analysis_cache(scope: str, entity_id: str, period_days: int, language: str = "pt", value: str = "") -> None:
     """Store AI text in Redis with TTL. Silent on error."""
     try:
         r = _get_redis()
-        key = f"flowmeter_analysis:{scope}:{entity_id}:{period_days}"
+        key = _make_cache_key(scope, entity_id, period_days, language)
         await r.set(key, value, ex=CACHE_TTL)
     except Exception:
         logger.warning("Redis set failed for flowmeter_analysis cache — continuing without cache", exc_info=True)
