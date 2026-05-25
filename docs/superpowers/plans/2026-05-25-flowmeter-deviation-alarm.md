@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **SESSION HANDOFF (2026-05-25):** Tasks 1 and 2 are **COMPLETE** (commits d0fe7f4, dbfca4f, 422e42c, dd4d1ff). Resume from **Task 3**. Note: `pytest` must be run via the dev stack — use `docker compose -f docker-compose.yml -f docker-compose.dev.yml exec backend pytest` (or `make test-backend` with the dev stack running via `make dev`).
+
 **Goal:** Flag sectors whose per-event water consumption deviates >±5% from their crop peers, stripping system spin-up/wind-down outliers (first + last event per sector per day), and surface the results inline on the Caudalímetros dashboard next to the AI analysis.
 
 **Architecture:** A new `FlowmeterAlertChecker` service does the outlier stripping and deviation maths (pure computation, testable without DB). `AlertEngine.run_farm_alerts()` delegates to it for DB-backed alert persistence. A new `GET /farms/{id}/flowmeter-deviations` endpoint exposes the same computation for the inline frontend component `FlowmeterDeviationWarnings`, which auto-loads when the page opens and sits side-by-side with `FlowmeterAIAnalysis` in a responsive grid.
