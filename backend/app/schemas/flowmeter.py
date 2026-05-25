@@ -1,5 +1,6 @@
 # backend/app/schemas/flowmeter.py
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -141,18 +142,18 @@ class FlowmeterDeviationSector(BaseModel):
     sector_id: str
     sector_name: str
     crop_type: str
-    direction: str          # "above" | "below"
+    direction: Literal["above", "below"]
     deviation_pct: float
     sector_avg_m3ha: float
     crop_avg_m3ha: float
-    interior_event_count: int
+    interior_event_count: int   # events after stripping first+last per day (outlier-stripped)
 
 
 class FlowmeterInsufficientDataSector(BaseModel):
     sector_id: str
     sector_name: str
     crop_type: str
-    interior_event_count: int
+    interior_event_count: int   # events after stripping first+last per day (outlier-stripped)
 
 
 class FlowmeterDeviationsResponse(BaseModel):

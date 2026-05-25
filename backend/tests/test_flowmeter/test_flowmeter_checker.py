@@ -62,7 +62,6 @@ def test_flowmeter_insufficient_data_alert_type_value():
 
 
 def test_flowmeter_deviations_response_schema_constructs():
-    from datetime import datetime
     from app.schemas.flowmeter import FlowmeterDeviationsResponse
     r = FlowmeterDeviationsResponse(
         period_days=7,
