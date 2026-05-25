@@ -5,9 +5,15 @@ import type { FlowmeterSectorDashboard } from "@/types";
 import { FlowmeterSparkline } from "./FlowmeterSparkline";
 import { FlowmeterSectorDetail } from "./FlowmeterSectorDetail";
 
+export type DeviationInfo =
+  | { type: "deviation"; direction: "above" | "below"; deviation_pct: number }
+  | { type: "insufficient" }
+  | null;
+
 interface Props {
   sector: FlowmeterSectorDashboard;
   period: "7d" | "30d" | "season";
+  deviation?: DeviationInfo;
 }
 
 function statusColor(lastIrrigation: string | null): string {
@@ -26,7 +32,7 @@ function relativeDate(iso: string | null): string {
   return `há ${daysAgo} dias`;
 }
 
-export function FlowmeterSectorRow({ sector, period }: Props) {
+export function FlowmeterSectorRow({ sector, period, deviation }: Props) {
   const [expanded, setExpanded] = useState(false);
   const dot = statusColor(sector.last_irrigation);
 
@@ -34,7 +40,7 @@ export function FlowmeterSectorRow({ sector, period }: Props) {
     <>
       <div
         className="grid items-center border-b border-rule-soft cursor-pointer hover:bg-surface-subtle transition-colors"
-        style={{ gridTemplateColumns: "56px 80px 120px 110px 90px 72px 1fr", padding: "9px 18px" }}
+        style={{ gridTemplateColumns: "56px 80px 120px 110px 90px 72px 1fr 80px", padding: "9px 18px" }}
         onClick={() => setExpanded((v) => !v)}
         role="button"
         aria-expanded={expanded}
@@ -64,6 +70,25 @@ export function FlowmeterSectorRow({ sector, period }: Props) {
           data={sector.daily_breakdown.slice(-7)}
           barColor={dot === "#dc2626" ? "#dc2626" : dot === "#d97706" ? "#d97706" : "#6b9e3a"}
         />
+        {/* Deviation badge */}
+        <div className="flex items-center justify-end">
+          {deviation?.type === "deviation" && (
+            <span
+              className={[
+                "text-[11px] font-semibold tabular-nums",
+                deviation.direction === "above" ? "text-terra" : "text-amber-600",
+              ].join(" ")}
+            >
+              {deviation.direction === "above" ? "▲ +" : "▼ −"}
+              {Math.abs(deviation.deviation_pct).toFixed(1)}%
+            </span>
+          )}
+          {deviation?.type === "insufficient" && (
+            <span className="text-[11px] text-ink-4" title="Dados insuficientes">
+              —
+            </span>
+          )}
+        </div>
       </div>
       {expanded && <FlowmeterSectorDetail sectorId={sector.sector_id} period={period} />}
     </>
