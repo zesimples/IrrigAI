@@ -68,7 +68,6 @@ export function FlowmeterSectorRow({ sector, period, deviation }: Props) {
         <span className="text-sm text-ink-2">{sector.num_events}</span>
         <FlowmeterSparkline
           data={sector.daily_breakdown.slice(-7)}
-          barColor={dot === "#dc2626" ? "#dc2626" : dot === "#d97706" ? "#d97706" : "#6b9e3a"}
         />
         {/* Deviation badge */}
         <div className="flex items-center justify-end">
