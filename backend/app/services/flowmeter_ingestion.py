@@ -80,6 +80,8 @@ class IrrigationEventDetector:
 
 _DATE_FMT = "%Y-%m-%d %H:%M:%S"
 _MAX_ADAPTIVE_LOOKBACK_HOURS = 168
+# How far back from the earliest new reading to extend the detection window.
+_EVENT_DETECTION_LOOKBACK_HOURS = 24
 
 
 def _adaptive_since(last_ts: datetime | None, default_lookback_hours: int, now: datetime) -> datetime:
@@ -147,10 +149,14 @@ class FlowmeterIngestionService:
         for flowmeter in flowmeters:
             since = _adaptive_since(flowmeter.last_reading_at, 2, now)
             try:
-                inserted = await self.ingest_device(flowmeter, since, now, adapter, db)
+                inserted, earliest_ts, latest_ts = await self.ingest_device(
+                    flowmeter, since, now, adapter, db
+                )
                 total_inserted += inserted
-                if inserted > 0:
-                    events_added = await self._detect_and_store_events(flowmeter, since, now, db)
+                if inserted > 0 and earliest_ts is not None and latest_ts is not None:
+                    events_added = await self._detect_and_store_events(
+                        flowmeter, earliest_ts, latest_ts, db
+                    )
                     total_events += events_added
             except Exception:
                 logger.exception(
@@ -176,8 +182,12 @@ class FlowmeterIngestionService:
         until: datetime,
         adapter: MyIrrigationAdapter,  # noqa: F821
         db: AsyncSession,
-    ) -> int:
-        """Fetch readings for one flowmeter and bulk-insert with deduplication."""
+    ) -> tuple[int, datetime | None, datetime | None]:
+        """Fetch readings for one flowmeter and bulk-insert with deduplication.
+
+        Returns (inserted_count, earliest_timestamp, latest_timestamp).
+        earliest/latest are from the API response and bound the detection window.
+        """
         import uuid
 
         from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -185,7 +195,6 @@ class FlowmeterIngestionService:
         from app.adapters.myirrigation import parse_flowmeter_data
         from app.models import FlowmeterReading
 
-        # _post_form_json handles authentication internally (including token refresh)
         try:
             raw = await adapter._post_form_json(
                 f"/data/devices/{flowmeter.external_device_id}/data",
@@ -199,11 +208,11 @@ class FlowmeterIngestionService:
             logger.exception(
                 "FlowmeterIngestion: API call failed for device %s", flowmeter.external_device_id
             )
-            return 0
+            return 0, None, None
 
         readings = parse_flowmeter_data(raw, flowmeter.external_device_id)
         if not readings:
-            return 0
+            return 0, None, None
 
         rows = [
             {
@@ -223,26 +232,30 @@ class FlowmeterIngestionService:
         result = await db.execute(stmt)
         inserted = result.rowcount if result.rowcount >= 0 else len(rows)
 
-        # Always advance last_reading_at when the API returned data,
-        # regardless of how many rows were actually inserted vs. deduplicated.
-        # asyncpg returns -1 for rowcount on mixed ON CONFLICT batches.
         latest_ts = max(ts for ts, _ in readings)
+        earliest_ts = min(ts for ts, _ in readings)
         flowmeter.last_reading_at = latest_ts
 
         logger.debug(
             "FlowmeterIngestion device %s: %d/%d readings inserted",
             flowmeter.external_device_id, inserted, len(rows),
         )
-        return inserted
+        return inserted, earliest_ts, latest_ts
 
     async def _detect_and_store_events(
         self,
         flowmeter: Flowmeter,  # noqa: F821
-        since: datetime,
-        until: datetime,
+        earliest_new_ts: datetime,
+        latest_new_ts: datetime,
         db: AsyncSession,
     ) -> int:
-        """Run event detection over the current window and upsert results."""
+        """Run event detection over a bounded window around new data.
+
+        Scans [earliest_new_ts - 24h, latest_new_ts + 1h] so that:
+        - Events that started before the ingestion window are captured.
+        - The +1h buffer ensures the tail of the last event is included.
+        ON CONFLICT DO NOTHING keeps this idempotent.
+        """
         import uuid
 
         from sqlalchemy import select
@@ -250,13 +263,15 @@ class FlowmeterIngestionService:
 
         from app.models import FlowmeterReading, IrrigationEventDetected
 
-        # Load readings for this window
+        window_since = earliest_new_ts - timedelta(hours=_EVENT_DETECTION_LOOKBACK_HOURS)
+        window_until = latest_new_ts + timedelta(hours=1)
+
         rows_result = await db.execute(
             select(FlowmeterReading)
             .where(
                 FlowmeterReading.flowmeter_id == flowmeter.id,
-                FlowmeterReading.timestamp >= since,
-                FlowmeterReading.timestamp <= until,
+                FlowmeterReading.timestamp >= window_since,
+                FlowmeterReading.timestamp <= window_until,
             )
             .order_by(FlowmeterReading.timestamp)
         )
@@ -290,4 +305,60 @@ class FlowmeterIngestionService:
             result = await db.execute(stmt)
             added += result.rowcount if result.rowcount >= 0 else 1
 
+        return added
+
+    async def backfill_events(self, flowmeter_id: str, db: AsyncSession) -> int:
+        """Reprocess ALL historical readings for a flowmeter. One-off tool, not called by ingest_farm.
+
+        Use this after migrating data or fixing the event detector logic.
+        """
+        import uuid
+
+        from sqlalchemy import select
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from app.models import FlowmeterReading, Flowmeter, IrrigationEventDetected
+
+        flowmeter_result = await db.execute(
+            select(Flowmeter).where(Flowmeter.id == flowmeter_id)
+        )
+        flowmeter = flowmeter_result.scalar_one_or_none()
+        if flowmeter is None:
+            raise ValueError(f"Flowmeter {flowmeter_id} not found")
+
+        rows_result = await db.execute(
+            select(FlowmeterReading)
+            .where(FlowmeterReading.flowmeter_id == flowmeter_id)
+            .order_by(FlowmeterReading.timestamp)
+        )
+        raw_readings = [(r.timestamp, r.value_m3_ha) for r in rows_result.scalars().all()]
+        if not raw_readings:
+            return 0
+
+        detector = IrrigationEventDetector()
+        events = detector.detect_events(raw_readings)
+
+        added = 0
+        for ev in events:
+            stmt = (
+                pg_insert(IrrigationEventDetected)
+                .values(
+                    id=str(uuid.uuid4()),
+                    flowmeter_id=flowmeter.id,
+                    sector_id=flowmeter.sector_id,
+                    start_time=ev.start_time,
+                    end_time=ev.end_time,
+                    duration_minutes=ev.duration_minutes,
+                    total_m3_ha=ev.total_m3_ha,
+                    peak_m3_ha=ev.peak_m3_ha,
+                    num_readings=ev.num_readings,
+                    date=ev.start_time.date(),
+                )
+                .on_conflict_do_nothing(constraint="uq_irrigation_event_detected_device_start")
+            )
+            result = await db.execute(stmt)
+            added += result.rowcount if result.rowcount >= 0 else 1
+
+        await db.commit()
+        logger.info("backfill_events flowmeter=%s: %d events upserted", flowmeter_id, added)
         return added
