@@ -321,7 +321,7 @@ export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviati
               </span>
             </span>
             <a style={{ color: '#5a5048', textDecoration: 'none', fontStyle: 'normal', fontFamily: 'var(--font-dm-sans, system-ui)', fontSize: 13 }}>
-              Diagnóstico de sondas ↗
+              Diagnóstico de caudalímetros ↗
             </a>
           </div>
         )}

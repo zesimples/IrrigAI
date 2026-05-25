@@ -114,7 +114,7 @@ export function FlowmeterDashboard({ farmId }: Props) {
                     {stats.almondSectors + stats.oliveSectors > 0
                       ? `${stats.almondSectors + stats.oliveSectors} sector${stats.almondSectors + stats.oliveSectors !== 1 ? 'es' : ''} ${stats.almondSectors + stats.oliveSectors !== 1 ? 'tiveram' : 'teve'} regas`
                       : 'Nenhum sector teve regas'}
-                    {stats.semDados > 0 && `; ${stats.semDados} sonda${stats.semDados !== 1 ? 's' : ''} sem dados`}.
+                    {stats.semDados > 0 && `; ${stats.semDados} caudalímetro${stats.semDados !== 1 ? 's' : ''} sem dados`}.
                     {stats.avgPerRega && ` O consumo médio por rega situou-se em `}
                     {stats.avgPerRega && (
                       <strong style={{ color: '#2a2520', fontWeight: 600 }}>
@@ -185,7 +185,7 @@ export function FlowmeterDashboard({ farmId }: Props) {
               { k: 'Amendoal', v: stats.almondTotal.toLocaleString('pt-PT', { maximumFractionDigits: 0 }), u: 'm³/ha', sub: `${stats.almondSectors} sectores activos`, tint: '#b84a2a', bar: data.total_m3_ha > 0 ? stats.almondTotal / data.total_m3_ha : 0 },
               { k: 'Olival', v: stats.oliveTotal.toLocaleString('pt-PT', { maximumFractionDigits: 0 }), u: 'm³/ha', sub: `${stats.oliveSectors} sectores activos`, tint: '#6b8f4e', bar: data.total_m3_ha > 0 ? stats.oliveTotal / data.total_m3_ha : 0 },
               { k: 'Regas totais', v: String(stats.totalRegas), u: undefined, sub: stats.avgPerRega ? `dose média ${stats.avgPerRega.toFixed(1)} m³` : 'sem regas', tint: '#2a2520', bar: undefined },
-              { k: 'Sondas sem dados', v: String(stats.semDados), u: `de ${data.sectors.length}`, sub: 'verificar comunicação', tint: '#c9a34a', bar: undefined },
+              { k: 'Caudalímetros sem dados', v: String(stats.semDados), u: `de ${data.sectors.length}`, sub: 'verificar comunicação', tint: '#c9a34a', bar: undefined },
             ].map((m, i) => (
               <div key={m.k} style={{ padding: '14px 18px', borderLeft: i === 0 ? 'none' : '1px solid #e8e0d0' }}>
                 <div style={{ fontSize: 10.5, color: '#8a7f74', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5, fontFamily: 'var(--font-jetbrains, ui-monospace)' }}>
