@@ -33,7 +33,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['sector_id'], ['sector.id']),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index(op.f('ix_flowmeter_sector_id'), 'flowmeter', ['sector_id'], unique=False)
+    op.create_index(op.f('ix_flowmeter_sector_id'), 'flowmeter', ['sector_id'], unique=True)
     op.create_index(op.f('ix_flowmeter_external_device_id'), 'flowmeter', ['external_device_id'], unique=False)
 
     # -- readings time-series table --
