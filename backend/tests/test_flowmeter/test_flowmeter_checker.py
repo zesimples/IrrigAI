@@ -72,3 +72,136 @@ def test_flowmeter_deviations_response_schema_constructs():
     )
     assert r.period_days == 7
     assert r.deviating == []
+
+
+# ── FlowmeterAlertChecker unit tests (no DB) ─────────────────────────────────
+
+class TestFlowmeterAlertChecker:
+    def setup_method(self):
+        from app.alerts.flowmeter_checker import FlowmeterAlertChecker
+        self.checker = FlowmeterAlertChecker()
+
+    def test_no_events_yields_insufficient_data(self):
+        """Farm with no events → sector has 0 interior events → insufficient_data."""
+        pairs = [_make_pair("fm1", "s1", "Setor A", "almond")]
+        result = self.checker._compute_from_data(pairs, [])
+        assert result.sector_results[0].interior_avg is None
+        assert result.crop_averages == {}
+
+    def test_single_event_per_day_excluded(self):
+        """Day with 1 event per sector → stripped entirely → insufficient_data."""
+        pairs = [_make_pair("fm1", "s1", "Setor A", "almond")]
+        events = []
+        for d in _days(4):
+            events += _day_events("fm1", d, [15.0])   # 1 event per day
+        result = self.checker._compute_from_data(pairs, events)
+        assert result.sector_results[0].interior_avg is None
+
+    def test_first_last_stripped_per_day(self):
+        """Day with 3 events → only middle event is interior; outlier values ignored."""
+        pairs = [_make_pair("fm1", "s1", "Setor A", "almond")]
+        events = []
+        for d in _days(4):
+            events += _day_events("fm1", d, [5.0, 15.0, 5.0])
+        result = self.checker._compute_from_data(pairs, events)
+        assert result.sector_results[0].interior_avg == pytest.approx(15.0)
+
+    def test_deviation_above_threshold_fires_alert(self):
+        """Sector A at 18 m³/ha, sector B at 14 m³/ha → crop avg 16 → A is +12.5%."""
+        from app.core.enums import AlertType
+        pairs = [
+            _make_pair("fm1", "s1", "Setor A", "almond"),
+            _make_pair("fm2", "s2", "Setor B", "almond"),
+        ]
+        events = []
+        for d in _days(4):
+            events += _day_events("fm1", d, [5.0, 18.0, 5.0])
+            events += _day_events("fm2", d, [5.0, 14.0, 5.0])
+        result = self.checker._compute_from_data(pairs, events)
+        alerts = self.checker._build_alerts(result, "farm1")
+        deviation_alerts = [a for a in alerts if a.alert_type == AlertType.FLOWMETER_DEVIATION]
+        sector_a = next(a for a in deviation_alerts if a.sector_id == "s1")
+        assert sector_a.data["direction"] == "above"
+        assert sector_a.data["deviation_pct"] == pytest.approx(12.5)
+
+    def test_deviation_below_threshold_fires_alert(self):
+        """Sector B at 14 m³/ha → −12.5% below crop avg 16 → alert direction=below."""
+        from app.core.enums import AlertType
+        pairs = [
+            _make_pair("fm1", "s1", "Setor A", "almond"),
+            _make_pair("fm2", "s2", "Setor B", "almond"),
+        ]
+        events = []
+        for d in _days(4):
+            events += _day_events("fm1", d, [5.0, 18.0, 5.0])
+            events += _day_events("fm2", d, [5.0, 14.0, 5.0])
+        result = self.checker._compute_from_data(pairs, events)
+        alerts = self.checker._build_alerts(result, "farm1")
+        deviation_alerts = [a for a in alerts if a.alert_type == AlertType.FLOWMETER_DEVIATION]
+        sector_b = next(a for a in deviation_alerts if a.sector_id == "s2")
+        assert sector_b.data["direction"] == "below"
+        assert sector_b.data["deviation_pct"] == pytest.approx(-12.5)
+
+    def test_within_threshold_no_deviation_alert(self):
+        """Sector at ±3.1% → under threshold → no FLOWMETER_DEVIATION."""
+        from app.core.enums import AlertType
+        pairs = [
+            _make_pair("fm1", "s1", "Setor A", "almond"),
+            _make_pair("fm2", "s2", "Setor B", "almond"),
+        ]
+        events = []
+        for d in _days(4):
+            events += _day_events("fm1", d, [5.0, 16.5, 5.0])
+            events += _day_events("fm2", d, [5.0, 15.5, 5.0])
+        result = self.checker._compute_from_data(pairs, events)
+        alerts = self.checker._build_alerts(result, "farm1")
+        deviation_alerts = [a for a in alerts if a.alert_type == AlertType.FLOWMETER_DEVIATION]
+        assert len(deviation_alerts) == 0
+
+    def test_insufficient_data_alert_fired(self):
+        """Sector with only 2 interior events (< MIN=3) → FLOWMETER_INSUFFICIENT_DATA."""
+        from app.core.enums import AlertType
+        pairs = [_make_pair("fm1", "s1", "Setor A", "almond")]
+        events = []
+        for d in _days(2):
+            events += _day_events("fm1", d, [5.0, 15.0, 5.0])
+        result = self.checker._compute_from_data(pairs, events)
+        alerts = self.checker._build_alerts(result, "farm1")
+        insuf = [a for a in alerts if a.alert_type == AlertType.FLOWMETER_INSUFFICIENT_DATA]
+        assert len(insuf) == 1
+        assert insuf[0].data["interior_event_count"] == 2
+
+    def test_single_sector_per_crop_no_deviation(self):
+        """Only one almond sector → crop_avg == sector_avg → deviation is 0 → no alert."""
+        from app.core.enums import AlertType
+        pairs = [_make_pair("fm1", "s1", "Setor A", "almond")]
+        events = []
+        for d in _days(4):
+            events += _day_events("fm1", d, [5.0, 20.0, 5.0])
+        result = self.checker._compute_from_data(pairs, events)
+        alerts = self.checker._build_alerts(result, "farm1")
+        deviation_alerts = [a for a in alerts if a.alert_type == AlertType.FLOWMETER_DEVIATION]
+        assert len(deviation_alerts) == 0
+
+    def test_crop_isolation(self):
+        """Almond and olive averages computed independently; olive (1 sector) never deviates."""
+        from app.core.enums import AlertType
+        pairs = [
+            _make_pair("fm1", "s1", "Setor A", "almond"),
+            _make_pair("fm2", "s2", "Setor B", "almond"),
+            _make_pair("fm3", "s3", "Setor C", "olive"),
+        ]
+        events = []
+        for d in _days(4):
+            events += _day_events("fm1", d, [5.0, 20.0, 5.0])
+            events += _day_events("fm2", d, [5.0, 16.0, 5.0])
+            events += _day_events("fm3", d, [5.0, 10.0, 5.0])
+        result = self.checker._compute_from_data(pairs, events)
+        assert result.crop_averages["almond"] == pytest.approx(18.0)
+        assert result.crop_averages["olive"] == pytest.approx(10.0)
+        alerts = self.checker._build_alerts(result, "farm1")
+        olive_deviations = [
+            a for a in alerts
+            if a.alert_type == AlertType.FLOWMETER_DEVIATION and a.sector_id == "s3"
+        ]
+        assert len(olive_deviations) == 0
