@@ -810,6 +810,32 @@ export interface FlowmeterSectorAnalysisResponse {
   statistics: FlowmeterSectorStatistics;
 }
 
+export interface FlowmeterDeviationSector {
+  sector_id: string;
+  sector_name: string;
+  crop_type: string;
+  direction: "above" | "below";
+  deviation_pct: number;
+  sector_avg_m3ha: number;
+  crop_avg_m3ha: number;
+  interior_event_count: number;
+}
+
+export interface FlowmeterInsufficientDataSector {
+  sector_id: string;
+  sector_name: string;
+  crop_type: string;
+  interior_event_count: number;
+}
+
+export interface FlowmeterDeviationsResponse {
+  period_days: number;
+  deviating: FlowmeterDeviationSector[];
+  insufficient_data: FlowmeterInsufficientDataSector[];
+  crop_averages: Record<string, number>;
+  evaluated_at: string;
+}
+
 // ── GDD Status ────────────────────────────────────────────────────────────────
 
 export interface GDDStatus {

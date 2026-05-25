@@ -10,6 +10,7 @@ import type {
   FarmCreate,
   FlowmeterAnalysisResponse,
   FlowmeterDashboardResponse,
+  FlowmeterDeviationsResponse,
   FlowmeterEventsResponse,
   FlowmeterOut,
   FlowmeterReadingsResponse,
@@ -421,6 +422,9 @@ export const flowmeterApi = {
     `/sectors/${sectorId}/flowmeter-analysis`,
     params,
   ),
+
+  deviations: (farmId: string) =>
+    get<FlowmeterDeviationsResponse>(`/farms/${farmId}/flowmeter-deviations`),
 };
 
 export { ApiError };
