@@ -57,6 +57,8 @@ class AlertType(str, Enum):
     MISSING_DATA = "missing_data"
     STALE_PROBE = "stale_probe"
     STALE_WEATHER = "stale_weather"
+    FLOWMETER_DEVIATION = "flowmeter_deviation"
+    FLOWMETER_INSUFFICIENT_DATA = "flowmeter_insufficient_data"
 
 
 class OverrideType(str, Enum):

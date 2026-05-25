@@ -133,3 +133,31 @@ class FlowmeterAnalysisResponse(BaseModel):
 class FlowmeterSectorAnalysisResponse(BaseModel):
     analysis: str
     statistics: FlowmeterSectorStatistics
+
+
+# ── Deviation alarm schemas ───────────────────────────────────────────────────
+
+class FlowmeterDeviationSector(BaseModel):
+    sector_id: str
+    sector_name: str
+    crop_type: str
+    direction: str          # "above" | "below"
+    deviation_pct: float
+    sector_avg_m3ha: float
+    crop_avg_m3ha: float
+    interior_event_count: int
+
+
+class FlowmeterInsufficientDataSector(BaseModel):
+    sector_id: str
+    sector_name: str
+    crop_type: str
+    interior_event_count: int
+
+
+class FlowmeterDeviationsResponse(BaseModel):
+    period_days: int
+    deviating: list[FlowmeterDeviationSector]
+    insufficient_data: list[FlowmeterInsufficientDataSector]
+    crop_averages: dict[str, float]   # crop_type → interior avg m³/ha
+    evaluated_at: datetime
