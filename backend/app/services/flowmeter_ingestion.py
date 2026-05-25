@@ -29,39 +29,88 @@ class DetectedEvent:
     num_readings: int
 
 
+# ---------------------------------------------------------------------------
+# Event detection constants
+# ---------------------------------------------------------------------------
+
+#: Default reading interval when it cannot be inferred from the data.
+_DEFAULT_INTERVAL_MINUTES: float = 15.0
+
+#: Split an event when the gap between two consecutive positive readings
+#: exceeds this multiple of the inferred interval.
+_GAP_SPLIT_FACTOR: float = 2.5
+
+
+def _infer_interval_minutes(readings: list[tuple[datetime, float]]) -> float:
+    """Infer the median reading interval from sorted (timestamp, value) pairs.
+
+    Returns _DEFAULT_INTERVAL_MINUTES if fewer than 2 readings or inference fails.
+    """
+    if len(readings) < 2:
+        return _DEFAULT_INTERVAL_MINUTES
+    gaps = [
+        (readings[i + 1][0] - readings[i][0]).total_seconds() / 60
+        for i in range(len(readings) - 1)
+        if (readings[i + 1][0] - readings[i][0]).total_seconds() > 0
+    ]
+    if not gaps:
+        return _DEFAULT_INTERVAL_MINUTES
+    gaps.sort()
+    mid = len(gaps) // 2
+    return gaps[mid] if len(gaps) % 2 == 1 else (gaps[mid - 1] + gaps[mid]) / 2
+
+
 class IrrigationEventDetector:
-    """Detect irrigation events from flowmeter 15-minute time-series data."""
+    """Detect irrigation events from flowmeter time-series data.
+
+    Duration correction: each bucket covers one interval period, so the last
+    bucket's interval is added to (end_time - start_time).
+
+    Gap splitting: if consecutive positive readings are separated by more than
+    _GAP_SPLIT_FACTOR × inferred_interval, they belong to different events.
+    """
 
     def detect_events(
         self,
         readings: list[tuple[datetime, float]],
         threshold_m3_ha: float = 0.5,
     ) -> list[DetectedEvent]:
+        sorted_readings = sorted(readings, key=lambda x: x[0])
+        interval_minutes = _infer_interval_minutes(sorted_readings)
+        gap_threshold_minutes = interval_minutes * _GAP_SPLIT_FACTOR
+
         events: list[DetectedEvent] = []
-        in_event = False
-        event_readings: list[tuple[datetime, float]] = []
+        current_segment: list[tuple[datetime, float]] = []
 
-        for ts, value in sorted(readings, key=lambda x: x[0]):
+        for ts, value in sorted_readings:
             if value > threshold_m3_ha:
-                in_event = True
-                event_readings.append((ts, value))
+                if current_segment:
+                    last_ts = current_segment[-1][0]
+                    gap_minutes = (ts - last_ts).total_seconds() / 60
+                    if gap_minutes > gap_threshold_minutes:
+                        if len(current_segment) >= 2:
+                            events.append(self._build_event(current_segment, interval_minutes))
+                        current_segment = []
+                current_segment.append((ts, value))
             else:
-                if in_event and event_readings:
-                    if len(event_readings) >= 2:
-                        events.append(self._build_event(event_readings))
-                    in_event = False
-                    event_readings = []
+                if current_segment:
+                    if len(current_segment) >= 2:
+                        events.append(self._build_event(current_segment, interval_minutes))
+                    current_segment = []
 
-        # Close event still open at end of data
-        if in_event and len(event_readings) >= 2:
-            events.append(self._build_event(event_readings))
+        if len(current_segment) >= 2:
+            events.append(self._build_event(current_segment, interval_minutes))
 
         return events
 
-    def _build_event(self, readings: list[tuple[datetime, float]]) -> DetectedEvent:
+    def _build_event(
+        self,
+        readings: list[tuple[datetime, float]],
+        interval_minutes: float,
+    ) -> DetectedEvent:
         start_time = readings[0][0]
         end_time = readings[-1][0]
-        duration_minutes = (end_time - start_time).total_seconds() / 60.0
+        duration_minutes = (end_time - start_time).total_seconds() / 60.0 + interval_minutes
         total_m3_ha = sum(v for _, v in readings)
         peak_m3_ha = max(v for _, v in readings)
         return DetectedEvent(
