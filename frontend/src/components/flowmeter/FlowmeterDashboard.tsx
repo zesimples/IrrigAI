@@ -5,7 +5,6 @@ import { flowmeterApi } from "@/lib/api";
 import type { FlowmeterDashboardResponse } from "@/types";
 import { FlowmeterSectorTable } from "./FlowmeterSectorTable";
 import { FlowmeterAIAnalysis } from "./FlowmeterAIAnalysis";
-import { FlowmeterDeviationWarnings } from "./FlowmeterDeviationWarnings";
 
 type Period = "7d" | "30d" | "season";
 
@@ -76,17 +75,14 @@ export function FlowmeterDashboard({ farmId }: Props) {
         </div>
       </div>
 
-      {/* Analysis grid — AI analysis + deviation warnings */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mx-4 my-3">
-        <FlowmeterAIAnalysis farmId={farmId} period={period} />
-        <FlowmeterDeviationWarnings farmId={farmId} />
-      </div>
+      {/* AI analysis */}
+      <FlowmeterAIAnalysis farmId={farmId} period={period} />
 
       {error && (
         <div className="px-[18px] py-4 text-sm text-terra">{error}</div>
       )}
 
-      {data && <FlowmeterSectorTable sectors={data.sectors} period={period} />}
+      {data && <FlowmeterSectorTable sectors={data.sectors} period={period} farmId={farmId} />}
     </div>
   );
 }

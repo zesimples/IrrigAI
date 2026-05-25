@@ -1,4 +1,3 @@
-// frontend/src/components/flowmeter/FlowmeterDeviationWarnings.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -7,9 +6,10 @@ import type { FlowmeterDeviationsResponse } from "@/types";
 
 interface Props {
   farmId: string;
+  embedded?: boolean;
 }
 
-export function FlowmeterDeviationWarnings({ farmId }: Props) {
+export function FlowmeterDeviationWarnings({ farmId, embedded = false }: Props) {
   const [data, setData] = useState<FlowmeterDeviationsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +36,110 @@ export function FlowmeterDeviationWarnings({ farmId }: Props) {
     ? data.deviating.length + data.insufficient_data.length
     : 0;
 
+  const content = (
+    <div className="px-4 py-3 space-y-2">
+      {/* Loading skeleton */}
+      {loading && (
+        <div className="space-y-2 animate-pulse">
+          <div className="h-3 bg-surface-subtle rounded w-4/5" />
+          <div className="h-3 bg-surface-subtle rounded w-3/5" />
+        </div>
+      )}
+
+      {/* Error */}
+      {error && !loading && (
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-terra">{error}</p>
+          <button
+            onClick={fetchDeviations}
+            className="text-xs text-ink-3 hover:text-ink-1 underline"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      )}
+
+      {/* All OK */}
+      {data && !loading && totalIssues === 0 && (
+        <p className="text-sm text-green-600 flex items-center gap-1.5">
+          <span>✓</span>
+          <span>Consumo dentro do normal</span>
+        </p>
+      )}
+
+      {/* Deviating sectors */}
+      {data && !loading && data.deviating.length > 0 && (
+        <div className="space-y-1.5">
+          {data.deviating.map((s) => (
+            <div
+              key={s.sector_id}
+              className="flex items-center justify-between text-xs"
+            >
+              <span className="text-ink-2 truncate mr-2">{s.sector_name}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span
+                  className={
+                    s.direction === "above"
+                      ? "text-terra font-medium"
+                      : "text-amber-600 font-medium"
+                  }
+                >
+                  {s.direction === "above" ? "▲ +" : "▼ −"}
+                  {Math.abs(s.deviation_pct).toFixed(1)}%
+                </span>
+                <span className="text-ink-4">
+                  {s.sector_avg_m3ha.toFixed(1)} m³/ha
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Insufficient data sectors */}
+      {data && !loading && data.insufficient_data.length > 0 && (
+        <div className="border-t border-rule-soft pt-2 space-y-1">
+          <p className="text-xs text-ink-4">Dados insuficientes:</p>
+          {data.insufficient_data.map((s) => (
+            <div
+              key={s.sector_id}
+              className="flex items-center justify-between text-xs"
+            >
+              <span className="text-ink-3 truncate mr-2">{s.sector_name}</span>
+              <span className="text-ink-4 shrink-0">
+                {s.interior_event_count} evento{s.interior_event_count !== 1 ? "s" : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Crop averages footnote + refresh */}
+      {data && !loading && (
+        <div className="flex items-center justify-between pt-1 border-t border-rule-soft">
+          <span className="text-xs text-ink-4">
+            {Object.entries(data.crop_averages)
+              .map(
+                ([crop, avg]) =>
+                  `${crop === "almond" ? "Amendoal" : crop === "olive" ? "Olival" : crop} ${avg.toFixed(1)} m³/ha`,
+              )
+              .join(" · ")}
+          </span>
+          <button
+            onClick={fetchDeviations}
+            className="text-xs text-ink-3 hover:text-ink-1 underline shrink-0 ml-2"
+          >
+            Atualizar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
   return (
     <div className="border border-rule-soft rounded-lg overflow-hidden bg-white">
       {/* Header */}
@@ -57,105 +161,7 @@ export function FlowmeterDeviationWarnings({ farmId }: Props) {
         <span className="text-ink-3 text-xs">{collapsed ? "▶" : "▼"}</span>
       </div>
 
-      {!collapsed && (
-        <div className="px-4 py-3 space-y-2">
-          {/* Loading skeleton */}
-          {loading && (
-            <div className="space-y-2 animate-pulse">
-              <div className="h-3 bg-surface-subtle rounded w-4/5" />
-              <div className="h-3 bg-surface-subtle rounded w-3/5" />
-            </div>
-          )}
-
-          {/* Error */}
-          {error && !loading && (
-            <div className="flex items-center gap-2">
-              <p className="text-sm text-terra">{error}</p>
-              <button
-                onClick={fetchDeviations}
-                className="text-xs text-ink-3 hover:text-ink-1 underline"
-              >
-                Tentar novamente
-              </button>
-            </div>
-          )}
-
-          {/* All OK */}
-          {data && !loading && totalIssues === 0 && (
-            <p className="text-sm text-green-600 flex items-center gap-1.5">
-              <span>✓</span>
-              <span>Consumo dentro do normal</span>
-            </p>
-          )}
-
-          {/* Deviating sectors */}
-          {data && !loading && data.deviating.length > 0 && (
-            <div className="space-y-1.5">
-              {data.deviating.map((s) => (
-                <div
-                  key={s.sector_id}
-                  className="flex items-center justify-between text-xs"
-                >
-                  <span className="text-ink-2 truncate mr-2">{s.sector_name}</span>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span
-                      className={
-                        s.direction === "above"
-                          ? "text-terra font-medium"
-                          : "text-amber-600 font-medium"
-                      }
-                    >
-                      {s.direction === "above" ? "▲ +" : "▼ −"}
-                      {Math.abs(s.deviation_pct).toFixed(1)}%
-                    </span>
-                    <span className="text-ink-4">
-                      {s.sector_avg_m3ha.toFixed(1)} m³/ha
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Insufficient data sectors */}
-          {data && !loading && data.insufficient_data.length > 0 && (
-            <div className="border-t border-rule-soft pt-2 space-y-1">
-              <p className="text-xs text-ink-4">Dados insuficientes:</p>
-              {data.insufficient_data.map((s) => (
-                <div
-                  key={s.sector_id}
-                  className="flex items-center justify-between text-xs"
-                >
-                  <span className="text-ink-3 truncate mr-2">{s.sector_name}</span>
-                  <span className="text-ink-4 shrink-0">
-                    {s.interior_event_count} evento{s.interior_event_count !== 1 ? "s" : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Crop averages footnote + refresh */}
-          {data && !loading && (
-            <div className="flex items-center justify-between pt-1 border-t border-rule-soft">
-              <span className="text-xs text-ink-4">
-                {Object.entries(data.crop_averages)
-                  .map(
-                    ([crop, avg]) =>
-                      `${crop === "almond" ? "Amendoal" : crop === "olive" ? "Olival" : crop} ${avg.toFixed(1)} m³/ha`,
-                  )
-                  .join(" · ")}
-              </span>
-              <button
-                onClick={fetchDeviations}
-                className="text-xs text-ink-3 hover:text-ink-1 underline shrink-0 ml-2"
-              >
-                Atualizar
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      {!collapsed && content}
     </div>
   );
 }
