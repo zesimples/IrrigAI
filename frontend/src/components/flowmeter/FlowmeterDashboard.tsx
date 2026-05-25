@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { flowmeterApi } from "@/lib/api";
-import type { FlowmeterDashboardResponse } from "@/types";
+import type { FlowmeterDashboardResponse, FlowmeterDeviationsResponse } from "@/types";
 import { FlowmeterSectorTable } from "./FlowmeterSectorTable";
 import { FlowmeterAIAnalysis } from "./FlowmeterAIAnalysis";
 
@@ -15,15 +15,21 @@ interface Props {
 export function FlowmeterDashboard({ farmId }: Props) {
   const [period, setPeriod] = useState<Period>("7d");
   const [data, setData] = useState<FlowmeterDashboardResponse | null>(null);
+  const [deviations, setDeviations] = useState<FlowmeterDeviationsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
-    flowmeterApi
-      .dashboard(farmId, period)
-      .then(setData)
+    Promise.all([
+      flowmeterApi.dashboard(farmId, period),
+      flowmeterApi.deviations(farmId),
+    ])
+      .then(([dashData, devData]) => {
+        setData(dashData);
+        setDeviations(devData);
+      })
       .catch((e: Error) => setError(e.message ?? "Erro ao carregar dados"))
       .finally(() => setLoading(false));
   }, [farmId, period]);
@@ -41,6 +47,16 @@ export function FlowmeterDashboard({ farmId }: Props) {
     const olivePct = data.total_m3_ha > 0 ? Math.round((oliveTotal / data.total_m3_ha) * 100) : 0;
     return { totalRegas, semDados, avgPerRega, almondTotal, oliveTotal, almondSectors, oliveSectors, almondPct, olivePct };
   }, [data]);
+
+  // Build sector_id → deviation_pct | null from the backend deviations response.
+  // Sectors in `deviating` carry a pre-computed deviation_pct; all others are null.
+  const deviationMap = useMemo((): Record<string, number | null> => {
+    if (!deviations || !data) return {};
+    const map: Record<string, number | null> = {};
+    for (const s of data.sectors) map[s.sector_id] = null;
+    for (const d of deviations.deviating) map[d.sector_id] = d.deviation_pct;
+    return map;
+  }, [deviations, data]);
 
   const periodLabel = period === '7d' ? 'últimos 7 dias' : period === '30d' ? 'últimos 30 dias' : 'campanha';
   const periodShort = period === 'season' ? 'Campanha' : period;
@@ -200,6 +216,8 @@ export function FlowmeterDashboard({ farmId }: Props) {
           sectors={data.sectors}
           period={period}
           farmId={farmId}
+          deviationMap={deviationMap}
+          cropAverages={deviations?.crop_averages ?? {}}
         />
       )}
     </div>

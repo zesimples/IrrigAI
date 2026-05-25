@@ -11,44 +11,17 @@ interface Props {
   sectors: FlowmeterSectorDashboard[];
   period: "7d" | "30d" | "season";
   farmId: string;
+  /** sector_id → deviation_pct (null = insufficient data). Computed server-side from interior event averages. */
+  deviationMap: Record<string, number | null>;
+  /** Per-crop interior event average (m³/ha). From the deviations endpoint. */
+  cropAverages: Record<string, number>;
 }
 
 const ALARM_THRESHOLD = 5;
 
-export function FlowmeterSectorTable({ sectors, period, farmId: _farmId }: Props) {
+export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviationMap, cropAverages }: Props) {
   const [cropFilter, setCropFilter] = useState<CropFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("name");
-
-  // Per-culture averages of total_m3_ha (only sectors with irrigation events)
-  const cropAverages = useMemo(() => {
-    const acc: Record<string, number[]> = {};
-    for (const s of sectors) {
-      if (s.num_events > 0 && s.total_m3_ha > 0) {
-        (acc[s.crop] ??= []).push(s.total_m3_ha);
-      }
-    }
-    const result: Record<string, number> = {};
-    for (const [crop, vals] of Object.entries(acc)) {
-      result[crop] = vals.reduce((a, b) => a + b, 0) / vals.length;
-    }
-    return result;
-  }, [sectors]);
-
-  // Deviation percentage per sector (null if no data)
-  const deviationMap = useMemo(() => {
-    const map: Record<string, number | null> = {};
-    for (const s of sectors) {
-      if (s.num_events === 0 || s.total_m3_ha === 0) {
-        map[s.sector_id] = null;
-      } else {
-        const avg = cropAverages[s.crop];
-        map[s.sector_id] = avg != null && avg > 0
-          ? ((s.total_m3_ha - avg) / avg) * 100
-          : null;
-      }
-    }
-    return map;
-  }, [sectors, cropAverages]);
 
   const filtered = useMemo(() => {
     const list = cropFilter === "all" ? sectors : sectors.filter((s) => s.crop === cropFilter);
