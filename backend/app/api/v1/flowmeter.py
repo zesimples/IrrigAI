@@ -87,6 +87,15 @@ async def _get_flowmeter_or_404(sector_id: str, db: AsyncSession) -> Flowmeter:
     return flowmeter
 
 
+def _validate_date_range(since: datetime, until: datetime) -> None:
+    """Raise HTTPException 400 if since >= until."""
+    if since >= until:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid date range: 'since' ({since.isoformat()}) must be before 'until' ({until.isoformat()})",
+        )
+
+
 @router.get("/sectors/{sector_id}/flowmeter", response_model=FlowmeterOut)
 async def get_sector_flowmeter(sector_id: str, db: AsyncSession = Depends(get_db)):
     return await _get_flowmeter_or_404(sector_id, db)
@@ -112,6 +121,8 @@ async def get_flowmeter_readings(
         since = since.replace(tzinfo=UTC)
     if until.tzinfo is None:
         until = until.replace(tzinfo=UTC)
+
+    _validate_date_range(since, until)
 
     if interval == "15m":
         rows_result = await db.execute(
@@ -174,6 +185,8 @@ async def get_flowmeter_events(
         since = since.replace(tzinfo=UTC)
     if until.tzinfo is None:
         until = until.replace(tzinfo=UTC)
+
+    _validate_date_range(since, until)
 
     events_result = await db.execute(
         select(IrrigationEventDetected)
