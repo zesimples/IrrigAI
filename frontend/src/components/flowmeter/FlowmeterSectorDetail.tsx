@@ -37,6 +37,23 @@ function fmtDuration(minutes: number) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+function periodToSinceUntil(period: "7d" | "30d" | "season"): { since: string; until: string } {
+  const until = new Date();
+  const since = new Date(until);
+  if (period === "7d") {
+    since.setDate(since.getDate() - 7);
+  } else if (period === "30d") {
+    since.setDate(since.getDate() - 30);
+  } else {
+    // season: 90 days, matching backend default
+    since.setDate(since.getDate() - 90);
+  }
+  return {
+    since: since.toISOString(),
+    until: until.toISOString(),
+  };
+}
+
 export function FlowmeterSectorDetail({ sectorId, period }: Props) {
   const [readings, setReadings] = useState<FlowmeterReadingPoint[]>([]);
   const [events, setEvents] = useState<IrrigationEventOut[]>([]);
@@ -46,9 +63,10 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
 
   useEffect(() => {
     setLoading(true);
+    const { since, until } = periodToSinceUntil(period);
     Promise.all([
-      flowmeterApi.readings(sectorId, { interval }),
-      flowmeterApi.events(sectorId),
+      flowmeterApi.readings(sectorId, { interval, since, until }),
+      flowmeterApi.events(sectorId, { since, until }),
     ])
       .then(([r, e]) => {
         setReadings(r.readings);
@@ -56,7 +74,7 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [sectorId, interval]);
+  }, [sectorId, period, interval]);
 
   if (loading) {
     return <div className="px-6 py-4 text-sm text-ink-3">A carregar...</div>;
