@@ -12,8 +12,12 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
