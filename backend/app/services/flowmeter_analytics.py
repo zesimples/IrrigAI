@@ -359,15 +359,16 @@ class FlowmeterAnalyticsService:
                     )
                 )
                 all_crop_events = crop_events_result.scalars().all()
-                # total per sector
+                # total per sector — only sectors that had at least one event
                 crop_total_by_fm: dict[str, float] = {}
                 for ev in all_crop_events:
                     fm_id = str(ev.flowmeter_id)
                     crop_total_by_fm[fm_id] = crop_total_by_fm.get(fm_id, 0.0) + ev.total_m3_ha
-                if crop_total_by_fm:
-                    # Denominator is total peer sectors (not just those with events),
-                    # so sectors with zero consumption in the period count as zero.
-                    crop_avg = sum(crop_total_by_fm.values()) / len(same_crop_pairs)
+                # Compare only against actively-irrigating peer sectors to avoid
+                # recently-created (no-data) sectors deflating the average.
+                active_peer_count = len(crop_total_by_fm)
+                if active_peer_count > 1:
+                    crop_avg = sum(crop_total_by_fm.values()) / active_peer_count
                     if crop_avg > 0:
                         sa.vs_crop_avg_pct = round(
                             (sa.total_m3_ha - crop_avg) / crop_avg * 100, 1
@@ -442,16 +443,21 @@ class FlowmeterAnalyticsService:
         # Compute crop averages for vs_crop_avg_pct
         crop_totals: dict[str, float] = {}
         crop_counts: dict[str, int] = {}
+        crop_active_counts: dict[str, int] = {}  # sectors with at least 1 event
         crop_event_counts: dict[str, int] = {}
         for sa in sector_analytics:
             crop_totals[sa.crop_type] = crop_totals.get(sa.crop_type, 0.0) + sa.total_m3_ha
             crop_counts[sa.crop_type] = crop_counts.get(sa.crop_type, 0) + 1
+            if sa.num_events > 0:
+                crop_active_counts[sa.crop_type] = crop_active_counts.get(sa.crop_type, 0) + 1
             crop_event_counts[sa.crop_type] = crop_event_counts.get(sa.crop_type, 0) + sa.num_events
 
+        # Compare only against actively-irrigating peer sectors to avoid
+        # recently-created (no-data) sectors deflating the average.
         for sa in sector_analytics:
-            n = crop_counts.get(sa.crop_type, 0)
-            if n > 0:
-                crop_avg = crop_totals[sa.crop_type] / n
+            n_active = crop_active_counts.get(sa.crop_type, 0)
+            if n_active > 1:
+                crop_avg = crop_totals[sa.crop_type] / n_active
                 if crop_avg > 0:
                     sa.vs_crop_avg_pct = round((sa.total_m3_ha - crop_avg) / crop_avg * 100, 1)
 

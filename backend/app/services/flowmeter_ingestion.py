@@ -38,7 +38,9 @@ _DEFAULT_INTERVAL_MINUTES: float = 15.0
 
 #: Split an event when the gap between two consecutive positive readings
 #: exceeds this multiple of the inferred interval.
-_GAP_SPLIT_FACTOR: float = 2.5
+#: 5.0 × 15 min = 75 min — prevents drip-system cycling pauses from
+#: fragmenting a single irrigation session into multiple events.
+_GAP_SPLIT_FACTOR: float = 5.0
 
 
 def _infer_interval_minutes(readings: list[tuple[datetime, float]]) -> float:
