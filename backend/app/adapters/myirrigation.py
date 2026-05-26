@@ -272,6 +272,11 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
                         params=params,
                         headers=self._auth_headers(),
                     )
+                if not resp.is_success:
+                    logger.warning(
+                        "MyIrrigation: %s on POST %s — body: %.300s",
+                        resp.status_code, path, resp.text,
+                    )
                 resp.raise_for_status()
                 return resp.json()
 

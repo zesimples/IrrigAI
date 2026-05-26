@@ -133,6 +133,40 @@ _MAX_ADAPTIVE_LOOKBACK_HOURS = 168
 _EVENT_DETECTION_LOOKBACK_HOURS = 24
 
 
+def _flowmeter_sensor_summary(raw: object) -> list[dict[str, object]]:
+    """Return safe sensor metadata for diagnosing failed flowmeter parsing."""
+    if not isinstance(raw, dict):
+        return []
+
+    data = raw.get("data") if isinstance(raw.get("data"), dict) else raw
+    if not isinstance(data, dict):
+        return []
+
+    sensors = data.get("sensors")
+    values_map = data.get("values")
+    if not isinstance(sensors, list):
+        return []
+    if not isinstance(values_map, dict):
+        values_map = {}
+
+    summary: list[dict[str, object]] = []
+    for sensor in sensors:
+        if not isinstance(sensor, dict):
+            continue
+        sensor_id = str(sensor.get("id") or "")
+        sensor_values = values_map.get(sensor_id)
+        summary.append(
+            {
+                "id": sensor_id,
+                "name": str(sensor.get("name") or ""),
+                "sensor_type": str(sensor.get("sensor_type") or ""),
+                "units": str(sensor.get("units") or ""),
+                "values": len(sensor_values) if isinstance(sensor_values, dict) else 0,
+            }
+        )
+    return summary
+
+
 def _adaptive_since(last_ts: datetime | None, default_lookback_hours: int, now: datetime) -> datetime:
     default_since = now - timedelta(hours=default_lookback_hours)
     if last_ts is None:
@@ -257,12 +291,23 @@ class FlowmeterIngestionService:
             )
         except Exception:
             logger.exception(
-                "FlowmeterIngestion: API call failed for device %s", flowmeter.external_device_id
+                "FlowmeterIngestion: API call failed for device %s (%s..%s)",
+                flowmeter.external_device_id,
+                since.isoformat(),
+                until.isoformat(),
             )
             return 0, None, None
 
         readings = parse_flowmeter_data(raw, flowmeter.external_device_id)
         if not readings:
+            logger.warning(
+                "FlowmeterIngestion device %s: no Water Meter readings parsed "
+                "for window %s..%s; sensors=%s",
+                flowmeter.external_device_id,
+                since.isoformat(),
+                until.isoformat(),
+                _flowmeter_sensor_summary(raw),
+            )
             return 0, None, None
 
         rows = [
@@ -287,9 +332,13 @@ class FlowmeterIngestionService:
         earliest_ts = min(ts for ts, _ in readings)
         flowmeter.last_reading_at = latest_ts
 
-        logger.debug(
-            "FlowmeterIngestion device %s: %d/%d readings inserted",
-            flowmeter.external_device_id, inserted, len(rows),
+        logger.info(
+            "FlowmeterIngestion device %s: %d/%d readings inserted (%s..%s)",
+            flowmeter.external_device_id,
+            inserted,
+            len(rows),
+            earliest_ts.isoformat(),
+            latest_ts.isoformat(),
         )
         return inserted, earliest_ts, latest_ts
 
@@ -368,7 +417,7 @@ class FlowmeterIngestionService:
         from sqlalchemy import select
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-        from app.models import FlowmeterReading, Flowmeter, IrrigationEventDetected
+        from app.models import Flowmeter, FlowmeterReading, IrrigationEventDetected
 
         flowmeter_result = await db.execute(
             select(Flowmeter).where(Flowmeter.id == flowmeter_id)
