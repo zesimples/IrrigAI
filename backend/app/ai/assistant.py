@@ -492,6 +492,9 @@ class IrrigationAssistant:
             "probe_summary.data_quality": "Qualidade dos dados",
             "probe_summary": "Qualidade dos dados",
             "probe_signal": "Leituras da sonda",
+            "probe": "Leituras da sonda",
+            "depths": "Leituras da sonda",
+            "depth": "Leituras da sonda",
             "weather.forecast": "Previsão do tempo",
             "weather": "Previsão do tempo",
             "alert": "Atenção",
@@ -505,9 +508,14 @@ class IrrigationAssistant:
 
         for ev in interpretation.evidence[:6]:
             label = next(
-                (lbl for key, lbl in _SRC_LABEL.items() if ev.source.startswith(key)),
-                ev.source.replace("_", " ").replace(".", " ").title(),
+                (lbl for key, lbl in _SRC_LABEL.items() if ev.source.lower().startswith(key)),
+                None,
             )
+            if label is None:
+                # Strip bracket notation (e.g. "depths[30]") → clean fallback
+                import re as _re
+                clean = _re.sub(r"\[.*?\]", "", ev.source)
+                label = clean.replace("_", " ").replace(".", " ").strip().title() or "Dados"
             if label not in used:
                 lines.append(f"• {label}: {ev.value}")
                 used.add(label)
