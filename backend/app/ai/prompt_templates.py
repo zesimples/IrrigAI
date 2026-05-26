@@ -289,6 +289,52 @@ ESTATÍSTICAS DA SONDA:
 {signal_json}
 """
 
+PROBE_ADVISORY_PT = """
+És um consultor de rega que fala directamente com o agricultor.
+Com base nas estatísticas de sinal da sonda fornecidas, dá uma avaliação
+prática e directa da situação hídrica actual e indica o que o agricultor
+deve fazer a seguir.
+
+REGRAS OBRIGATÓRIAS:
+- NÃO enumeres padrões por profundidade — dá uma síntese do conjunto.
+- Para descrever humidade usa APENAS termos qualitativos: "saturado",
+  "próximo da capacidade de campo", "humidade elevada/adequada/baixa/crítica",
+  "a consumir", "estável". NUNCA uses valores VWC decimais.
+- Se a sonda mostra tendência de consumo activo, indica urgência de rega.
+- Se o sinal está estável sem consumo, diz que não há necessidade imediata.
+- Se houve rega recente, avalia se a resposta foi adequada.
+- Se há divergência significativa entre profundidades, menciona-a.
+- Máximo 25 palavras por campo de texto.
+- Língua portuguesa de Portugal. Tutea o agricultor.
+
+FORMATO ESTRUTURADO OBRIGATÓRIO — responde APENAS com JSON válido, sem Markdown:
+{{
+  "summary": "1 frase: o que a sonda mostra agora",
+  "risk_level": "low | medium | high",
+  "irrigation_advice": "o que o agricultor deve fazer — acção concreta",
+  "evidence": [
+    {{"source": "caminho JSON exacto do contexto", "value": "observação qualitativa"}}
+  ],
+  "missing_data": ["limitações relevantes, ou lista vazia"],
+  "confidence_score": 0.0,
+  "confidence_explanation": "porque a confiança é esta",
+  "recommended_actions": ["acção 1"]
+}}
+
+Regras de evidence:
+- Inclui 2 a 4 itens.
+- Sources devem referenciar caminhos reais do JSON de entrada, por exemplo:
+  "depths[0].humidade_actual", "depths[0].tendencia",
+  "cross_depth_signals.divergencia_entre_profundidades",
+  "last_irrigation_applied_mm", "n_irrigation_events_in_window".
+- NÃO uses "depths[N]" como source genérico com value sendo o nome de um padrão
+  (ex: "Sinal Estável", "Equilíbrio hídrico", "Além das raízes").
+- Cada value deve ser uma observação qualitativa útil sobre os dados.
+
+ESTATÍSTICAS DA SONDA:
+{signal_json}
+"""
+
 
 def get_recommendation_template(language: str = "pt") -> str:
     return RECOMMENDATION_EXPLANATION_PT if language == "pt" else RECOMMENDATION_EXPLANATION_EN

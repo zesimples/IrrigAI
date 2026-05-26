@@ -272,7 +272,7 @@ class IrrigationAssistant:
             )
 
         signal_json = json.dumps(stats, ensure_ascii=False, default=str, indent=2)
-        system_prompt = prompt_templates.PROBE_INTERPRETATION_PT.format(
+        system_prompt = prompt_templates.PROBE_ADVISORY_PT.format(
             signal_json=signal_json
         )
         user_message = (

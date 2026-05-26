@@ -4,6 +4,7 @@ Provides OpenAIChatClient (real API) and MockChatClient (testing without key).
 Use get_chat_client(settings) to obtain the right instance.
 """
 
+import json
 import logging
 
 import openai
@@ -94,6 +95,26 @@ class MockChatClient:
                 "• Intervalo de rega longo: a última rega foi há mais de 4 dias — para este tipo de solo e fase, o ideal seria regas mais frequentes.\n"
                 "• Configuração do sistema de rega em falta: sem taxa de aplicação definida, o motor usa padrão conservador que pode subestimar a dose necessária."
             )
+
+        if "não enumeres padrões por profundidade" in prompt_lower:
+            return json.dumps({
+                "summary": "Sonda mostra humidade estável e adequada.",
+                "risk_level": "low",
+                "irrigation_advice": (
+                    "Não há necessidade de regar nos próximos 1-2 dias. "
+                    "Monitoriza a tendência e rega se o consumo se tornar activo."
+                ),
+                "evidence": [
+                    {"source": "depths[0].humidade_actual", "value": "humidade adequada"},
+                    {"source": "depths[0].tendencia", "value": "estável"},
+                ],
+                "missing_data": [],
+                "confidence_score": 0.75,
+                "confidence_explanation": "Sinal estável com leituras suficientes nas últimas 72 horas.",
+                "recommended_actions": [
+                    "Monitorizar a tendência de humidade nas próximas 24 horas.",
+                ],
+            }, ensure_ascii=False)
 
         if "interpreta" in prompt_lower or "sonda" in prompt_lower or "padrão" in prompt_lower or "flatline" in prompt_lower:
             return (

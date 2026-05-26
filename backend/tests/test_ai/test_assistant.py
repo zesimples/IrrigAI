@@ -8,8 +8,42 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.ai.assistant import IrrigationAssistant
-from app.ai.context_builder import AssistantContextBuilder, FarmAssistantContext, SectorAssistantContext
+from app.ai.context_builder import (
+    AssistantContextBuilder,
+    FarmAssistantContext,
+    SectorAssistantContext,
+)
 from app.ai.openai_client import MockChatClient
+from app.schemas.ai import AgronomicInterpretation
+
+_MINIMAL_PROBE_STATS = {
+    "probe_id": "probe-001",
+    "probe_external_id": "EXT-001",
+    "sector_id": "sec-001",
+    "sector_name": "Norte",
+    "soil_texture": None,
+    "root_depth_cm": 60,
+    "analysis_window_hours": 72,
+    "n_irrigation_events_in_window": 1,
+    "last_irrigation_applied_mm": 20.0,
+    "depths": [
+        {
+            "depth_cm": 30,
+            "n_readings": 24,
+            "humidade_actual": "humidade adequada",
+            "tendencia": "estável",
+            "sinal_estavel": True,
+            "causa_sinal_estavel": "humidade estável sem consumo nem recarga activos — equilíbrio hídrico",
+            "profundidade_alem_raizes": False,
+            "variabilidade_sinal": "muito baixa (sinal plano)",
+            "variacao_24h": "sem variação significativa",
+            "variacao_48h": "sem variação significativa",
+            "resposta_rega": "moderada",
+            "horas_ate_pico_apos_rega": 2.0,
+        }
+    ],
+    "cross_depth_signals": {},
+}
 
 
 def _sector_ctx(**overrides) -> SectorAssistantContext:
@@ -40,6 +74,9 @@ def _sector_ctx(**overrides) -> SectorAssistantContext:
         last_irrigation_date=None,
         total_irrigation_7d_mm=0.0,
         active_alerts=[],
+        probe_live=None,
+        source_confidence="high",
+        data_quality_explanation="Good sensor data quality",
         generated_at="2026-04-08T08:00:00+00:00",
     )
     defaults.update(overrides)
@@ -136,3 +173,59 @@ async def test_chat_without_sector_id_uses_farm_context(mock_builder, assistant)
     await assistant.chat("farm-001", "Resume a exploração", db, sector_id=None)
     mock_builder.build_farm_context.assert_called_once_with("farm-001", db)
     mock_builder.build_sector_context.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_interpret_probe_structured_uses_advisory_prompt(assistant):
+    """interpret_probe_patterns_structured must use PROBE_ADVISORY_PT, not PROBE_INTERPRETATION_PT."""
+    captured: list[str] = []
+
+    async def _capture(system_prompt, user_message, **kwargs):
+        captured.append(system_prompt)
+        # Return valid AgronomicInterpretation JSON so _parse_structured_output succeeds
+        return json.dumps({
+            "summary": "Sonda mostra humidade estável e adequada.",
+            "risk_level": "low",
+            "irrigation_advice": "Não há necessidade de regar nos próximos 1-2 dias. Monitoriza a tendência.",
+            "evidence": [
+                {"source": "depths[0].humidade_actual", "value": "humidade adequada"},
+                {"source": "depths[0].tendencia", "value": "estável"},
+            ],
+            "missing_data": [],
+            "confidence_score": 0.8,
+            "confidence_explanation": "Sinal estável com leituras suficientes.",
+            "recommended_actions": ["Monitorizar humidade nas próximas 24h"],
+        })
+
+    db = AsyncMock()
+    with patch("app.ai.assistant.compute_probe_signal_stats", return_value=_MINIMAL_PROBE_STATS):
+        assistant.client.complete = _capture
+        result = await assistant.interpret_probe_patterns_structured("probe-001", db)
+
+    assert len(captured) == 1
+    # Advisory prompt is present
+    assert "NÃO enumeres padrões por profundidade" in captured[0]
+    # Old pattern enumeration heading is absent
+    assert "PADRÕES A VERIFICAR" not in captured[0]
+    # Returns a valid AgronomicInterpretation
+    assert isinstance(result, AgronomicInterpretation)
+    assert result.irrigation_advice != ""
+
+
+@pytest.mark.asyncio
+async def test_interpret_probe_structured_evidence_no_depth_pattern_labels(assistant):
+    """Evidence items must not be per-depth 'Sinal Estável' pattern name labels."""
+    db = AsyncMock()
+    with patch("app.ai.assistant.compute_probe_signal_stats", return_value=_MINIMAL_PROBE_STATS):
+        result = await assistant.interpret_probe_patterns_structured("probe-001", db)
+
+    anti_pattern_values = {
+        "Sinal Estável", "Equilíbrio hídrico", "Além das raízes",
+        "Solo saturado", "Resposta fraca à rega", "Drenagem rápida",
+    }
+    for ev in result.evidence:
+        # A source like "depths[0]" paired with a bare pattern-name value is the anti-pattern
+        if ev.source.startswith("depths["):
+            assert ev.value not in anti_pattern_values, (
+                f"evidence has depth-pattern label: source={ev.source!r}, value={ev.value!r}"
+            )
