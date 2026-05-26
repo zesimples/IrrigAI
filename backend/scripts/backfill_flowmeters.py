@@ -4,6 +4,9 @@ Run from inside the backend container:
     python scripts/backfill_flowmeters.py --farm-name "Herdade dos Conqueiros" --days 30
     python scripts/backfill_flowmeters.py --farm-name "Herdade dos Conqueiros" --days 30 --device-id 7193
 
+    # After changing _GAP_SPLIT_FACTOR — delete fragmented events and re-detect:
+    python scripts/backfill_flowmeters.py --farm-name "Herdade dos Conqueiros" --days 30 --redetect
+
 This uses farm-specific MyIrrigation credentials when present, inserts readings
 idempotently, and runs irrigation-event detection for devices that returned data.
 """
@@ -60,6 +63,15 @@ async def main() -> None:
         dest="device_ids",
         help="Limit to one external flowmeter device id; can be repeated",
     )
+    parser.add_argument(
+        "--redetect",
+        action="store_true",
+        help=(
+            "Delete existing irrigation_event_detected rows for the window "
+            "and re-detect from scratch. Use after changing detection parameters "
+            "(e.g. _GAP_SPLIT_FACTOR) to replace stale fragmented events."
+        ),
+    )
     args = parser.parse_args()
 
     if args.days <= 0:
@@ -91,38 +103,57 @@ async def main() -> None:
                 print(f"No active flowmeters found for farm {farm.name}")
                 return
 
+            mode = "REDETECT" if args.redetect else "BACKFILL"
             print(
-                f"Backfilling {len(flowmeters)} flowmeters for {farm.name} "
+                f"{mode} {len(flowmeters)} flowmeters for {farm.name} "
                 f"window={since.isoformat()}..{until.isoformat()}"
             )
 
             total_inserted = 0
+            total_deleted = 0
             total_events = 0
             devices_with_data = 0
+
             for flowmeter in flowmeters:
                 inserted, earliest_ts, latest_ts = await service.ingest_device(
                     flowmeter, since, until, adapter, db
                 )
+                total_inserted += inserted
+
+                deleted = 0
                 events = 0
-                if earliest_ts is not None and latest_ts is not None:
+                if args.redetect:
+                    # Delete the full backfill window, not just the ingest window,
+                    # so stale fragmented events outside the new readings are also removed.
+                    deleted, events = await service.redetect_events(
+                        flowmeter, since, until, db
+                    )
+                    devices_with_data += 1
+                elif earliest_ts is not None and latest_ts is not None:
                     devices_with_data += 1
                     events = await service._detect_and_store_events(
                         flowmeter, earliest_ts, latest_ts, db
                     )
-                total_inserted += inserted
+
+                total_deleted += deleted
                 total_events += events
                 print(
                     f"device={flowmeter.external_device_id} "
-                    f"inserted={inserted} events={events} "
+                    f"inserted={inserted}"
+                    + (f" deleted={deleted}" if args.redetect else "")
+                    + f" events={events} "
                     f"range={earliest_ts.isoformat() if earliest_ts else '-'}.."
                     f"{latest_ts.isoformat() if latest_ts else '-'}"
                 )
 
             await db.commit()
-            print(
+            summary = (
                 f"DONE flowmeters={len(flowmeters)} devices_with_data={devices_with_data} "
                 f"readings_inserted={total_inserted} events_detected={total_events}"
             )
+            if args.redetect:
+                summary += f" events_deleted={total_deleted}"
+            print(summary)
         except Exception:
             await db.rollback()
             raise

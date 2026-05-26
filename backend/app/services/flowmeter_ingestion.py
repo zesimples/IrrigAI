@@ -409,6 +409,83 @@ class FlowmeterIngestionService:
 
         return added
 
+    async def redetect_events(
+        self,
+        flowmeter: Flowmeter,  # noqa: F821
+        window_since: datetime,
+        window_until: datetime,
+        db: AsyncSession,
+    ) -> tuple[int, int]:
+        """Delete existing events in a window then re-detect from raw readings.
+
+        Use after changing detection parameters (e.g. _GAP_SPLIT_FACTOR) to
+        replace stale fragmented events with freshly segmented ones.
+
+        Returns (deleted_count, inserted_count).
+        """
+        import uuid
+
+        from sqlalchemy import delete, select
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from app.models import FlowmeterReading, IrrigationEventDetected
+
+        del_result = await db.execute(
+            delete(IrrigationEventDetected).where(
+                IrrigationEventDetected.flowmeter_id == str(flowmeter.id),
+                IrrigationEventDetected.start_time >= window_since,
+                IrrigationEventDetected.start_time <= window_until,
+            )
+        )
+        deleted = del_result.rowcount if del_result.rowcount >= 0 else 0
+
+        rows_result = await db.execute(
+            select(FlowmeterReading)
+            .where(
+                FlowmeterReading.flowmeter_id == str(flowmeter.id),
+                FlowmeterReading.timestamp >= window_since,
+                FlowmeterReading.timestamp <= window_until,
+            )
+            .order_by(FlowmeterReading.timestamp)
+        )
+        raw_readings = [(r.timestamp, r.value_m3_ha) for r in rows_result.scalars().all()]
+        if not raw_readings:
+            return deleted, 0
+
+        detector = IrrigationEventDetector()
+        events = detector.detect_events(raw_readings)
+
+        added = 0
+        for ev in events:
+            stmt = (
+                pg_insert(IrrigationEventDetected)
+                .values(
+                    id=str(uuid.uuid4()),
+                    flowmeter_id=str(flowmeter.id),
+                    sector_id=flowmeter.sector_id,
+                    start_time=ev.start_time,
+                    end_time=ev.end_time,
+                    duration_minutes=ev.duration_minutes,
+                    total_m3_ha=ev.total_m3_ha,
+                    peak_m3_ha=ev.peak_m3_ha,
+                    num_readings=ev.num_readings,
+                    date=ev.start_time.date(),
+                )
+                .on_conflict_do_nothing(constraint="uq_irrigation_event_detected_device_start")
+            )
+            result = await db.execute(stmt)
+            added += result.rowcount if result.rowcount >= 0 else 1
+
+        logger.info(
+            "redetect_events device=%s window=%s..%s: deleted=%d inserted=%d",
+            flowmeter.external_device_id,
+            window_since.isoformat(),
+            window_until.isoformat(),
+            deleted,
+            added,
+        )
+        return deleted, added
+
     async def backfill_events(self, flowmeter_id: str, db: AsyncSession) -> int:
         """Reprocess ALL historical readings for a flowmeter. One-off tool, not called by ingest_farm.
 
