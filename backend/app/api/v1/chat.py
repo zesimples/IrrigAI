@@ -180,7 +180,7 @@ async def interpret_probe(
     """Interpret time-series probe signal patterns (flatline, drainage, etc.)."""
     try:
         structured = await assistant.interpret_probe_patterns_structured(probe_id=probe_id, db=db)
-        interpretation = assistant.render_structured(structured)
+        interpretation = assistant.render_probe_interpretation(structured)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return InterpretationResponse(interpretation=interpretation, structured=structured)

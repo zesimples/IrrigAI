@@ -229,3 +229,27 @@ async def test_interpret_probe_structured_evidence_no_depth_pattern_labels(assis
             assert ev.value not in anti_pattern_values, (
                 f"evidence has depth-pattern label: source={ev.source!r}, value={ev.value!r}"
             )
+
+
+def test_render_probe_interpretation_includes_summary_advice_evidence_and_action(assistant):
+    """Probe card renderer must keep the summary/advisory format expected by the UI."""
+    interpretation = AgronomicInterpretation(
+        summary="Sonda mostra humidade estável e adequada.",
+        risk_level="low",
+        irrigation_advice="Não há necessidade de regar agora.",
+        evidence=[
+            {"source": "depths[0].humidade_actual", "value": "humidade adequada"},
+            {"source": "depths[0].tendencia", "value": "estável"},
+        ],
+        missing_data=[],
+        confidence_score=0.82,
+        confidence_explanation="Leituras suficientes e coerentes.",
+        recommended_actions=["Monitorizar a tendência nas próximas 24h."],
+    )
+
+    rendered = assistant.render_probe_interpretation(interpretation)
+
+    assert rendered.splitlines()[0] == "• Resumo: Sonda mostra humidade estável e adequada."
+    assert "• Conselho: Não há necessidade de regar agora." in rendered
+    assert "• Evidência: humidade adequada; estável" in rendered
+    assert "• Próxima ação: Monitorizar a tendência nas próximas 24h." in rendered
