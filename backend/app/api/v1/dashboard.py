@@ -113,12 +113,20 @@ async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
     ).scalars().all()
 
     plot_name_by_id: dict[str, str] = {p.id: p.name for p in plots}
+    plot_ids = [p.id for p in plots]
+    # Only include sectors that have at least one soil probe — flowmeter-only
+    # sectors belong on the Caudalímetros page, not in Recomendações.
     sectors: list[Sector] = []
-    for plot in plots:
-        s = (
-            await db.execute(select(Sector).where(Sector.plot_id == plot.id))
+    if plot_ids:
+        sectors = (
+            await db.execute(
+                select(Sector)
+                .where(
+                    Sector.plot_id.in_(plot_ids),
+                    exists().where(Probe.sector_id == Sector.id),
+                )
+            )
         ).scalars().all()
-        sectors.extend(s)
 
     # --- Per-sector aggregation ---
     sector_summaries: list[SectorSummary] = []
