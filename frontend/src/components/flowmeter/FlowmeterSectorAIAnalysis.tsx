@@ -90,7 +90,7 @@ export function FlowmeterSectorAIAnalysis({ sectorId, period }: Props) {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => runAnalysis(false)}
-                className="px-2.5 py-1 text-xs font-medium bg-ink-1 text-white rounded hover:bg-ink-2 transition-colors"
+                className="px-2.5 py-1 text-xs font-medium bg-ink text-white rounded hover:bg-ink-2 transition-colors"
               >
                 Analisar
               </button>

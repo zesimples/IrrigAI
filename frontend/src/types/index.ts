@@ -818,14 +818,14 @@ export interface FlowmeterDeviationSector {
   deviation_pct: number;
   sector_avg_m3ha: number;
   crop_avg_m3ha: number;
-  interior_event_count: number;
+  interior_day_count: number;
 }
 
 export interface FlowmeterInsufficientDataSector {
   sector_id: string;
   sector_name: string;
   crop_type: string;
-  interior_event_count: number;
+  interior_day_count: number;
 }
 
 export interface FlowmeterDeviationsResponse {

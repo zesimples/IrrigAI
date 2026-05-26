@@ -107,7 +107,7 @@ export function FlowmeterDeviationWarnings({ farmId, embedded = false }: Props) 
             >
               <span className="text-ink-3 truncate mr-2">{s.sector_name}</span>
               <span className="text-ink-4 shrink-0">
-                {s.interior_event_count} evento{s.interior_event_count !== 1 ? "s" : ""}
+                {s.interior_day_count} dia{s.interior_day_count !== 1 ? "s" : ""} com leituras
               </span>
             </div>
           ))}

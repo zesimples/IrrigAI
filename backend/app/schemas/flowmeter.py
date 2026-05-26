@@ -146,19 +146,19 @@ class FlowmeterDeviationSector(BaseModel):
     deviation_pct: float
     sector_avg_m3ha: float
     crop_avg_m3ha: float
-    interior_event_count: int   # events after stripping first+last per day (outlier-stripped)
+    interior_day_count: int   # days with interior 15-min readings (first+last reading stripped per day)
 
 
 class FlowmeterInsufficientDataSector(BaseModel):
     sector_id: str
     sector_name: str
     crop_type: str
-    interior_event_count: int   # events after stripping first+last per day (outlier-stripped)
+    interior_day_count: int   # days with interior 15-min readings (first+last reading stripped per day)
 
 
 class FlowmeterDeviationsResponse(BaseModel):
     period_days: int
     deviating: list[FlowmeterDeviationSector]
     insufficient_data: list[FlowmeterInsufficientDataSector]
-    crop_averages: dict[str, float]   # crop_type → interior avg m³/ha
+    crop_averages: dict[str, float]   # crop_type → mean of sector interior-day averages (m³/ha/day)
     evaluated_at: datetime
