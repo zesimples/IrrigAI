@@ -147,11 +147,50 @@ async def _run_flowmeter_ingestion() -> None:
                             logger.exception(
                                 "Flowmeter ingestion failed for farm %s", farm.id
                             )
+                        try:
+                            from app.alerts.flowmeter_flow_rate_alerts import FlowmeterFlowRateAlertChecker
+                            await FlowmeterFlowRateAlertChecker().check_and_persist(str(farm.id), db)
+                        except Exception:
+                            logger.exception(
+                                "Flow-rate alert check failed for farm %s", farm.id
+                            )
                 except Exception:
                     logger.exception("Flowmeter ingestion job failed")
             scheduler_job_runs_total.labels("flowmeter_ingestion", "success").inc()
         except Exception:
             scheduler_job_runs_total.labels("flowmeter_ingestion", "failure").inc()
+            raise
+
+
+async def _run_reference_recompute() -> None:
+    async with JobLock("reference_recompute", ttl=3_600) as acquired:
+        if not acquired:
+            scheduler_job_runs_total.labels("reference_recompute", "skipped").inc()
+            return
+
+        from app.database import get_db
+        from app.models import Farm
+        from app.services.flowmeter_reference import FlowmeterReferenceService
+        from sqlalchemy import select
+
+        logger.info("Scheduler: reference recompute at %s", datetime.now(UTC))
+        svc = FlowmeterReferenceService()
+
+        try:
+            async for db in get_db():
+                try:
+                    farms = (await db.execute(select(Farm))).scalars().all()
+                    for farm in farms:
+                        try:
+                            await svc.compute_all_for_farm(str(farm.id), db)
+                            await db.commit()
+                        except Exception:
+                            logger.exception("Reference recompute failed for farm %s", farm.id)
+                except Exception:
+                    logger.exception("Reference recompute job failed")
+            scheduler_job_runs_total.labels("reference_recompute", "success").inc()
+        except Exception:
+            scheduler_job_runs_total.labels("reference_recompute", "failure").inc()
             raise
 
 
@@ -189,6 +228,13 @@ def start_scheduler() -> AsyncIOScheduler:
         id="flowmeter_ingestion",
         replace_existing=True,
         misfire_grace_time=120,
+    )
+    _scheduler.add_job(
+        _run_reference_recompute,
+        trigger=CronTrigger(day_of_week="mon", hour=3, minute=0, timezone="UTC"),
+        id="reference_recompute",
+        replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     _scheduler.start()
