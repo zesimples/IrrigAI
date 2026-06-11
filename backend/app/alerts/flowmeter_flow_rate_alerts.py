@@ -77,6 +77,8 @@ class FlowmeterFlowRateAlertChecker:
             return None
 
         ref_rate = reference.reference_rate_m3_ha
+        if not ref_rate:
+            return None
         deviation_pct = (stable_rate - ref_rate) / ref_rate * 100
 
         if abs(deviation_pct) <= reference.tolerance_pct:
@@ -237,13 +239,15 @@ class FlowmeterFlowRateAlertChecker:
                         db.add(rate_alert)
                         new_alerts.append(rate_alert)
 
-                zero_alert = self._detect_mid_event_zeros(
-                    reading_pairs,
-                    sector.name,
-                    str(sector.id),
-                    farm_id,
-                    event.start_time,
-                )
+                zero_alert = None
+                if reading_pairs:
+                    zero_alert = self._detect_mid_event_zeros(
+                        reading_pairs,
+                        sector.name,
+                        str(sector.id),
+                        farm_id,
+                        event.start_time,
+                    )
                 if zero_alert is not None:
                     db.add(zero_alert)
                     new_alerts.append(zero_alert)
@@ -251,7 +255,6 @@ class FlowmeterFlowRateAlertChecker:
             # Update checkpoint to the end time of the last processed event
             ref.last_alert_check_at = events[-1].end_time
 
-        if new_alerts:
-            await db.commit()
+        await db.commit()
 
         return new_alerts

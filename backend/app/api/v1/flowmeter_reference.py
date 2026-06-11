@@ -141,6 +141,10 @@ async def get_farm_flowmeter_references(farm_id: str, db: AsyncSession = Depends
 
 @router.get("/farms/{farm_id}/flowmeter-flow-rate-alerts")
 async def get_farm_flow_rate_alerts(farm_id: str, db: AsyncSession = Depends(get_db)):
+    farm = await db.get(Farm, farm_id)
+    if farm is None:
+        raise HTTPException(404, detail="Farm not found")
+
     from datetime import timedelta
 
     from app.core.enums import AlertType

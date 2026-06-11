@@ -166,7 +166,9 @@ class FlowmeterReferenceService:
         lookback_days: int = 30,
         tolerance_pct: float = 5.0,
     ) -> "FlowmeterReference":
-        """Compute reference and upsert into DB. Preserves is_manual_override rows."""
+        """Compute reference and upsert into DB. Preserves is_manual_override rows.
+        Caller is responsible for calling db.commit() after this method returns.
+        """
         from app.models.flowmeter_reference import FlowmeterReference
 
         existing_result = await db.execute(
