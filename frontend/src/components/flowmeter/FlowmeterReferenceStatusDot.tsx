@@ -40,6 +40,8 @@ export function FlowmeterReferenceStatusDot({ reference, latestDeviationPct, sec
     <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 5 }}>
       <button
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+        aria-label="Caudal de referência"
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -138,6 +140,7 @@ export function FlowmeterReferenceStatusDot({ reference, latestDeviationPct, sec
             {onRecompute && (
               <button
                 onClick={(e) => { e.stopPropagation(); onRecompute(sectorId); setOpen(false); }}
+                aria-label="Recalcular referência"
                 style={{
                   marginTop: 12,
                   width: "100%",
