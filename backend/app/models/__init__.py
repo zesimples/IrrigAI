@@ -27,6 +27,7 @@ from app.models.detected_water_event import DetectedWaterEvent
 from app.models.flowmeter import Flowmeter
 from app.models.flowmeter_reading import FlowmeterReading
 from app.models.irrigation_event_detected import IrrigationEventDetected
+from app.models.flowmeter_reference import FlowmeterReference
 
 __all__ = [
     "CropProfileTemplate",
@@ -55,4 +56,5 @@ __all__ = [
     "Flowmeter",
     "FlowmeterReading",
     "IrrigationEventDetected",
+    "FlowmeterReference",
 ]

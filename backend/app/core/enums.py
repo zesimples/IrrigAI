@@ -59,6 +59,9 @@ class AlertType(str, Enum):
     STALE_WEATHER = "stale_weather"
     FLOWMETER_DEVIATION = "flowmeter_deviation"
     FLOWMETER_INSUFFICIENT_DATA = "flowmeter_insufficient_data"
+    FLOWMETER_FLOW_RATE_HIGH = "flowmeter_flow_rate_high"
+    FLOWMETER_FLOW_RATE_LOW = "flowmeter_flow_rate_low"
+    FLOWMETER_MID_EVENT_ZEROS = "flowmeter_mid_event_zeros"
 
 
 class OverrideType(str, Enum):
