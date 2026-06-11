@@ -32,18 +32,21 @@ export function FlowmeterReferenceManager({ references, onUpdated }: Props) {
   const [saving, setSaving] = useState<string | null>(null);
 
   async function handleSaveManual(ref: FlowmeterReferenceOut, valueStr: string) {
+    if (!ref.sector_id) return;
     const value = parseFloat(valueStr);
     if (isNaN(value) || value <= 0) return;
-    setSaving(ref.sector_id!);
+    setSaving(ref.sector_id);
     try {
-      const updated = await flowmeterApi.setManualReference(ref.sector_id!, {
+      const updated = await flowmeterApi.setManualReference(ref.sector_id, {
         reference_rate_m3_ha: value,
         tolerance_pct: ref.tolerance_pct,
       });
       onUpdated(updated);
+      setEditing(null);
+    } catch (e) {
+      console.error("Manual reference save failed:", e);
     } finally {
       setSaving(null);
-      setEditing(null);
     }
   }
 
@@ -53,6 +56,8 @@ export function FlowmeterReferenceManager({ references, onUpdated }: Props) {
     try {
       const updated = await flowmeterApi.recomputeReference(ref.sector_id);
       onUpdated(updated);
+    } catch (e) {
+      console.error("Recompute failed:", e);
     } finally {
       setSaving(null);
     }
@@ -126,8 +131,8 @@ export function FlowmeterReferenceManager({ references, onUpdated }: Props) {
                   defaultValue={ref.reference_rate_m3_ha?.toFixed(2) ?? ""}
                   onBlur={(e) => handleSaveManual(ref, e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSaveManual(ref, (e.target as HTMLInputElement).value);
-                    if (e.key === "Escape") setEditing(null);
+                    if (e.key === "Enter") { e.preventDefault(); handleSaveManual(ref, (e.target as HTMLInputElement).value); }
+                    if (e.key === "Escape") { e.preventDefault(); setEditing(null); }
                   }}
                   style={{
                     width: 72,
