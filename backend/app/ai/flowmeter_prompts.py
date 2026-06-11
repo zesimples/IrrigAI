@@ -62,6 +62,11 @@ ESTRUTURA DA RESPOSTA (máximo 3 parágrafos curtos):
 2. Consistência: os eventos são uniformes ou muito variáveis? O intervalo entre regas é regular?
 3. Posição relativa e observações: este setor rega mais ou menos que a média? Algo fora do normal?
 
+Se os dados incluírem flow_rate_reference:
+- Se o caudal do último evento se desviar mais de tolerance_pct% da referência, menciona como anomalia a verificar.
+- Se o caudal estiver dentro dos limites, indica que o sistema funciona normalmente.
+- Se status for "provisional", indica que a referência ainda está a ser calibrada.
+
 DADOS DO SETOR:
 {analytics_json}
 """
@@ -79,6 +84,11 @@ RESPONSE STRUCTURE (maximum 3 short paragraphs):
 1. Volume and frequency: how much per event, how often, total for the period.
 2. Consistency: are events uniform or variable? Is the interval between irrigations regular?
 3. Relative position and observations: more or less than the crop average? Anything unusual?
+
+If the data includes flow_rate_reference:
+- If the latest event flow rate deviates more than tolerance_pct% from the reference, mention it as an anomaly to investigate.
+- If the flow rate is within limits, indicate the system is operating normally.
+- If status is "provisional", indicate the reference is still being calibrated.
 
 SECTOR DATA:
 {analytics_json}

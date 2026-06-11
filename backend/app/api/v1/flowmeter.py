@@ -439,7 +439,35 @@ async def sector_flowmeter_analysis(
         if cached_text:
             return FlowmeterSectorAnalysisResponse(analysis=cached_text, statistics=stats)
 
-    analytics_json = _json.dumps(asdict(sector_analytics), ensure_ascii=False, default=str, indent=2)
+    # Load flow rate reference for this sector, if available
+    from app.models import Flowmeter as _Flowmeter
+    from app.models.flowmeter_reference import FlowmeterReference
+    from sqlalchemy import select as _select
+
+    _fm_result = await db.execute(
+        _select(_Flowmeter).where(_Flowmeter.sector_id == sector_id, _Flowmeter.is_active.is_(True))
+    )
+    _fm = _fm_result.scalar_one_or_none()
+    _reference_context: dict | None = None
+    if _fm is not None:
+        _ref_result = await db.execute(
+            _select(FlowmeterReference).where(FlowmeterReference.flowmeter_id == str(_fm.id))
+        )
+        _ref = _ref_result.scalar_one_or_none()
+        if _ref is not None and _ref.status in ("established", "provisional"):
+            _reference_context = {
+                "reference_rate_m3_ha": _ref.reference_rate_m3_ha,
+                "status": _ref.status,
+                "tolerance_pct": _ref.tolerance_pct,
+                "upper_limit_m3_ha": _ref.upper_limit_m3_ha,
+                "lower_limit_m3_ha": _ref.lower_limit_m3_ha,
+                "num_events_analyzed": _ref.num_events_analyzed,
+            }
+
+    analytics_dict = asdict(sector_analytics)
+    if _reference_context:
+        analytics_dict["flow_rate_reference"] = _reference_context
+    analytics_json = _json.dumps(analytics_dict, ensure_ascii=False, default=str, indent=2)
     prompt = get_sector_analysis_prompt(body.language).format(analytics_json=analytics_json)
     user_message = (
         f"Analisa o consumo do setor '{sector_analytics.sector_name}' nos últimos {body.period_days} dias."
