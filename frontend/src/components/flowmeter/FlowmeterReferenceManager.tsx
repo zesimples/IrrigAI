@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { flowmeterApi } from "@/lib/api";
 import type { FlowmeterReferenceOut } from "@/types";
 
@@ -30,6 +30,7 @@ interface EditState {
 export function FlowmeterReferenceManager({ references, onUpdated }: Props) {
   const [editing, setEditing] = useState<EditState | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const submittedRef = useRef(false);
 
   async function handleSaveManual(ref: FlowmeterReferenceOut, valueStr: string) {
     if (!ref.sector_id) return;
@@ -129,9 +130,12 @@ export function FlowmeterReferenceManager({ references, onUpdated }: Props) {
                   type="number"
                   step="0.01"
                   defaultValue={ref.reference_rate_m3_ha?.toFixed(2) ?? ""}
-                  onBlur={(e) => handleSaveManual(ref, e.target.value)}
+                  onBlur={(e) => {
+                    if (!submittedRef.current) handleSaveManual(ref, e.target.value);
+                    submittedRef.current = false;
+                  }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") { e.preventDefault(); handleSaveManual(ref, (e.target as HTMLInputElement).value); }
+                    if (e.key === "Enter") { e.preventDefault(); submittedRef.current = true; handleSaveManual(ref, (e.target as HTMLInputElement).value); }
                     if (e.key === "Escape") { e.preventDefault(); setEditing(null); }
                   }}
                   style={{

@@ -335,14 +335,19 @@ export function FlowmeterDashboard({ farmId }: Props) {
           }}>{showRefManager ? "▲ fechar" : "▼ ver tabela"}</span>
         </button>
 
-        {showRefManager && references.length > 0 && (
+        {showRefManager && (
           <div style={{
             border: "1px solid #dcd3c2",
             borderRadius: 10,
             overflow: "hidden",
             background: "#fbf8f1",
           }}>
-            <FlowmeterReferenceManager references={references} onUpdated={handleReferenceUpdated} />
+            {references.length > 0
+              ? <FlowmeterReferenceManager references={references} onUpdated={handleReferenceUpdated} />
+              : <div style={{ padding: "24px 16px", textAlign: "center", fontFamily: "var(--font-fraunces)", fontStyle: "italic", fontSize: 13, color: "#8a7f74" }}>
+                  Nenhuma referência computada ainda.
+                </div>
+            }
           </div>
         )}
       </div>

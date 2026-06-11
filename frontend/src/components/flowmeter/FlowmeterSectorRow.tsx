@@ -139,6 +139,7 @@ export function FlowmeterSectorRow({ sector, period, deviation, reference, onRec
         <div style={{ paddingLeft: 8 }}>
           <FlowmeterReferenceStatusDot
             reference={reference}
+            latestDeviationPct={deviation}
             sectorId={sector.sector_id}
             onRecompute={onRecompute}
           />
