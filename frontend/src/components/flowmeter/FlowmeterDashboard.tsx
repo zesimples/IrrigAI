@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { flowmeterApi } from "@/lib/api";
-import type { FlowmeterDashboardResponse, FlowmeterDeviationsResponse } from "@/types";
+import type { FlowmeterDashboardResponse, FlowmeterDeviationsResponse, FlowmeterFlowRateAlert, FlowmeterReferenceOut } from "@/types";
 import { FlowmeterSectorTable } from "./FlowmeterSectorTable";
 import { FlowmeterAIAnalysis } from "./FlowmeterAIAnalysis";
+import { FlowmeterFlowRateAlerts } from "./FlowmeterFlowRateAlerts";
 
 type Period = "7d" | "30d" | "season";
 
@@ -18,20 +19,28 @@ export function FlowmeterDashboard({ farmId }: Props) {
   const [deviations, setDeviations] = useState<FlowmeterDeviationsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [references, setReferences] = useState<FlowmeterReferenceOut[]>([]);
+  const [flowRateAlerts, setFlowRateAlerts] = useState<FlowmeterFlowRateAlert[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setAlertsLoading(true);
     Promise.all([
       flowmeterApi.dashboard(farmId, period),
       flowmeterApi.deviations(farmId),
+      flowmeterApi.getFarmReferences(farmId),
+      flowmeterApi.getFlowRateAlerts(farmId),
     ])
-      .then(([dashData, devData]) => {
+      .then(([dashData, devData, refsData, alertsData]) => {
         setData(dashData);
         setDeviations(devData);
+        setReferences(refsData);
+        setFlowRateAlerts(alertsData);
       })
       .catch((e: Error) => setError(e.message ?? "Erro ao carregar dados"))
-      .finally(() => setLoading(false));
+      .finally(() => { setLoading(false); setAlertsLoading(false); });
   }, [farmId, period]);
 
   const stats = useMemo(() => {
@@ -58,8 +67,28 @@ export function FlowmeterDashboard({ farmId }: Props) {
     return map;
   }, [deviations, data]);
 
+  const referenceMap = useMemo((): Record<string, FlowmeterReferenceOut | null> => {
+    const map: Record<string, FlowmeterReferenceOut | null> = {};
+    for (const ref of references) {
+      if (ref.sector_id) map[ref.sector_id] = ref;
+    }
+    return map;
+  }, [references]);
+
   const periodLabel = period === '7d' ? 'últimos 7 dias' : period === '30d' ? 'últimos 30 dias' : 'campanha';
   const periodShort = period === 'season' ? 'Campanha' : period;
+
+  async function handleRecompute(sectorId: string) {
+    try {
+      const updated = await flowmeterApi.recomputeReference(sectorId);
+      setReferences((prev) => {
+        const next = prev.filter((r) => r.sector_id !== sectorId);
+        return [...next, updated];
+      });
+    } catch (e) {
+      console.error("Recompute failed", e);
+    }
+  }
 
   return (
     <div style={{ width: '100%', minHeight: '100%', background: '#f5f0e6', color: '#2a2520' }}>
@@ -218,8 +247,51 @@ export function FlowmeterDashboard({ farmId }: Props) {
           farmId={farmId}
           deviationMap={deviationMap}
           cropAverages={deviations?.crop_averages ?? {}}
+          referenceMap={referenceMap}
+          onRecompute={handleRecompute}
         />
       )}
+
+      {/* Flow rate alerts */}
+      <div style={{ margin: "32px 44px 0" }}>
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}>
+          <span style={{
+            fontFamily: "var(--font-fraunces)",
+            fontSize: 16,
+            fontWeight: 600,
+            color: "#2a2520",
+            letterSpacing: "-0.01em",
+          }}>
+            Alertas de Caudal
+          </span>
+          {flowRateAlerts.filter(a => a.severity === "warning").length > 0 && (
+            <span style={{
+              fontFamily: "var(--font-jetbrains, ui-monospace)",
+              fontSize: 10.5,
+              color: "#b84a2a",
+              background: "#fbf4ee",
+              border: "1px solid rgba(184,74,42,0.2)",
+              borderRadius: 999,
+              padding: "3px 10px",
+            }}>
+              {flowRateAlerts.filter(a => a.severity === "warning").length} ativo{flowRateAlerts.filter(a => a.severity === "warning").length !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+        <div style={{
+          border: "1px solid #dcd3c2",
+          borderRadius: 10,
+          overflow: "hidden",
+          background: "#fbf8f1",
+        }}>
+          <FlowmeterFlowRateAlerts alerts={flowRateAlerts} loading={alertsLoading} />
+        </div>
+      </div>
     </div>
   );
 }
