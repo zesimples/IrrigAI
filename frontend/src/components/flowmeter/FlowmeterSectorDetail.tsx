@@ -103,8 +103,9 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
     const { since, until } = periodToSinceUntil(period);
 
     async function load() {
-      // Start events fetch immediately — it doesn't depend on interval resolution.
+      // Start events + reference fetch immediately — independent of interval resolution.
       const eventsPromise = flowmeterApi.events(sectorId, { since, until });
+      const referencePromise = flowmeterApi.getReference(sectorId).catch(() => null);
 
       let readingsResult;
       if (period === "7d") {
@@ -123,13 +124,13 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
         readingsResult = await flowmeterApi.readings(sectorId, { interval: "1d", since, until });
       }
 
-      const eventsResult = await eventsPromise;
+      const [eventsResult, refResult] = await Promise.all([eventsPromise, referencePromise]);
       setReadings(readingsResult.readings);
       setEvents(eventsResult.events);
+      setReference(refResult);
     }
 
     load().catch(console.error).finally(() => setLoading(false));
-    flowmeterApi.getReference(sectorId).then(setReference).catch(() => setReference(null));
   }, [sectorId, period]);
 
   if (loading) {
