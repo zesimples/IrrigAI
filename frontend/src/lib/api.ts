@@ -432,10 +432,12 @@ export const flowmeterApi = {
     get<FlowmeterReferenceOut>(`/sectors/${sectorId}/flowmeter-reference`),
 
   recomputeReference: (sectorId: string) =>
-    post<FlowmeterReferenceOut>(`/sectors/${sectorId}/flowmeter-reference/recompute`, {}),
+    post<FlowmeterReferenceOut>(`/sectors/${sectorId}/flowmeter-reference/recompute`),
 
-  setManualReference: (sectorId: string, body: { reference_rate_m3_ha: number; tolerance_pct: number }) =>
-    put<FlowmeterReferenceOut>(`/sectors/${sectorId}/flowmeter-reference`, body),
+  setManualReference: (
+    sectorId: string,
+    body: { reference_rate_m3_ha: number; tolerance_pct: number },
+  ) => put<FlowmeterReferenceOut>(`/sectors/${sectorId}/flowmeter-reference`, body),
 
   getFarmReferences: (farmId: string) =>
     get<FlowmeterReferenceOut[]>(`/farms/${farmId}/flowmeter-references`),
