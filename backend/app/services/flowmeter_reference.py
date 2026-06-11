@@ -86,3 +86,141 @@ def compute_reference_from_stable_rates(
         "num_events": n,
         "status": status,
     }
+
+
+class FlowmeterReferenceService:
+    """Compute and persist per-flowmeter reference flow rates."""
+
+    async def _load_events(
+        self, flowmeter_id: str, since: datetime, db: AsyncSession
+    ) -> list:
+        from app.models import IrrigationEventDetected
+        result = await db.execute(
+            select(IrrigationEventDetected)
+            .where(
+                IrrigationEventDetected.flowmeter_id == flowmeter_id,
+                IrrigationEventDetected.start_time >= since,
+            )
+            .order_by(IrrigationEventDetected.start_time)
+        )
+        return result.scalars().all()
+
+    async def _load_readings_for_event(self, event, db: AsyncSession) -> list:
+        from app.models import FlowmeterReading
+        result = await db.execute(
+            select(FlowmeterReading)
+            .where(
+                FlowmeterReading.flowmeter_id == event.flowmeter_id,
+                FlowmeterReading.timestamp >= event.start_time,
+                FlowmeterReading.timestamp <= event.end_time,
+            )
+            .order_by(FlowmeterReading.timestamp)
+        )
+        return result.scalars().all()
+
+    async def compute_reference(
+        self,
+        flowmeter_id: str,
+        sector_id: str,
+        sector_name: str,
+        db: AsyncSession,
+        lookback_days: int = 30,
+        tolerance_pct: float = 5.0,
+    ) -> "FlowmeterReference":
+        from app.models.flowmeter_reference import FlowmeterReference
+
+        since = datetime.now(UTC) - timedelta(days=lookback_days)
+        events = await self._load_events(flowmeter_id, since, db)
+
+        stable_rates: list[float] = []
+        for event in events:
+            raw = await self._load_readings_for_event(event, db)
+            reading_pairs = [(r.timestamp, r.value_m3_ha) for r in raw]
+            result = compute_stable_flow_rate(reading_pairs)
+            if result.status == "ok" and result.stable_rate_m3_ha is not None:
+                stable_rates.append(result.stable_rate_m3_ha)
+
+        ref_data = compute_reference_from_stable_rates(stable_rates, tolerance_pct=tolerance_pct)
+        now = datetime.now(UTC)
+
+        row = FlowmeterReference(
+            flowmeter_id=flowmeter_id,
+            reference_rate_m3_ha=ref_data["reference_rate_m3_ha"] or 0.0,
+            tolerance_pct=tolerance_pct,
+            upper_limit_m3_ha=ref_data["upper_limit_m3_ha"] or 0.0,
+            lower_limit_m3_ha=ref_data["lower_limit_m3_ha"] or 0.0,
+            num_events_analyzed=ref_data["num_events"],
+            std_dev=ref_data["std_dev"],
+            status=ref_data["status"],
+            computed_at=now,
+            is_manual_override=False,
+        )
+        return row
+
+    async def compute_and_save(
+        self,
+        flowmeter_id: str,
+        sector_id: str,
+        sector_name: str,
+        db: AsyncSession,
+        lookback_days: int = 30,
+        tolerance_pct: float = 5.0,
+    ) -> "FlowmeterReference":
+        """Compute reference and upsert into DB. Preserves is_manual_override rows."""
+        from app.models.flowmeter_reference import FlowmeterReference
+
+        existing_result = await db.execute(
+            select(FlowmeterReference).where(FlowmeterReference.flowmeter_id == flowmeter_id)
+        )
+        existing = existing_result.scalar_one_or_none()
+
+        if existing and existing.is_manual_override:
+            return existing
+
+        row = await self.compute_reference(
+            flowmeter_id, sector_id, sector_name, db,
+            lookback_days=lookback_days,
+            tolerance_pct=existing.tolerance_pct if existing else tolerance_pct,
+        )
+
+        if existing:
+            existing.reference_rate_m3_ha = row.reference_rate_m3_ha
+            existing.upper_limit_m3_ha = row.upper_limit_m3_ha
+            existing.lower_limit_m3_ha = row.lower_limit_m3_ha
+            existing.num_events_analyzed = row.num_events_analyzed
+            existing.std_dev = row.std_dev
+            existing.status = row.status
+            existing.computed_at = row.computed_at
+            return existing
+        else:
+            db.add(row)
+            await db.flush()
+            return row
+
+    async def compute_all_for_farm(
+        self,
+        farm_id: str,
+        db: AsyncSession,
+        lookback_days: int = 30,
+    ) -> list["FlowmeterReference"]:
+        """Recompute references for all active flowmeters in a farm."""
+        from app.models import Flowmeter, Plot, Sector
+
+        result = await db.execute(
+            select(Flowmeter, Sector)
+            .join(Sector, Flowmeter.sector_id == Sector.id)
+            .join(Plot, Sector.plot_id == Plot.id)
+            .where(Plot.farm_id == farm_id, Flowmeter.is_active.is_(True))
+        )
+        pairs = result.all()
+        refs: list = []
+        for fm, sector in pairs:
+            ref = await self.compute_and_save(
+                flowmeter_id=str(fm.id),
+                sector_id=str(sector.id),
+                sector_name=sector.name,
+                db=db,
+                lookback_days=lookback_days,
+            )
+            refs.append(ref)
+        return refs

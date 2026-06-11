@@ -107,3 +107,82 @@ def test_reference_computes_limits():
     ref = compute_reference_from_stable_rates(rates, tolerance_pct=5.0)
     assert abs(ref["upper_limit_m3_ha"] - 2.90 * 1.05) < 0.001
     assert abs(ref["lower_limit_m3_ha"] - 2.90 * 0.95) < 0.001
+
+
+# ─── FlowmeterReferenceService (DB mocked) ────────────────────────────────────
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from app.services.flowmeter_reference import FlowmeterReferenceService
+
+FM_ID = "fm-001"
+SECTOR_ID = "sec-001"
+SECTOR_NAME = "S02 Amendoal"
+
+
+def _mock_event(start_offset_h: int, end_offset_h: int) -> MagicMock:
+    ev = MagicMock()
+    ev.id = f"ev-{start_offset_h}"
+    ev.start_time = T0 + timedelta(hours=start_offset_h)
+    ev.end_time = T0 + timedelta(hours=end_offset_h)
+    return ev
+
+
+def _mock_readings_for_event(
+    start_time: datetime, count: int, plateau_value: float = 2.9
+) -> list[MagicMock]:
+    ramp_up = [1.0, 1.5]
+    plateau = [plateau_value] * (count - 4)
+    ramp_down = [1.2, 0.5]
+    all_vals = ramp_up + plateau + ramp_down
+    result = []
+    for i, v in enumerate(all_vals):
+        r = MagicMock()
+        r.timestamp = start_time + timedelta(minutes=i * 15)
+        r.value_m3_ha = v
+        result.append(r)
+    return result
+
+
+@pytest.mark.asyncio
+async def test_compute_reference_returns_established_status():
+    svc = FlowmeterReferenceService()
+
+    # Build 6 mock events
+    events = [_mock_event(i * 24, i * 24 + 6) for i in range(6)]
+    readings_per_event = {
+        ev.id: _mock_readings_for_event(ev.start_time, count=9, plateau_value=2.9)
+        for ev in events
+    }
+
+    db = AsyncMock()
+
+    with patch.object(svc, "_load_events", new=AsyncMock(return_value=events)), \
+         patch.object(svc, "_load_readings_for_event") as mock_load:
+        async def load_readings(event, db):
+            return readings_per_event.get(
+                event.id, _mock_readings_for_event(event.start_time, count=9)
+            )
+        mock_load.side_effect = load_readings
+        ref = await svc.compute_reference(FM_ID, SECTOR_ID, SECTOR_NAME, db=db, lookback_days=30)
+
+    assert ref.status == "established"
+    assert ref.num_events_analyzed == 6
+    assert ref.reference_rate_m3_ha is not None
+    assert ref.reference_rate_m3_ha > 2.0
+
+
+@pytest.mark.asyncio
+async def test_compute_reference_returns_insufficient_when_few_events():
+    svc = FlowmeterReferenceService()
+    db = AsyncMock()
+
+    with patch.object(svc, "_load_events", new=AsyncMock(return_value=[_mock_event(0, 6), _mock_event(24, 30)])), \
+         patch.object(svc, "_load_readings_for_event") as mock_load:
+        async def load_readings(event, db):
+            return _mock_readings_for_event(event.start_time, count=9)
+        mock_load.side_effect = load_readings
+        ref = await svc.compute_reference(FM_ID, SECTOR_ID, SECTOR_NAME, db=db, lookback_days=30)
+
+    assert ref.status == "insufficient"
+    assert ref.reference_rate_m3_ha == 0.0
