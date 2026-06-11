@@ -5,6 +5,8 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  ReferenceArea,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -14,6 +16,7 @@ import { flowmeterApi } from "@/lib/api";
 import { FlowmeterSectorAIAnalysis } from "./FlowmeterSectorAIAnalysis";
 import type {
   FlowmeterReadingPoint,
+  FlowmeterReferenceOut,
   IrrigationEventOut,
 } from "@/types";
 
@@ -93,6 +96,7 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
   const [events, setEvents] = useState<IrrigationEventOut[]>([]);
   const [resolvedInterval, setResolvedInterval] = useState<ResolvedInterval>("1h");
   const [loading, setLoading] = useState(true);
+  const [reference, setReference] = useState<FlowmeterReferenceOut | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -125,6 +129,7 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
     }
 
     load().catch(console.error).finally(() => setLoading(false));
+    flowmeterApi.getReference(sectorId).then(setReference).catch(() => setReference(null));
   }, [sectorId, period]);
 
   if (loading) {
@@ -156,6 +161,52 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
               formatter={(v: number) => [`${v.toFixed(2)} m³/ha`, "Consumo"]}
             />
             <Bar dataKey="value" fill="#6b9e3a" radius={[2, 2, 0, 0]} maxBarSize={24} />
+            {reference && reference.reference_rate_m3_ha !== null && (
+              <>
+                <ReferenceArea
+                  y1={reference.lower_limit_m3_ha ?? undefined}
+                  y2={reference.upper_limit_m3_ha ?? undefined}
+                  fill="#4a8c4a"
+                  fillOpacity={0.07}
+                />
+                <ReferenceLine
+                  y={reference.upper_limit_m3_ha ?? undefined}
+                  stroke="#4a8c4a"
+                  strokeDasharray="4 3"
+                  strokeWidth={1}
+                  label={{
+                    value: `+${reference.tolerance_pct}%`,
+                    position: "insideTopRight",
+                    fontSize: 9,
+                    fill: "#4a8c4a",
+                  }}
+                />
+                <ReferenceLine
+                  y={reference.lower_limit_m3_ha ?? undefined}
+                  stroke="#4a8c4a"
+                  strokeDasharray="4 3"
+                  strokeWidth={1}
+                  label={{
+                    value: `-${reference.tolerance_pct}%`,
+                    position: "insideBottomRight",
+                    fontSize: 9,
+                    fill: "#4a8c4a",
+                  }}
+                />
+                <ReferenceLine
+                  y={reference.reference_rate_m3_ha}
+                  stroke="#4a8c4a"
+                  strokeWidth={1.5}
+                  strokeOpacity={0.6}
+                  label={{
+                    value: `Ref: ${reference.reference_rate_m3_ha.toFixed(2)} m³/ha`,
+                    position: "insideTopLeft",
+                    fontSize: 9,
+                    fill: "#4a8c4a",
+                  }}
+                />
+              </>
+            )}
           </BarChart>
         </ResponsiveContainer>
       </div>
