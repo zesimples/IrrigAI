@@ -10,6 +10,7 @@ from app.api.v1 import (
     dashboard,
     farms,
     flowmeter,
+    flowmeter_reference,
     gdd,
     irrigation,
     overrides,
@@ -39,3 +40,4 @@ router.include_router(audit_log.router)
 router.include_router(auto_calibration.router)
 router.include_router(gdd.router)
 router.include_router(flowmeter.router)
+router.include_router(flowmeter_reference.router)

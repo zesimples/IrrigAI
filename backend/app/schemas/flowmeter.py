@@ -162,3 +162,29 @@ class FlowmeterDeviationsResponse(BaseModel):
     insufficient_data: list[FlowmeterInsufficientDataSector]
     crop_averages: dict[str, float]   # crop_type → mean of sector interior-day averages (m³/ha/day)
     evaluated_at: datetime
+
+
+# ── Flow rate reference schemas ───────────────────────────────────────────────
+
+class FlowmeterReferenceOut(BaseModel):
+    id: str
+    flowmeter_id: str
+    reference_rate_m3_ha: float | None
+    tolerance_pct: float
+    upper_limit_m3_ha: float | None
+    lower_limit_m3_ha: float | None
+    num_events_analyzed: int
+    std_dev: float
+    status: str  # "established", "provisional", "insufficient"
+    computed_at: datetime
+    is_manual_override: bool
+    sector_id: str | None = None
+    sector_name: str | None = None
+    crop_type: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class FlowmeterReferenceManualSet(BaseModel):
+    reference_rate_m3_ha: float = Field(..., gt=0.0, description="Manual reference rate in m³/ha")
+    tolerance_pct: float = Field(default=5.0, ge=0.5, le=50.0)
