@@ -39,7 +39,7 @@ export function FlowmeterDashboard({ farmId }: Props) {
         setReferences(refsData);
         setFlowRateAlerts(alertsData);
       })
-      .catch((e: Error) => setError(e.message ?? "Erro ao carregar dados"))
+      .catch((e) => setError(e instanceof Error ? e.message : "Erro ao carregar dados"))
       .finally(() => { setLoading(false); setAlertsLoading(false); });
   }, [farmId, period]);
 
@@ -269,19 +269,22 @@ export function FlowmeterDashboard({ farmId }: Props) {
           }}>
             Alertas de Caudal
           </span>
-          {flowRateAlerts.filter(a => a.severity === "warning").length > 0 && (
-            <span style={{
-              fontFamily: "var(--font-jetbrains, ui-monospace)",
-              fontSize: 10.5,
-              color: "#b84a2a",
-              background: "#fbf4ee",
-              border: "1px solid rgba(184,74,42,0.2)",
-              borderRadius: 999,
-              padding: "3px 10px",
-            }}>
-              {flowRateAlerts.filter(a => a.severity === "warning").length} ativo{flowRateAlerts.filter(a => a.severity === "warning").length !== 1 ? "s" : ""}
-            </span>
-          )}
+          {(() => {
+            const warningCount = flowRateAlerts.filter(a => a.severity === "warning").length;
+            return warningCount > 0 ? (
+              <span style={{
+                fontFamily: "var(--font-jetbrains, ui-monospace)",
+                fontSize: 10.5,
+                color: "#b84a2a",
+                background: "#fbf4ee",
+                border: "1px solid rgba(184,74,42,0.2)",
+                borderRadius: 999,
+                padding: "3px 10px",
+              }}>
+                {warningCount} ativo{warningCount !== 1 ? "s" : ""}
+              </span>
+            ) : null;
+          })()}
         </div>
         <div style={{
           border: "1px solid #dcd3c2",

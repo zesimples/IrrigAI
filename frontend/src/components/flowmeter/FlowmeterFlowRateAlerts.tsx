@@ -9,7 +9,7 @@ interface Props {
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "";
-  return new Date(iso).toLocaleDateString("pt-PT", {
+  return new Date(iso).toLocaleString("pt-PT", {
     day: "2-digit",
     month: "short",
     hour: "2-digit",
