@@ -6,6 +6,7 @@ import type { FlowmeterDashboardResponse, FlowmeterDeviationsResponse, Flowmeter
 import { FlowmeterSectorTable } from "./FlowmeterSectorTable";
 import { FlowmeterAIAnalysis } from "./FlowmeterAIAnalysis";
 import { FlowmeterFlowRateAlerts } from "./FlowmeterFlowRateAlerts";
+import { FlowmeterReferenceManager } from "./FlowmeterReferenceManager";
 
 type Period = "7d" | "30d" | "season";
 
@@ -22,6 +23,7 @@ export function FlowmeterDashboard({ farmId }: Props) {
   const [references, setReferences] = useState<FlowmeterReferenceOut[]>([]);
   const [flowRateAlerts, setFlowRateAlerts] = useState<FlowmeterFlowRateAlert[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(false);
+  const [showRefManager, setShowRefManager] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -88,6 +90,13 @@ export function FlowmeterDashboard({ farmId }: Props) {
     } catch (e) {
       console.error("Recompute failed", e);
     }
+  }
+
+  function handleReferenceUpdated(updated: FlowmeterReferenceOut) {
+    setReferences((prev) => {
+      const next = prev.filter((r) => r.sector_id !== updated.sector_id);
+      return [...next, updated].sort((a, b) => (a.sector_name ?? "").localeCompare(b.sector_name ?? ""));
+    });
   }
 
   return (
@@ -294,6 +303,48 @@ export function FlowmeterDashboard({ farmId }: Props) {
         }}>
           <FlowmeterFlowRateAlerts alerts={flowRateAlerts} loading={alertsLoading} />
         </div>
+      </div>
+
+      {/* Reference management panel */}
+      <div style={{ margin: "32px 44px 0" }}>
+        <button
+          onClick={() => setShowRefManager((v) => !v)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: "0 0 12px",
+          }}
+        >
+          <span style={{
+            fontFamily: "var(--font-fraunces)",
+            fontSize: 16,
+            fontWeight: 600,
+            color: "#2a2520",
+            letterSpacing: "-0.01em",
+          }}>Referências de Caudal</span>
+          <span style={{
+            fontFamily: "var(--font-jetbrains, ui-monospace)",
+            fontSize: 10,
+            color: "#8a7f74",
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+          }}>{showRefManager ? "▲ fechar" : "▼ ver tabela"}</span>
+        </button>
+
+        {showRefManager && references.length > 0 && (
+          <div style={{
+            border: "1px solid #dcd3c2",
+            borderRadius: 10,
+            overflow: "hidden",
+            background: "#fbf8f1",
+          }}>
+            <FlowmeterReferenceManager references={references} onUpdated={handleReferenceUpdated} />
+          </div>
+        )}
       </div>
     </div>
   );
