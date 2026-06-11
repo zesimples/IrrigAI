@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { FlowmeterSectorDashboard } from "@/types";
+import type { FlowmeterReferenceOut } from "@/types";
 import { FlowmeterSectorRow } from "./FlowmeterSectorRow";
 
 type SortKey = "name" | "last_irrigation" | "total" | "events";
@@ -15,11 +16,14 @@ interface Props {
   deviationMap: Record<string, number | null>;
   /** Per-crop interior event average (m³/ha). From the deviations endpoint. */
   cropAverages: Record<string, number>;
+  /** sector_id → FlowmeterReferenceOut (null = not yet computed) */
+  referenceMap?: Record<string, FlowmeterReferenceOut | null>;
+  onRecompute?: (sectorId: string) => void;
 }
 
 const ALARM_THRESHOLD = 5;
 
-export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviationMap, cropAverages }: Props) {
+export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviationMap, cropAverages, referenceMap, onRecompute }: Props) {
   const [cropFilter, setCropFilter] = useState<CropFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("name");
 
@@ -64,7 +68,7 @@ export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviati
 
   const noData = sectors.filter((s) => s.num_events === 0).length;
 
-  const GRID = "92px 92px 106px 122px 116px 62px 1fr 176px";
+  const GRID = "92px 92px 106px 122px 116px 62px 1fr 110px 176px";
 
   function GroupHeader({ name, list, crop }: { name: string; list: FlowmeterSectorDashboard[]; crop: string }) {
     const alarms = alarmCount(list);
@@ -218,6 +222,9 @@ export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviati
             <div>Total período</div>
             <div>N.º regas</div>
             <div>Gráfico 7d</div>
+            <div style={{ fontSize: 9.5, color: "#8a7f74", fontFamily: "var(--font-jetbrains, ui-monospace)", letterSpacing: "0.14em", textTransform: "uppercase" }}>
+              Caudal ref.
+            </div>
             {/* Deviation column header — alarm rail */}
             <div style={{
               display: 'flex',
@@ -263,6 +270,8 @@ export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviati
                   sector={s}
                   period={period}
                   deviation={deviationMap[s.sector_id] ?? null}
+                  reference={referenceMap?.[s.sector_id] ?? null}
+                  onRecompute={onRecompute}
                   odd={i % 2 === 1}
                 />
               ))}
@@ -279,6 +288,8 @@ export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviati
                   sector={s}
                   period={period}
                   deviation={deviationMap[s.sector_id] ?? null}
+                  reference={referenceMap?.[s.sector_id] ?? null}
+                  onRecompute={onRecompute}
                   odd={i % 2 === 1}
                 />
               ))}

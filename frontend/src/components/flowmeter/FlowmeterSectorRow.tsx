@@ -5,12 +5,16 @@ import type { FlowmeterSectorDashboard } from "@/types";
 import { FlowmeterSparkline } from "./FlowmeterSparkline";
 import { FlowmeterSectorDetail } from "./FlowmeterSectorDetail";
 import { DeviationCell } from "./DeviationCell";
+import { FlowmeterReferenceStatusDot } from "./FlowmeterReferenceStatusDot";
+import type { FlowmeterReferenceOut } from "@/types";
 
 interface Props {
   sector: FlowmeterSectorDashboard;
   period: "7d" | "30d" | "season";
   deviation: number | null;   // pre-computed % vs crop avg; null = no data
   odd?: boolean;
+  reference?: FlowmeterReferenceOut | null;
+  onRecompute?: (sectorId: string) => void;
 }
 
 function relativeDate(iso: string | null): string {
@@ -23,7 +27,7 @@ function relativeDate(iso: string | null): string {
 
 const ALARM_THRESHOLD = 5;
 
-export function FlowmeterSectorRow({ sector, period, deviation, odd }: Props) {
+export function FlowmeterSectorRow({ sector, period, deviation, reference, onRecompute, odd }: Props) {
   const [expanded, setExpanded] = useState(false);
   const hasData = sector.num_events > 0;
   const isAlarm = deviation != null && Math.abs(deviation) > ALARM_THRESHOLD;
@@ -34,7 +38,7 @@ export function FlowmeterSectorRow({ sector, period, deviation, odd }: Props) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '92px 92px 106px 122px 116px 62px 1fr 176px',
+          gridTemplateColumns: '92px 92px 106px 122px 116px 62px 1fr 110px 176px',
           padding: '12px 18px',
           gap: 8,
           alignItems: 'center',
@@ -129,6 +133,15 @@ export function FlowmeterSectorRow({ sector, period, deviation, odd }: Props) {
         {/* Gráfico 7d */}
         <div style={{ paddingRight: 24 }}>
           <FlowmeterSparkline data={sector.daily_breakdown.slice(-7)} />
+        </div>
+
+        {/* Caudal ref. */}
+        <div style={{ paddingLeft: 8 }}>
+          <FlowmeterReferenceStatusDot
+            reference={reference}
+            sectorId={sector.sector_id}
+            onRecompute={onRecompute}
+          />
         </div>
 
         {/* Desvio */}
