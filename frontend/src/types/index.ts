@@ -859,3 +859,42 @@ export interface GDDStatus {
   suggestion_pt: string | null;
   suggestion_en: string | null;
 }
+
+// ── Flowmeter flow rate reference ─────────────────────────────────────────────
+
+export interface FlowmeterReferenceOut {
+  id: string;
+  flowmeter_id: string;
+  reference_rate_m3_ha: number | null;
+  tolerance_pct: number;
+  upper_limit_m3_ha: number | null;
+  lower_limit_m3_ha: number | null;
+  num_events_analyzed: number;
+  std_dev: number;
+  status: "established" | "provisional" | "insufficient";
+  computed_at: string;
+  is_manual_override: boolean;
+  sector_id: string | null;
+  sector_name: string | null;
+  crop_type: string | null;
+}
+
+export interface FlowmeterFlowRateAlert {
+  id: string;
+  alert_type: "flowmeter_flow_rate_high" | "flowmeter_flow_rate_low" | "flowmeter_mid_event_zeros";
+  severity: "warning" | "info";
+  title_pt: string;
+  title_en: string;
+  description_pt: string;
+  description_en: string;
+  sector_id: string | null;
+  is_active: boolean;
+  created_at: string | null;
+  data: {
+    stable_rate_m3_ha?: number;
+    reference_rate_m3_ha?: number;
+    deviation_pct?: number;
+    event_start_time?: string;
+    zero_count?: number;
+  } | null;
+}

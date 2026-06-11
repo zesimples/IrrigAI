@@ -12,8 +12,10 @@ import type {
   FlowmeterDashboardResponse,
   FlowmeterDeviationsResponse,
   FlowmeterEventsResponse,
+  FlowmeterFlowRateAlert,
   FlowmeterOut,
   FlowmeterReadingsResponse,
+  FlowmeterReferenceOut,
   FlowmeterSectorAnalysisResponse,
   GDDStatus,
   IngestionRunOut,
@@ -425,6 +427,21 @@ export const flowmeterApi = {
 
   deviations: (farmId: string) =>
     get<FlowmeterDeviationsResponse>(`/farms/${farmId}/flowmeter-deviations`),
+
+  getReference: (sectorId: string) =>
+    get<FlowmeterReferenceOut>(`/sectors/${sectorId}/flowmeter-reference`),
+
+  recomputeReference: (sectorId: string) =>
+    post<FlowmeterReferenceOut>(`/sectors/${sectorId}/flowmeter-reference/recompute`, {}),
+
+  setManualReference: (sectorId: string, body: { reference_rate_m3_ha: number; tolerance_pct: number }) =>
+    put<FlowmeterReferenceOut>(`/sectors/${sectorId}/flowmeter-reference`, body),
+
+  getFarmReferences: (farmId: string) =>
+    get<FlowmeterReferenceOut[]>(`/farms/${farmId}/flowmeter-references`),
+
+  getFlowRateAlerts: (farmId: string) =>
+    get<FlowmeterFlowRateAlert[]>(`/farms/${farmId}/flowmeter-flow-rate-alerts`),
 };
 
 export { ApiError };
