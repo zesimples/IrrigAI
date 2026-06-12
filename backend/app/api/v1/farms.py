@@ -25,7 +25,9 @@ async def list_farms(
     db: AsyncSession = Depends(get_db),
 ):
     offset = (page - 1) * page_size
-    base = select(Farm).where(Farm.owner_id == current_user.id, Farm.is_archived == False)  # noqa: E712
+    base = select(Farm).where(Farm.is_archived == False)  # noqa: E712
+    if current_user.role != "admin":
+        base = base.where(Farm.owner_id == current_user.id)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     farms = (await db.execute(base.offset(offset).limit(page_size))).scalars().all()
     return PaginatedResponse(
@@ -39,7 +41,7 @@ async def list_farms(
 @router.get("/{farm_id}", response_model=FarmDetail)
 async def get_farm(farm_id: str, current_user: CurrentUser, db: AsyncSession = Depends(get_db)):
     farm = await db.get(Farm, farm_id)
-    if not farm or farm.owner_id != current_user.id:
+    if not farm or (farm.owner_id != current_user.id and current_user.role != "admin"):
         raise HTTPException(404, detail="Farm not found")
 
     plots = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalars().all()
@@ -74,7 +76,7 @@ async def create_farm(body: FarmCreate, current_user: CurrentUser, db: AsyncSess
 @router.put("/{farm_id}", response_model=FarmOut)
 async def update_farm(farm_id: str, body: FarmUpdate, current_user: CurrentUser, db: AsyncSession = Depends(get_db)):
     farm = await db.get(Farm, farm_id)
-    if not farm or farm.owner_id != current_user.id:
+    if not farm or (farm.owner_id != current_user.id and current_user.role != "admin"):
         raise HTTPException(404, detail="Farm not found")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(farm, k, v)
@@ -86,7 +88,7 @@ async def update_farm(farm_id: str, body: FarmUpdate, current_user: CurrentUser,
 @router.post("/{farm_id}/archive", response_model=FarmOut)
 async def archive_farm(farm_id: str, current_user: CurrentUser, db: AsyncSession = Depends(get_db)):
     farm = await db.get(Farm, farm_id)
-    if not farm or farm.owner_id != current_user.id:
+    if not farm or (farm.owner_id != current_user.id and current_user.role != "admin"):
         raise HTTPException(404, detail="Farm not found")
     farm.is_archived = True
     farm.archived_at = datetime.now(UTC)
@@ -98,7 +100,7 @@ async def archive_farm(farm_id: str, current_user: CurrentUser, db: AsyncSession
 @router.post("/{farm_id}/unarchive", response_model=FarmOut)
 async def unarchive_farm(farm_id: str, current_user: CurrentUser, db: AsyncSession = Depends(get_db)):
     farm = await db.get(Farm, farm_id)
-    if not farm or farm.owner_id != current_user.id:
+    if not farm or (farm.owner_id != current_user.id and current_user.role != "admin"):
         raise HTTPException(404, detail="Farm not found")
     farm.is_archived = False
     farm.archived_at = None
