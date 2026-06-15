@@ -186,8 +186,10 @@ jobs:
       LLM_PROVIDER: mock
       PROBE_PROVIDER: mock
       WEATHER_PROVIDER: mock
-      BACKEND_INTERNAL_URL: http://localhost:8000
-      NEXTAUTH_URL: http://localhost:3000
+      # 127.0.0.1 (not localhost) — uvicorn --host 0.0.0.0 binds IPv4 only, but
+      # localhost can resolve to IPv6 ::1 on the runner, so localhost:8000 fails.
+      BACKEND_INTERNAL_URL: http://127.0.0.1:8000
+      NEXTAUTH_URL: http://127.0.0.1:3000
       NEXTAUTH_SECRET: ci-build-secret
       CI: "true"
     steps:
@@ -233,12 +235,12 @@ jobs:
       # processes survive (GitHub reaps step-spawned processes between steps).
       - name: Run E2E tests
         env:
-          PLAYWRIGHT_BASE_URL: http://localhost:3000
-          BACKEND_URL: http://localhost:8000
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+          BACKEND_URL: http://127.0.0.1:8000
         run: |
           nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend > /tmp/backend.log 2>&1 &
           nohup npm --prefix frontend start -- -p 3000 > /tmp/frontend.log 2>&1 &
-          npx wait-on http://localhost:8000/health http://localhost:3000 --timeout 90000 \
+          npx wait-on http://127.0.0.1:8000/health http://127.0.0.1:3000 --timeout 90000 \
             || { echo "=== backend.log ==="; cat /tmp/backend.log; echo "=== frontend.log ==="; cat /tmp/frontend.log; exit 1; }
           cd frontend && npm run e2e
 
