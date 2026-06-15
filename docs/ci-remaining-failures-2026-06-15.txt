@@ -1,0 +1,99 @@
+FAILED tests/test_ai/test_context_builder.py::test_sector_context_is_json_serialisable
+FAILED tests/test_ai/test_context_builder.py::test_sector_context_includes_config_status
+FAILED tests/test_ai/test_context_builder.py::test_sector_context_includes_defaults_used
+FAILED tests/test_ai/test_context_builder.py::test_sector_context_includes_missing_config
+FAILED tests/test_ai/test_context_builder.py::test_farm_context_is_json_serialisable
+FAILED tests/test_ai/test_context_builder.py::test_farm_context_setup_completion_pct_type
+FAILED tests/test_ai/test_context_builder.py::test_to_json_handles_none_values
+FAILED tests/test_e2e/test_onboarding.py::test_minimal_config_still_works - a...
+FAILED tests/test_e2e/test_onboarding.py::test_farm_list_returns_created_farms
+FAILED tests/test_e2e/test_scenarios.py::test_scenario_g_custom_soil_parameters
+FAILED tests/test_engine/test_dosage.py::TestBasicDosage::test_gross_is_net_over_efficiency
+FAILED tests/test_engine/test_dosage.py::TestBasicDosage::test_runtime_computed_from_app_rate
+FAILED tests/test_engine/test_dosage.py::TestBasicDosage::test_runtime_none_when_no_system
+FAILED tests/test_engine/test_dosage.py::TestEmitterFallback::test_computes_rate_from_emitter_config
+FAILED tests/test_engine/test_dosage.py::TestCapping::test_min_irrigation_cap
+FAILED tests/test_engine/test_dosage.py::TestCapping::test_max_irrigation_cap
+FAILED tests/test_engine/test_dosage.py::TestCapping::test_max_runtime_cap - ...
+FAILED tests/test_engine/test_dosage.py::TestCapping::test_no_cap_within_range
+FAILED tests/test_engine/test_minimal_config.py::TestMinimalConfigConfidence::test_minimal_config_gives_low_confidence
+FAILED tests/test_engine/test_minimal_config.py::TestMinimalConfigConfidence::test_minimal_config_has_multiple_penalties
+FAILED tests/test_engine/test_minimal_config.py::TestMinimalConfigConfidence::test_score_never_below_floor
+FAILED tests/test_engine/test_minimal_config.py::TestMinimalConfigWaterBalance::test_fallback_swc_used_when_no_probe
+FAILED tests/test_engine/test_minimal_config.py::TestMinimalConfigRuntime::test_runtime_none_when_no_system
+FAILED tests/test_engine/test_minimal_config.py::TestMinimalConfigRuntime::test_dosage_still_has_net_and_gross
+FAILED tests/test_engine/test_trigger.py::TestRainSkip::test_skips_when_rain_exceeds_15mm
+FAILED tests/test_engine/test_trigger.py::TestRainSkip::test_does_not_skip_below_threshold
+FAILED tests/test_engine/test_trigger.py::TestRainSkip::test_exactly_15mm_triggers_skip
+FAILED tests/test_engine/test_trigger.py::TestStandardTrigger::test_irrigates_when_dr_gte_raw
+FAILED tests/test_engine/test_trigger.py::TestStandardTrigger::test_skips_when_dr_lt_raw
+FAILED tests/test_flowmeter/test_analytics.py::TestSectorAnalyticsFromEvents::test_consistency_score_high_for_uniform
+ERROR tests/test_agronomic_context.py::test_structured_context_returns_required_keys
+ERROR tests/test_agronomic_context.py::test_probe_diagnostics_shape - sqlalch...
+ERROR tests/test_agronomic_context.py::test_water_events_returns_list - sqlal...
+ERROR tests/test_anomaly/test_detector.py::test_clean_seed_data_has_no_critical_anomalies
+ERROR tests/test_anomaly/test_detector.py::test_detector_returns_list - sqlal...
+ERROR tests/test_anomaly/test_detector.py::test_detector_sorted_by_severity
+ERROR tests/test_api/test_dashboard.py::TestDashboard::test_dashboard_returns_200
+ERROR tests/test_api/test_dashboard.py::TestDashboard::test_dashboard_structure
+ERROR tests/test_api/test_dashboard.py::TestDashboard::test_dashboard_has_all_sectors
+ERROR tests/test_api/test_dashboard.py::TestDashboard::test_sector_summaries_have_required_fields
+ERROR tests/test_api/test_dashboard.py::TestDashboard::test_alert_counts_structure
+ERROR tests/test_api/test_dashboard.py::TestDashboard::test_weather_today_structure
+ERROR tests/test_api/test_dashboard.py::TestDashboardWithRecommendations::test_generate_then_dashboard_shows_actions
+ERROR tests/test_api/test_dashboard.py::TestDashboardWithRecommendations::test_sector_summaries_have_confidence_after_generation
+ERROR tests/test_api/test_probes.py::TestProbeList::test_list_probes_returns_200
+ERROR tests/test_api/test_probes.py::TestProbeList::test_list_probes_has_items
+ERROR tests/test_api/test_probes.py::TestProbeDetail::test_get_probe_returns_200
+ERROR tests/test_api/test_probes.py::TestProbeDetail::test_probe_detail_has_depths
+ERROR tests/test_api/test_probes.py::TestProbeReadings::test_readings_grouped_by_depth
+ERROR tests/test_api/test_probes.py::TestProbeReadings::test_readings_depth_filter
+ERROR tests/test_api/test_probes.py::TestProbeReadings::test_readings_time_range_filter
+ERROR tests/test_api/test_probes.py::TestProbeReadings::test_readings_downsampling_reduces_points
+ERROR tests/test_api/test_probes.py::TestProbeReadings::test_readings_reference_lines
+ERROR tests/test_api/test_probes.py::TestProbeReadings::test_invalid_interval_returns_400
+ERROR tests/test_api/test_probes.py::TestProbeReadings::test_readings_points_have_quality_flag
+ERROR tests/test_api/test_recommendations.py::TestGenerateRecommendation::test_generate_sector_returns_201
+ERROR tests/test_api/test_recommendations.py::TestGenerateRecommendation::test_generate_sector_returns_valid_rec
+ERROR tests/test_api/test_recommendations.py::TestGenerateRecommendation::test_generate_farm_returns_all_sectors
+ERROR tests/test_api/test_recommendations.py::TestGetRecommendation::test_get_detail_has_reasons
+ERROR tests/test_api/test_recommendations.py::TestGetRecommendation::test_get_detail_has_computation_log
+ERROR tests/test_api/test_recommendations.py::TestGetRecommendation::test_get_detail_has_inputs_snapshot
+ERROR tests/test_api/test_recommendations.py::TestGetRecommendation::test_list_sector_recommendations
+ERROR tests/test_api/test_recommendations.py::TestAcceptRejectOverride::test_accept_recommendation
+ERROR tests/test_api/test_recommendations.py::TestAcceptRejectOverride::test_reject_recommendation
+ERROR tests/test_api/test_recommendations.py::TestAcceptRejectOverride::test_override_recommendation
+ERROR tests/test_e2e/test_crop_profiles.py::test_crop_profile_template_to_sector
+ERROR tests/test_e2e/test_crop_profiles.py::test_crop_profile_reset - sqlalch...
+ERROR tests/test_e2e/test_crop_profiles.py::test_engine_reads_customized_profile
+ERROR tests/test_e2e/test_full_pipeline.py::test_full_day_pipeline - sqlalche...
+ERROR tests/test_e2e/test_full_pipeline.py::test_dashboard_returns_sector_summaries
+ERROR tests/test_e2e/test_full_pipeline.py::test_recommendation_confidence_and_reasons_present
+ERROR tests/test_e2e/test_onboarding.py::test_onboarding_creates_working_farm
+ERROR tests/test_e2e/test_scenarios.py::test_scenario_a_olive_needs_irrigation
+ERROR tests/test_e2e/test_scenarios.py::test_scenario_b_rain_skip - sqlalchem...
+ERROR tests/test_e2e/test_scenarios.py::test_scenario_c_rdi_window - sqlalche...
+ERROR tests/test_e2e/test_scenarios.py::test_scenario_d_probe_flatline_anomaly
+ERROR tests/test_e2e/test_scenarios.py::test_scenario_e_missing_irrigation_system
+ERROR tests/test_e2e/test_scenarios.py::test_scenario_f_maize_tasseling - sql...
+ERROR tests/test_engine/test_context_loading.py::TestFullyConfiguredSector::test_ctx_has_positive_kc
+ERROR tests/test_engine/test_context_loading.py::TestFullyConfiguredSector::test_ctx_crop_type_matches_sector
+ERROR tests/test_engine/test_context_loading.py::TestFullyConfiguredSector::test_ctx_mad_in_range
+ERROR tests/test_engine/test_context_loading.py::TestFullyConfiguredSector::test_ctx_root_depth_positive
+ERROR tests/test_engine/test_context_loading.py::TestFullyConfiguredSector::test_ctx_field_capacity_reasonable
+ERROR tests/test_engine/test_context_loading.py::TestMissingStageSector::test_kc_source_indicates_fallback
+ERROR tests/test_engine/test_context_loading.py::TestMissingStageSector::test_kc_default_in_defaults_used
+ERROR tests/test_engine/test_context_loading.py::TestNoIrrigationSystemSector::test_missing_config_contains_irrigation_system
+ERROR tests/test_engine/test_context_loading.py::TestNoIrrigationSystemSector::test_efficiency_falls_back_to_default
+ERROR tests/test_engine/test_context_loading.py::TestKcLookup::test_kc_from_stage_matches_profile
+ERROR tests/test_engine/test_pipeline.py::test_pipeline_runs_for_all_seed_sectors
+ERROR tests/test_engine/test_pipeline.py::test_run_all_sectors_returns_all - ...
+ERROR tests/test_engine/test_pipeline.py::test_recommendation_has_water_balance_fields
+ERROR tests/test_engine/test_pipeline.py::test_sector_without_stage_uses_kc_fallback
+ERROR tests/test_engine/test_pipeline.py::test_sector_without_stage_has_penalised_confidence
+ERROR tests/test_engine/test_pipeline.py::test_sector_without_irrigation_system_has_no_runtime
+ERROR tests/test_engine/test_pipeline.py::test_build_sector_context_loads_kc_from_profile
+ERROR tests/test_engine/test_pipeline.py::test_build_sector_context_missing_config_without_irrig_system
+ERROR tests/test_water_event_persistence.py::test_detect_and_persist_is_idempotent
+ERROR tests/test_water_event_persistence.py::test_confirm_and_reject_endpoints
+ERROR tests/test_water_event_persistence.py::test_list_water_events_endpoint
