@@ -29,9 +29,10 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
-    op.create_index('ix_sector_override_sector_id', 'sector_override', ['sector_id'])
+    # The sector_id index is created automatically by index=True on the column
+    # above; an explicit create_index here duplicates it and fails with
+    # DuplicateTable when migrations run against a fresh DB.
 
 
 def downgrade() -> None:
-    op.drop_index('ix_sector_override_sector_id', table_name='sector_override')
     op.drop_table('sector_override')
