@@ -217,12 +217,6 @@ jobs:
         working-directory: backend
         run: python -m app.seed
 
-      - name: Start backend
-        working-directory: backend
-        run: |
-          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &
-          echo "backend pid $!"
-
       - name: Install frontend
         working-directory: frontend
         run: npm ci
@@ -231,27 +225,22 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Start frontend
-        working-directory: frontend
-        run: |
-          nohup npm start -- -p 3000 > /tmp/frontend.log 2>&1 &
-          echo "frontend pid $!"
-
-      - name: Wait for services
-        run: |
-          npx wait-on http://localhost:8000/health http://localhost:3000 --timeout 90000 \
-            || { echo "=== backend.log ==="; cat /tmp/backend.log; echo "=== frontend.log ==="; cat /tmp/frontend.log; exit 1; }
-
       - name: Install Playwright browsers
         working-directory: frontend
         run: npx playwright install chromium --with-deps
 
+      # Boot both servers and run Playwright in a single step so the background
+      # processes survive (GitHub reaps step-spawned processes between steps).
       - name: Run E2E tests
-        working-directory: frontend
-        run: npm run e2e
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:3000
           BACKEND_URL: http://localhost:8000
+        run: |
+          (cd backend && nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &)
+          (cd frontend && nohup npm start -- -p 3000 > /tmp/frontend.log 2>&1 &)
+          npx wait-on http://localhost:8000/health http://localhost:3000 --timeout 90000 \
+            || { echo "=== backend.log ==="; cat /tmp/backend.log; echo "=== frontend.log ==="; cat /tmp/frontend.log; exit 1; }
+          cd frontend && npm run e2e
 
       - uses: actions/upload-artifact@v4
         if: failure()
