@@ -700,7 +700,7 @@ def test_parse_device_readings_ignores_battery():
 
 
 def test_parse_device_readings_negative_values_included():
-    """Negative values are included (quality flagging happens in ingestion service)."""
+    """Ordinary negative values are included; ingestion applies quality flags."""
     response = {
         "success": True,
         "data": {
@@ -708,12 +708,28 @@ def test_parse_device_readings_negative_values_included():
                 {"id": "17_0_0", "sensor_type": "Suction", "name": "WM 40cm", "units": "cBar"},
             ],
             "datetimes": [1717243200000],
-            "values": {"17_0_0": {"1717243200000": -252}},
+            "values": {"17_0_0": {"1717243200000": -5}},
         }
     }
     result = _parse_device_readings(response, "1044/4664")
     assert len(result) == 1
-    assert result[0].raw_value == -252.0
+    assert result[0].raw_value == -5.0
+
+
+def test_parse_device_readings_skips_watermark_sentinels():
+    """MyIrrigation Watermark no-data sentinels are not persisted as readings."""
+    response = {
+        "success": True,
+        "data": {
+            "sensors": [
+                {"id": "17_0_0", "sensor_type": "Suction", "name": "WM 40cm", "units": "cBar"},
+            ],
+            "datetimes": [1717243200000, 1717246800000],
+            "values": {"17_0_0": {"1717243200000": -252, "1717246800000": 253}},
+        },
+    }
+    result = _parse_device_readings(response, "1044/4664")
+    assert result == []
 
 
 def test_get_float_first_matching_key():

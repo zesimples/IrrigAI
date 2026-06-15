@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -11,6 +11,9 @@ from app.models.base import TimestampMixin, new_uuid
 
 class Recommendation(Base, TimestampMixin):
     __tablename__ = "recommendation"
+    __table_args__ = (
+        Index("ix_recommendation_generated_at", "generated_at"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
     sector_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("sector.id"), nullable=False, index=True)
@@ -20,7 +23,7 @@ class Recommendation(Base, TimestampMixin):
     action: Mapped[RecommendationAction] = mapped_column(String(50), nullable=False)
     irrigation_depth_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     irrigation_runtime_min: Mapped[float | None] = mapped_column(Float, nullable=True)
-    suggested_start_time: Mapped[str | None] = mapped_column(String(10), nullable=True, comment="HH:MM")
+    suggested_start_time: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
     confidence_level: Mapped[ConfidenceLevel] = mapped_column(String(20), nullable=False)

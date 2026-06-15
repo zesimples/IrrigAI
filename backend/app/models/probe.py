@@ -14,7 +14,7 @@ class Probe(Base, TimestampMixin):
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
     sector_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("sector.id"), nullable=False, index=True)
-    external_id: Mapped[str] = mapped_column(String(255), nullable=False, comment="Provider's probe identifier")
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
     serial_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
     manufacturer: Mapped[str | None] = mapped_column(String(255), nullable=True)
     model: Mapped[str | None] = mapped_column(String(255), nullable=True)

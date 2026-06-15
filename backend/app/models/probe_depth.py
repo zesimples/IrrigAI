@@ -15,7 +15,7 @@ class ProbeDepth(Base, TimestampMixin):
     probe_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("probe.id"), nullable=False, index=True)
     depth_cm: Mapped[int] = mapped_column(Integer, nullable=False)
     sensor_type: Mapped[str] = mapped_column(
-        String(50), nullable=False, comment="'moisture', 'temperature', 'ec'"
+        String(50), nullable=False
     )
     calibration_offset: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     calibration_factor: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
@@ -30,7 +30,6 @@ class ProbeDepth(Base, TimestampMixin):
     last_gap_detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     data_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="unknown", server_default="unknown",
-        comment="'ok' | 'partial' | 'stale' | 'no_data' | 'unknown'",
     )
 
     # Relationships

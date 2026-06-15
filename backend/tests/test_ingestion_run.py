@@ -16,7 +16,7 @@ from app.config import get_settings
 from app.models import Probe, ProviderIngestionRun
 from app.services.ingestion import ingest_probe_readings
 
-NOW = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+NOW = datetime(2099, 1, 1, 12, tzinfo=UTC)
 
 
 @pytest.fixture

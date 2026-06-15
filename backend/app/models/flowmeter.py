@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,6 +10,9 @@ from app.models.base import TimestampMixin, new_uuid
 
 class Flowmeter(Base, TimestampMixin):
     __tablename__ = "flowmeter"
+    __table_args__ = (
+        Index("ix_flowmeter_external_device_id", "external_device_id"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
     sector_id: Mapped[str] = mapped_column(

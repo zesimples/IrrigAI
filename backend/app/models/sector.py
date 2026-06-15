@@ -29,15 +29,13 @@ class Sector(Base, TimestampMixin):
 
     # Auto-calibration state
     auto_calibration_dismissed_until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
-        comment="If set, auto-calibration suggestions are suppressed until this datetime"
+        DateTime(timezone=True), nullable=True
     )
 
     # Agronomic management
     current_phenological_stage: Mapped[str | None] = mapped_column(
         String(50),
         nullable=True,
-        comment="References a stage key from the sector's SectorCropProfile.stages",
     )
     irrigation_strategy: Mapped[str] = mapped_column(String(50), nullable=False, default="full_etc")
     deficit_factor: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)

@@ -19,6 +19,18 @@ target_metadata = Base.metadata
 settings = get_settings()
 
 
+def include_object(object_, name, type_, reflected, compare_to):
+    if (
+        type_ == "index"
+        and reflected
+        and name == "probe_reading_timestamp_idx"
+        and getattr(object_, "table", None) is not None
+        and object_.table.name == "probe_reading"
+    ):
+        return False
+    return True
+
+
 def get_url() -> str:
     return settings.DATABASE_URL_SYNC
 
@@ -52,6 +64,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

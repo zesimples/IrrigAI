@@ -26,7 +26,7 @@ class ProbeReading(Base):
     raw_value: Mapped[float] = mapped_column(Float, nullable=False)
     calibrated_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     unit: Mapped[str] = mapped_column(
-        String(20), nullable=False, comment="'vwc_m3m3', 'raw_counts', 'celsius', 'dS_m'"
+        String(20), nullable=False
     )
     quality_flag: Mapped[str] = mapped_column(String(20), nullable=False, default="ok")
 

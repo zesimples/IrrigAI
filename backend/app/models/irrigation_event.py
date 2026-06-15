@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,6 +10,9 @@ from app.models.base import TimestampMixin, new_uuid
 
 class IrrigationEvent(Base, TimestampMixin):
     __tablename__ = "irrigation_event"
+    __table_args__ = (
+        Index("ix_irrigation_event_sector_start", "sector_id", "start_time"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
     sector_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("sector.id"), nullable=False, index=True)
@@ -18,7 +21,7 @@ class IrrigationEvent(Base, TimestampMixin):
     duration_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
     applied_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(
-        String(50), nullable=False, comment="'manual_log', 'controller', 'recommendation_accepted'"
+        String(50), nullable=False
     )
     recommendation_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("recommendation.id"), nullable=True

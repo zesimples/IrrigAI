@@ -8,7 +8,7 @@ which rows were skipped and why.
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,9 @@ class ProviderIngestionRun(Base):
     """
 
     __tablename__ = "provider_ingestion_run"
+    __table_args__ = (
+        Index("ix_provider_ingestion_run_started_at", "started_at"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
     farm_id: Mapped[str] = mapped_column(

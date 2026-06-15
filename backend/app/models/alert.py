@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -11,6 +11,9 @@ from app.models.base import TimestampMixin, new_uuid
 
 class Alert(Base, TimestampMixin):
     __tablename__ = "alert"
+    __table_args__ = (
+        Index("ix_alert_is_active", "is_active"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
     sector_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("sector.id"), nullable=True, index=True)

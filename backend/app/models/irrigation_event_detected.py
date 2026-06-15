@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Index, Integer, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,14 +14,16 @@ class IrrigationEventDetected(Base, TimestampMixin):
         UniqueConstraint(
             "flowmeter_id", "start_time", name="uq_irrigation_event_detected_device_start"
         ),
+        Index("ix_irrigation_event_detected_fm_start", "flowmeter_id", "start_time"),
+        Index("ix_irrigation_event_detected_sector_start", "sector_id", "start_time"),
     )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
     flowmeter_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), ForeignKey("flowmeter.id"), nullable=False, index=True
+        UUID(as_uuid=False), ForeignKey("flowmeter.id"), nullable=False
     )
     sector_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), ForeignKey("sector.id"), nullable=False, index=True
+        UUID(as_uuid=False), ForeignKey("sector.id"), nullable=False
     )
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

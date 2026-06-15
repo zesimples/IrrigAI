@@ -849,27 +849,34 @@ def _parse_forecast_response(raw: list | dict, days: int) -> list[WeatherForecas
         }
     """
     issued_at = datetime.now(UTC)
-    today = datetime.now(UTC).date()
 
-    if not isinstance(raw, dict):
-        return []
-
-    values = raw.get("values", {})
-    if not isinstance(values, dict):
+    if isinstance(raw, dict):
+        raw_values = raw.get("values", {})
+        if not isinstance(raw_values, dict):
+            return []
+        entries = [
+            (date_str, entry)
+            for date_str, entry in sorted(raw_values.items())
+        ]
+    elif isinstance(raw, list):
+        entries = [(None, entry) for entry in raw]
+    else:
         return []
 
     forecasts: list[WeatherForecastDTO] = []
-    for date_str in sorted(values.keys()):
+    for date_str, entry in entries:
         if len(forecasts) >= days:
             break
-        entry = values[date_str]
         if not isinstance(entry, dict):
             continue
-        try:
-            fc_date = date.fromisoformat(date_str)
-        except ValueError:
-            continue
-        if fc_date < today:
+        if date_str is not None:
+            try:
+                fc_date = date.fromisoformat(date_str)
+            except ValueError:
+                continue
+        else:
+            fc_date = _date_from_entry(entry)
+        if fc_date is None:
             continue
 
         rh_max = _get_float(entry, "relativehumidity_max")
@@ -877,7 +884,7 @@ def _parse_forecast_response(raw: list | dict, days: int) -> list[WeatherForecas
         rh_mean = (
             (rh_max + rh_min) / 2
             if rh_max is not None and rh_min is not None
-            else (rh_max or rh_min)
+            else (rh_max or rh_min or _get_float(entry, "humidity", "humidity_pct"))
         )
 
         forecasts.append(WeatherForecastDTO(
@@ -886,10 +893,12 @@ def _parse_forecast_response(raw: list | dict, days: int) -> list[WeatherForecas
             temperature_max_c=_get_float(entry, "temperature_max"),
             temperature_min_c=_get_float(entry, "temperature_min"),
             humidity_pct=rh_mean,
-            wind_speed_ms=_get_float(entry, "windspeed_mean"),
-            rainfall_mm=_get_float(entry, "precipitation"),
-            rainfall_probability_pct=_get_float(entry, "precipitation_probability"),
-            et0_mm=_get_float(entry, "referenceevapotranspiration_fao"),
+            wind_speed_ms=_get_float(entry, "windspeed_mean", "wind_speed_ms"),
+            rainfall_mm=_get_float(entry, "precipitation", "rainfall"),
+            rainfall_probability_pct=_get_float(
+                entry, "precipitation_probability", "rainfall_probability_pct"
+            ),
+            et0_mm=_get_float(entry, "referenceevapotranspiration_fao", "et0"),
         ))
 
     return forecasts

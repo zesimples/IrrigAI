@@ -18,13 +18,13 @@ class SectorOverride(Base, TimestampMixin):
         UUID(as_uuid=False), ForeignKey("sector.id"), nullable=False, index=True
     )
     override_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    value: Mapped[float | None] = mapped_column(Float, nullable=True, comment="e.g. forced depth mm")
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     created_by_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("user.id"), nullable=True
     )
     valid_until: Mapped[date | None] = mapped_column(
-        Date, nullable=True, comment="None = until manually removed"
+        Date, nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     override_strategy: Mapped[str] = mapped_column(

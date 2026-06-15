@@ -19,7 +19,7 @@ from app.models import Probe, ProbeDepth, ProbeReading
 # Helpers
 # ---------------------------------------------------------------------------
 
-NOW = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+NOW = datetime(2099, 1, 1, 12, tzinfo=UTC)
 SINCE = NOW - timedelta(days=7)
 UNTIL = NOW
 

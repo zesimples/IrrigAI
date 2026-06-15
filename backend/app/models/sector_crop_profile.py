@@ -26,7 +26,6 @@ class SectorCropProfile(Base, TimestampMixin):
         UUID(as_uuid=False),
         ForeignKey("crop_profile_template.id"),
         nullable=True,
-        comment="Tracks origin template for reference; null if manually created",
     )
 
     # Agronomic parameters — fully editable

@@ -16,7 +16,7 @@ from app.config import get_settings
 from app.models import Plot, Probe, ProbeDepth, Sector
 from app.services.ingestion import _derive_data_status, ingest_probe_readings
 
-NOW = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+NOW = datetime(2099, 1, 1, 12, tzinfo=UTC)
 
 
 @pytest.fixture

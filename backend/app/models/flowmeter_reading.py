@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,11 +12,12 @@ class FlowmeterReading(Base):
     __tablename__ = "flowmeter_reading"
     __table_args__ = (
         UniqueConstraint("flowmeter_id", "timestamp", name="uq_flowmeter_reading_device_ts"),
+        Index("ix_flowmeter_reading_fm_ts", "flowmeter_id", "timestamp"),
     )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
     flowmeter_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), ForeignKey("flowmeter.id"), nullable=False, index=True
+        UUID(as_uuid=False), ForeignKey("flowmeter.id"), nullable=False
     )
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     value_m3_ha: Mapped[float] = mapped_column(Float, nullable=False)
