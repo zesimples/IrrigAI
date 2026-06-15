@@ -78,6 +78,10 @@ _DEFAULT_TOKEN_TTL_SECONDS = 86400  # 24 h
 # Date format for POST form fields
 _DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
+# HTTP timeout (seconds). MyIrrigation's device-data endpoint can be slow for
+# wide windows / during load, so allow generous time before giving up.
+_HTTP_TIMEOUT = 60.0
+
 # Retry policy for transient HTTP / network errors
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 1.0  # seconds; doubles each attempt
@@ -172,7 +176,7 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
         if self._is_token_valid():
             return
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             resp = await client.post(
                 f"{self._base_url}/login",
                 data={
@@ -226,7 +230,7 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
         await self.authenticate()
 
         async def _do():
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
                 resp = await client.get(
                     f"{self._base_url}{path}",
                     params=params,
@@ -257,7 +261,7 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
         await self.authenticate()
 
         async def _do():
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
                 resp = await client.post(
                     f"{self._base_url}{path}",
                     data=form_data,
