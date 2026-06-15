@@ -213,9 +213,15 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
 
+      - name: Seed data
+        working-directory: backend
+        run: python -m app.seed
+
       - name: Start backend
         working-directory: backend
-        run: uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+        run: |
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &
+          echo "backend pid $!"
 
       - name: Install frontend
         working-directory: frontend
@@ -227,11 +233,14 @@ jobs:
 
       - name: Start frontend
         working-directory: frontend
-        run: npm start -- -p 3000 &
+        run: |
+          nohup npm start -- -p 3000 > /tmp/frontend.log 2>&1 &
+          echo "frontend pid $!"
 
       - name: Wait for services
         run: |
-          npx wait-on http://localhost:8000/health http://localhost:3000 --timeout 60000
+          npx wait-on http://localhost:8000/health http://localhost:3000 --timeout 90000 \
+            || { echo "=== backend.log ==="; cat /tmp/backend.log; echo "=== frontend.log ==="; cat /tmp/frontend.log; exit 1; }
 
       - name: Install Playwright browsers
         working-directory: frontend
