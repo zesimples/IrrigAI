@@ -24,6 +24,7 @@ from app.adapters.myirrigation import (
     _parse_device_readings,
     _parse_external_id,
     _unix_ms_to_datetime,
+    _with_backoff,
 )
 
 # ---------------------------------------------------------------------------
@@ -258,6 +259,28 @@ async def test_get_json_retries_on_401():
     mock_client.post.assert_called_once()
     # GET was called twice (first → 401, second → 200)
     assert mock_client.get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_with_backoff_retries_provider_406():
+    """MyIrrigation can return transient 406 during valid device-data bursts."""
+    request = httpx.Request("POST", "http://test")
+    calls = 0
+
+    async def flaky_call():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            response = httpx.Response(406, request=request)
+            raise httpx.HTTPStatusError("not acceptable", request=request, response=response)
+        return {"ok": True}
+
+    with patch("asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
+        result = await _with_backoff(flaky_call, "POST /data/devices")
+
+    assert result == {"ok": True}
+    assert calls == 2
+    sleep_mock.assert_awaited_once()
 
 
 @pytest.mark.asyncio

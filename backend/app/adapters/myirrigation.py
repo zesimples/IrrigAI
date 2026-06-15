@@ -50,6 +50,7 @@ import asyncio
 import logging
 import random
 import re
+import unicodedata
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
@@ -80,7 +81,9 @@ _DATE_FMT = "%Y-%m-%d %H:%M:%S"
 # Retry policy for transient HTTP / network errors
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 1.0  # seconds; doubles each attempt
-_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+# MyIrrigation occasionally returns 406 for otherwise valid device-data POSTs
+# during ingestion bursts; retry it like their transient 5xx/429 responses.
+_RETRY_STATUSES = frozenset({406, 429, 500, 502, 503, 504})
 
 
 async def _with_backoff(coro_factory, label: str):
@@ -572,10 +575,49 @@ def _parse_device_readings_with_stats(
     return sorted(readings, key=lambda r: (r.depth_cm, r.timestamp)), stats
 
 
+_FLOWMETER_SENSOR_TERMS = (
+    "water meter",
+    "watermeter",
+    "flow meter",
+    "flowmeter",
+    "caudalimetro",
+    "contador de agua",
+    "contador agua",
+    "hidrometro",
+    "aplicacao de rega",
+)
+
+
+def _normalise_metadata_text(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    return "".join(ch for ch in text if not unicodedata.combining(ch)).lower().strip()
+
+
+def _is_flowmeter_unit(units: object) -> bool:
+    unit = _normalise_metadata_text(units)
+    compact = re.sub(r"[\s._-]+", "", unit).replace("³", "3")
+    return compact in {"m3/ha", "m3ha1", "m3ha", "m3/hectare", "m3porha"}
+
+
+def _flowmeter_sensor_score(sensor: dict) -> int:
+    sensor_type = _normalise_metadata_text(sensor.get("sensor_type"))
+    name = _normalise_metadata_text(sensor.get("name"))
+    metadata = f"{sensor_type} {name}"
+
+    score = 0
+    if any(term in metadata for term in _FLOWMETER_SENSOR_TERMS):
+        score += 2
+    if _is_flowmeter_unit(sensor.get("units")):
+        score += 1
+    return score
+
+
 def parse_flowmeter_data(raw: dict | None, device_id: int) -> list[tuple[datetime, float]]:
     """Extract (timestamp, value_m3_ha) pairs from a MyIrrigation device data response.
 
-    Looks for sensor_type == "Water Meter". Returns [] on any parse error.
+    Looks for a flowmeter-like sensor. MyIrrigation has historically returned
+    sensor_type == "Water Meter", but some farms/devices expose the same stream
+    with localized names or only m3/ha units. Returns [] on any parse error.
     Uses the same columnar format as probe readings.
     """
     if not isinstance(raw, dict):
@@ -591,15 +633,23 @@ def parse_flowmeter_data(raw: dict | None, device_id: int) -> list[tuple[datetim
     sensors: list[dict] = data.get("sensors") or []
     values_map: dict[str, dict] = data.get("values") or {}
 
+    candidates = sorted(
+        (s for s in sensors if isinstance(s, dict) and _flowmeter_sensor_score(s) > 0),
+        key=_flowmeter_sensor_score,
+        reverse=True,
+    )
     water_meter = next(
-        (s for s in sensors if s.get("sensor_type", "").lower() == "water meter"),
-        None,
+        (
+            s for s in candidates
+            if isinstance(values_map.get(str(s.get("id", ""))), dict)
+        ),
+        candidates[0] if candidates else None,
     )
     if water_meter is None:
-        logger.debug("MyIrrigation device %s: no Water Meter sensor in response", device_id)
+        logger.debug("MyIrrigation device %s: no flowmeter sensor in response", device_id)
         return []
 
-    sensor_id = water_meter.get("id", "")
+    sensor_id = str(water_meter.get("id", ""))
     sensor_values = values_map.get(sensor_id)
     if not isinstance(sensor_values, dict):
         return []

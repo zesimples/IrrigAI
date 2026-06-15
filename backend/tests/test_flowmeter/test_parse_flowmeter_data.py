@@ -67,6 +67,78 @@ def test_parse_skips_null_values():
     assert result[0][1] == 1.5
 
 
+def test_parse_accepts_flowmeter_unit_when_sensor_type_changes():
+    raw = {
+        "data": {
+            "sensors": [
+                {
+                    "id": "0_0_0",
+                    "sensor_type": "Irrigation",
+                    "name": "Aplicação de Rega",
+                    "units": "m³/ha",
+                }
+            ],
+            "values": {"0_0_0": {"1778804100000": 2.4}},
+        }
+    }
+
+    result = parse_flowmeter_data(raw, device_id=6980)
+
+    assert len(result) == 1
+    assert result[0][1] == 2.4
+
+
+def test_parse_accepts_localized_flowmeter_name():
+    raw = {
+        "data": {
+            "sensors": [
+                {
+                    "id": "0_0_0",
+                    "sensor_type": "Sensor",
+                    "name": "Caudalímetro S01",
+                    "units": "m3/ha",
+                }
+            ],
+            "values": {"0_0_0": {"1778804100000": 3.1}},
+        }
+    }
+
+    result = parse_flowmeter_data(raw, device_id=6980)
+
+    assert len(result) == 1
+    assert result[0][1] == 3.1
+
+
+def test_parse_prefers_flowmeter_sensor_over_other_meters():
+    raw = {
+        "data": {
+            "sensors": [
+                {
+                    "id": "1_0_0",
+                    "sensor_type": "Water Meter",
+                    "name": "Volume raw",
+                    "units": "L",
+                },
+                {
+                    "id": "0_0_0",
+                    "sensor_type": "Irrigation",
+                    "name": "Aplicação de Rega",
+                    "units": "m3/ha",
+                },
+            ],
+            "values": {
+                "1_0_0": {"1778804100000": 999},
+                "0_0_0": {"1778804100000": 1.7},
+            },
+        }
+    }
+
+    result = parse_flowmeter_data(raw, device_id=6980)
+
+    assert len(result) == 1
+    assert result[0][1] == 1.7
+
+
 def test_parse_returns_empty_if_no_water_meter_sensor():
     raw = {
         "data": {
