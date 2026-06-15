@@ -40,6 +40,9 @@ def _make_sector_ctx(**overrides) -> SectorAssistantContext:
         last_irrigation_date="2026-04-05",
         total_irrigation_7d_mm=25.0,
         active_alerts=[],
+        probe_live=None,
+        source_confidence="no_probe",
+        data_quality_explanation="Sem sonda ativa — recomendação baseada em balanço hídrico.",
         generated_at="2026-04-08T08:00:00+00:00",
     )
     defaults.update(overrides)

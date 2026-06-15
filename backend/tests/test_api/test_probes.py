@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
-from app.models import Farm, Plot, Probe, Sector
+from app.models import Farm, Plot, Probe, ProbeDepth, ProbeReading, Sector
 
 
 @pytest.fixture
@@ -34,6 +34,47 @@ async def seed_probe_id(db: AsyncSession, seed_sector_id: str) -> str:
         await db.execute(select(Probe).where(Probe.sector_id == seed_sector_id))
     ).scalars().first()
     assert probe is not None, "No probe found in seed data"
+
+    # The readings endpoint only surfaces soil_moisture (VWC) depths, but seeded
+    # olive probes record soil_tension. Ensure a soil_moisture depth with a few
+    # recent VWC readings exists so the readings tests have data to assert on.
+    depth = (
+        await db.execute(
+            select(ProbeDepth).where(
+                ProbeDepth.probe_id == probe.id,
+                ProbeDepth.sensor_type == "soil_moisture",
+                ProbeDepth.depth_cm == 10,
+            )
+        )
+    ).scalars().first()
+    if depth is None:
+        depth = ProbeDepth(probe_id=probe.id, depth_cm=10, sensor_type="soil_moisture")
+        db.add(depth)
+        await db.flush()
+
+    now = datetime.now(UTC)
+    existing = (
+        await db.execute(
+            select(ProbeReading).where(
+                ProbeReading.probe_depth_id == depth.id,
+                ProbeReading.timestamp >= now - timedelta(hours=48),
+            )
+        )
+    ).scalars().first()
+    if existing is None:
+        for k in range(1, 7):
+            db.add(
+                ProbeReading(
+                    probe_depth_id=depth.id,
+                    timestamp=now - timedelta(hours=k),
+                    raw_value=0.25,
+                    calibrated_value=0.25,
+                    unit="vwc_m3m3",
+                    quality_flag="ok",
+                )
+            )
+        await db.commit()
+
     return probe.id
 
 

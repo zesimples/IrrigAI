@@ -46,6 +46,7 @@ def make_minimal_ctx() -> SectorContext:
         irrigation_system_type=None,       # NOT configured
         application_rate_mm_h=None,        # NOT configured
         irrigation_efficiency=0.90,        # fallback
+        distribution_uniformity=1.0,       # fallback
         emitter_flow_lph=None,
         emitter_spacing_m=None,
         row_spacing_m=None,
@@ -89,6 +90,7 @@ def make_minimal_weather() -> WeatherContext:
         farm_id="test-farm",
         lat=38.57,
         lon=-8.0,
+        elevation_m=100.0,
         today=DailyWeather(
             date=datetime.now(UTC).date(),
             t_max=28.0,

@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Farm, Plot, Sector
+from app.models import Farm, Plot, Sector, SoilPreset
 from app.schemas.common import PaginatedResponse
 from app.schemas.plot import PlotCreate, PlotDetail, PlotOut, PlotUpdate
 
@@ -59,6 +59,17 @@ async def create_plot(farm_id: str, body: PlotCreate, db: AsyncSession = Depends
     if not farm:
         raise HTTPException(404, detail="Farm not found")
     plot = Plot(farm_id=farm_id, **body.model_dump())
+    # Inherit soil hydraulic properties from the chosen preset when not given
+    # explicitly, so the plot has usable FC/PWP straight away.
+    if plot.soil_preset_id and (plot.field_capacity is None or plot.wilting_point is None):
+        preset = await db.get(SoilPreset, plot.soil_preset_id)
+        if preset:
+            if plot.field_capacity is None:
+                plot.field_capacity = preset.field_capacity
+            if plot.wilting_point is None:
+                plot.wilting_point = preset.wilting_point
+            if plot.soil_texture is None:
+                plot.soil_texture = preset.texture
     db.add(plot)
     await db.commit()
     await db.refresh(plot)

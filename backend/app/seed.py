@@ -510,7 +510,18 @@ def seed(engine, only_farms: set[str] | None = None) -> None:
 
         test_user = session.execute(
             select(User).where(User.email == "you@irrigai.dev")
-        ).scalar_one()
+        ).scalar_one_or_none()
+        if not test_user:
+            test_user = User(
+                id=str(uuid.uuid4()),
+                email="you@irrigai.dev",
+                name="Dev User",
+                role="grower",
+                language="pt",
+                hashed_password="$2b$12$demo_hash_dev",  # not real — dev/seed only
+            )
+            session.add(test_user)
+            session.flush()
 
         session.flush()
 
@@ -1051,7 +1062,18 @@ def seed(engine, only_farms: set[str] | None = None) -> None:
         # Reuse same owner as Esporão
         test_user = session.execute(
             select(User).where(User.email == "you@irrigai.dev")
-        ).scalar_one()
+        ).scalar_one_or_none()
+        if not test_user:
+            test_user = User(
+                id=str(uuid.uuid4()),
+                email="you@irrigai.dev",
+                name="Dev User",
+                role="grower",
+                language="pt",
+                hashed_password="$2b$12$demo_hash_dev",  # not real — dev/seed only
+            )
+            session.add(test_user)
+            session.flush()
 
         # Almond and olive templates
         almond_tmpl = session.execute(
@@ -1603,7 +1625,18 @@ def seed_adl(engine) -> None:
 
         test_user = session.execute(
             select(User).where(User.email == "you@irrigai.dev")
-        ).scalar_one()
+        ).scalar_one_or_none()
+        if not test_user:
+            test_user = User(
+                id=str(uuid.uuid4()),
+                email="you@irrigai.dev",
+                name="Dev User",
+                role="grower",
+                language="pt",
+                hashed_password="$2b$12$demo_hash_dev",  # not real — dev/seed only
+            )
+            session.add(test_user)
+            session.flush()
 
         almond_tmpl = session.execute(
             select(CropProfileTemplate).where(

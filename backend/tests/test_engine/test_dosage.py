@@ -28,10 +28,12 @@ def make_ctx(
     min_irrig=None,
     max_irrig=None,
     max_runtime=None,
+    distribution_uniformity=1.0,
 ):
     ctx = MagicMock()
     ctx.application_rate_mm_h = app_rate
     ctx.irrigation_efficiency = efficiency
+    ctx.distribution_uniformity = distribution_uniformity
     ctx.emitter_flow_lph = emitter_flow
     ctx.emitter_spacing_m = emitter_spacing
     ctx.row_spacing_m = row_spacing

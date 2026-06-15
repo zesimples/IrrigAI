@@ -5,7 +5,13 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
+from app.limiter import limiter
 from app.main import app
+
+# Rate limiting uses a shared Redis counter that persists across tests (Redis is
+# not reset between tests), so the accumulated count trips 429s late in the
+# suite. No test asserts rate-limiting behaviour, so disable it process-wide.
+limiter.enabled = False
 
 _TEST_CLEANUP_STATEMENTS = (
     "DELETE FROM recommendation_reason",

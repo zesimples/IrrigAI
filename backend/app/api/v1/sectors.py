@@ -5,7 +5,17 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Alert, IrrigationEvent, IrrigationSystem, Plot, Probe, Recommendation, Sector
+from app.models import (
+    Alert,
+    CropProfileTemplate,
+    IrrigationEvent,
+    IrrigationSystem,
+    Plot,
+    Probe,
+    Recommendation,
+    Sector,
+    SectorCropProfile,
+)
 from app.schemas.common import PaginatedResponse
 from app.schemas.recommendation import StressProjectionOut
 from app.schemas.sector import (
@@ -208,6 +218,34 @@ async def create_sector(plot_id: str, body: SectorCreate, db: AsyncSession = Dep
         raise HTTPException(404, detail="Plot not found")
     sector = Sector(plot_id=plot_id, **body.model_dump())
     db.add(sector)
+    await db.flush()
+
+    # Auto-materialise a crop profile from the system-default template for this
+    # crop type (if one exists), so the sector has agronomic Kc/root-depth values
+    # straight away. Mirrors the seed and the reset endpoint.
+    tpl = (
+        await db.execute(
+            select(CropProfileTemplate).where(
+                CropProfileTemplate.crop_type == sector.crop_type,
+                CropProfileTemplate.is_system_default.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if tpl:
+        db.add(
+            SectorCropProfile(
+                sector_id=sector.id,
+                source_template_id=tpl.id,
+                crop_type=tpl.crop_type,
+                mad=tpl.mad,
+                root_depth_mature_m=tpl.root_depth_mature_m,
+                root_depth_young_m=tpl.root_depth_young_m,
+                maturity_age_years=tpl.maturity_age_years,
+                stages=tpl.stages,
+                is_customized=False,
+            )
+        )
+
     await db.commit()
     await db.refresh(sector)
     return SectorOut.model_validate(sector)

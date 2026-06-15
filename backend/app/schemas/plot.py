@@ -7,6 +7,7 @@ class PlotBase(BaseModel):
     name: str
     area_ha: float | None = None
     soil_texture: str | None = None
+    soil_preset_id: str | None = None
     field_capacity: float | None = None
     wilting_point: float | None = None
     stone_content_pct: float | None = None
@@ -21,6 +22,7 @@ class PlotUpdate(BaseModel):
     name: str | None = None
     area_ha: float | None = None
     soil_texture: str | None = None
+    soil_preset_id: str | None = None
     field_capacity: float | None = None
     wilting_point: float | None = None
     stone_content_pct: float | None = None

@@ -29,7 +29,11 @@ async def list_farms(
     if current_user.role != "admin":
         base = base.where(Farm.owner_id == current_user.id)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
-    farms = (await db.execute(base.offset(offset).limit(page_size))).scalars().all()
+    farms = (
+        await db.execute(
+            base.order_by(Farm.created_at.desc()).offset(offset).limit(page_size)
+        )
+    ).scalars().all()
     return PaginatedResponse(
         items=[FarmOut.model_validate(f) for f in farms],
         total=total,

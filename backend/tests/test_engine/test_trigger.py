@@ -19,12 +19,19 @@ def make_wb(dr: float, raw: float, taw: float = 50.0) -> WaterBalanceResult:
     )
 
 
-def make_ctx(strategy="standard", deficit_factor=1.0, rdi_eligible=False, rdi_factor=None):
+def make_ctx(
+    strategy="standard",
+    deficit_factor=1.0,
+    rdi_eligible=False,
+    rdi_factor=None,
+    rainfall_effectiveness=0.20,
+):
     ctx = MagicMock()
     ctx.irrigation_strategy = strategy
     ctx.deficit_factor = deficit_factor
     ctx.rdi_eligible = rdi_eligible
     ctx.rdi_factor = rdi_factor
+    ctx.rainfall_effectiveness = rainfall_effectiveness
     return ctx
 
 
@@ -33,7 +40,7 @@ class TestRainSkip:
         wb = make_wb(dr=30.0, raw=20.0)
         do_it, reason = should_irrigate(wb, make_ctx(), forecast_rain_next_48h=20.0)
         assert do_it is False
-        assert "rain skip" in reason.lower() or "rain" in reason.lower()
+        assert "chuva" in reason.lower()
 
     def test_does_not_skip_below_threshold(self):
         """14.9mm rain → does NOT trigger rain skip."""
@@ -52,13 +59,13 @@ class TestStandardTrigger:
         wb = make_wb(dr=20.0, raw=18.0)
         do_it, reason = should_irrigate(wb, make_ctx())
         assert do_it is True
-        assert "depletion" in reason.lower() or "threshold" in reason.lower()
+        assert "regar" in reason.lower()
 
     def test_skips_when_dr_lt_raw(self):
         wb = make_wb(dr=10.0, raw=18.0)
         do_it, reason = should_irrigate(wb, make_ctx())
         assert do_it is False
-        assert "no irrigation" in reason.lower() or "margin" in reason.lower()
+        assert "reserva" in reason.lower()
 
     def test_exactly_at_raw_triggers(self):
         wb = make_wb(dr=18.0, raw=18.0)

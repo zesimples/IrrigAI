@@ -11,10 +11,11 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.main import app
-from app.models import CropProfileTemplate, Farm, Plot, Sector, SectorCropProfile, SoilPreset
+from app.models import CropProfileTemplate, Farm, Plot, Sector, SectorCropProfile, SoilPreset, User
 
 
 @pytest.fixture(scope="session")
@@ -42,12 +43,23 @@ async def client(settings):
         async with session_factory() as session:
             yield session
 
+    async def override_get_current_user() -> User:
+        # E2E tests run against the seeded DB; authenticate as the seed owner
+        # (you@irrigai.dev), who owns the demo farm. expire_on_commit=False keeps
+        # the loaded attributes usable after the session closes.
+        async with session_factory() as session:
+            return (
+                await session.execute(select(User).where(User.email == "you@irrigai.dev"))
+            ).scalar_one()
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             yield ac
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
         await engine.dispose()
 
 

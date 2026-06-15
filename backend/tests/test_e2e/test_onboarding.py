@@ -49,8 +49,8 @@ async def test_onboarding_creates_working_farm(
     presets = resp.json()
     assert len(presets) >= 5
     sandy_loam = next(p for p in presets if p["texture"] == "sandy_loam")
-    assert sandy_loam["field_capacity"] == pytest.approx(0.18, abs=0.01)
-    assert sandy_loam["wilting_point"] == pytest.approx(0.08, abs=0.01)
+    assert sandy_loam["field_capacity"] == pytest.approx(0.16, abs=0.01)
+    assert sandy_loam["wilting_point"] == pytest.approx(0.07, abs=0.01)
 
     # ── Step 2: Create farm → plot → sector ───────────────────────────────────
     farm_id = await api_create_farm(

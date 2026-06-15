@@ -25,6 +25,7 @@ def _make_inputs_snapshot(eng: EngineRecommendation, target_date: date) -> dict:
         "target_date": target_date.isoformat(),
         "et0_mm": eng.et0_mm,
         "etc_mm": eng.etc_mm,
+        "kc": eng.kc,
         "swc_current": eng.swc_current,
         "depletion_mm": eng.depletion_mm,
         "raw_mm": eng.raw_mm,

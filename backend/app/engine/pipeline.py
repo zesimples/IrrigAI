@@ -530,6 +530,7 @@ class RecommendationPipeline:
             reasons=reasons,
             et0_mm=et0_val,
             etc_mm=etc_val,
+            kc=ctx.kc,
             swc_current=wb.swc_current,
             depletion_mm=wb.depletion_mm,
             raw_mm=wb.raw_mm,

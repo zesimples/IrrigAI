@@ -73,7 +73,8 @@ class OverrideRequest(BaseModel):
     custom_action: str | None = None              # e.g. "irrigate", "skip"
     custom_depth_mm: float | None = None
     custom_runtime_min: float | None = None
-    override_reason: str                           # required
+    # Optional: the handler falls back to the legacy `notes` field when absent.
+    override_reason: str | None = None
     override_strategy: str = "one_time"            # "one_time" | "until_next_stage"
     # Legacy fields kept for backwards compat
     irrigation_depth_mm: float | None = None

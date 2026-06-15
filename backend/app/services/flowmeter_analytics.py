@@ -190,7 +190,10 @@ class FlowmeterAnalyticsService:
         period_end: date,
     ) -> SectorFlowmeterAnalytics:
         """Compute sector-level analytics from a pre-loaded list of events."""
-        today = date.today()
+        # Evaluate recency relative to the analysis window end, not wall-clock,
+        # so historical periods are scored correctly (for live dashboards
+        # period_end is today, so behaviour is unchanged there).
+        today = period_end
         num_events = len(events)
 
         if num_events == 0:

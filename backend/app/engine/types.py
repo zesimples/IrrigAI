@@ -194,3 +194,6 @@ class EngineRecommendation:
 
     # 48-72h stress projection (optional, stored in inputs_snapshot)
     stress_projection: dict | None = None
+
+    # Crop coefficient actually used this run (stored in inputs_snapshot)
+    kc: float | None = None
