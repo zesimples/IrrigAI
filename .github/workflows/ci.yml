@@ -236,8 +236,8 @@ jobs:
           PLAYWRIGHT_BASE_URL: http://localhost:3000
           BACKEND_URL: http://localhost:8000
         run: |
-          (cd backend && nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &)
-          (cd frontend && nohup npm start -- -p 3000 > /tmp/frontend.log 2>&1 &)
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend > /tmp/backend.log 2>&1 &
+          nohup npm --prefix frontend start -- -p 3000 > /tmp/frontend.log 2>&1 &
           npx wait-on http://localhost:8000/health http://localhost:3000 --timeout 90000 \
             || { echo "=== backend.log ==="; cat /tmp/backend.log; echo "=== frontend.log ==="; cat /tmp/frontend.log; exit 1; }
           cd frontend && npm run e2e
