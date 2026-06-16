@@ -33,6 +33,7 @@ def score(
     probes: ProbeSnapshot,
     weather: WeatherContext,
     anomalies: list[str] | list[AnomalyObj] | None = None,
+    swc_model_confidence: float | None = None,
 ) -> ConfidenceResult:
     """Compute confidence score for a recommendation.
 
@@ -47,8 +48,17 @@ def score(
     depth_statuses = getattr(rz, "depth_statuses", None)
     has_depth_quality = isinstance(depth_statuses, list) and len(depth_statuses) > 0
     if not rz.has_data:
-        _pen(conf, penalties, warnings, "No probe data", 0.25)
-        conf -= 0.25
+        if swc_model_confidence is not None:
+            # Defensive clamp: a public param must not produce a negative penalty
+            # (which would *raise* confidence) or bypass the no-probe penalty entirely.
+            swc_model_confidence = max(0.0, min(1.0, swc_model_confidence))
+            pen = round(0.25 * (1.0 - swc_model_confidence), 3)
+            _pen(conf, penalties, warnings,
+                 f"SWC from water-balance model (conf {swc_model_confidence:.2f})", pen)
+            conf -= pen
+        else:
+            _pen(conf, penalties, warnings, "No probe data", 0.25)
+            conf -= 0.25
     elif has_depth_quality:
         conf -= _apply_depth_quality_penalties(rz, penalties, warnings)
     elif rz.hours_since_any_reading is not None and rz.hours_since_any_reading > PROBE_STALE_H:

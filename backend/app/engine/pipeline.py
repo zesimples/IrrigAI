@@ -517,7 +517,10 @@ class RecommendationPipeline:
             )
 
         # Step 11: Confidence
-        conf: ConfidenceResult = confidence.score(ctx, probes, weather, probes.anomalies_detected)
+        conf: ConfidenceResult = confidence.score(
+            ctx, probes, weather, probes.anomalies_detected,
+            swc_model_confidence=(swc_model_result.confidence_factor if swc_model_result else None),
+        )
         log.append(f"Confidence: {conf.score:.2f} ({conf.level})")
 
         # Step 11.5: 48-72h stress projection

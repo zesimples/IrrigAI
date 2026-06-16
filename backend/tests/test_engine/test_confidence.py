@@ -178,6 +178,22 @@ class TestConfidenceLevels:
             assert result.level == "low"
 
 
+class TestModeledSWC:
+    def test_modeled_swc_softens_no_probe_penalty(self):
+        from app.engine import confidence
+        ctx = make_ctx()
+        probes = make_probes(has_data=False)
+        weather = make_weather()
+        base = confidence.score(ctx, probes, weather, None)
+        modeled = confidence.score(ctx, probes, weather, None, swc_model_confidence=0.75)
+        assert modeled.score > base.score
+        # Pin the magnitude: flat 0.25 penalty softens to 0.25*(1-0.75)=0.0625,
+        # so the modeled score should be ~0.1875 higher (catches a formula inversion).
+        assert abs((modeled.score - base.score) - (0.25 - 0.0625)) < 0.001
+        # And the softened penalty is labelled as model-sourced.
+        assert any("water-balance model" in reason for reason, _amount in modeled.penalties)
+
+
 class TestPenaltyBreakdown:
     def test_penalties_list_populated(self):
         ctx = make_ctx(phenological_stage=None)
