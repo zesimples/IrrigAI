@@ -302,15 +302,14 @@ REGRAS OBRIGATÓRIAS:
   "a consumir", "estável". NUNCA uses valores VWC decimais.
 - Se a sonda mostra tendência de consumo activo, indica urgência de rega.
 - Se o sinal está estável sem consumo, diz que não há necessidade imediata.
-- Se "latest_recommendation.action" = "no_irrigation" OU
-  "latest_recommendation.depletion_pct" <= 5, NUNCA aconselhes rega urgente:
-  diz que há água suficiente e recomenda apenas monitorização/validação de
-  profundidades discrepantes.
+- Se "latest_recommendation.action" for "skip" ou "defer" (o motor decidiu NÃO
+  regar), NUNCA aconselhes rega urgente: diz que há água suficiente e recomenda
+  apenas monitorização/validação de profundidades discrepantes.
 - Se houve rega recente, avalia se a resposta foi adequada.
 - Se há divergência significativa entre profundidades, menciona-a.
-- Uma profundidade isolada "humidade crítica" não justifica rega se o balanço
-  hídrico actual indica depleção muito baixa; trata-a como possível discrepância
-  local/sensorial a confirmar.
+- Uma profundidade isolada "humidade crítica" não justifica rega se o motor
+  decidiu não regar; trata-a como possível discrepância local/sensorial a
+  confirmar.
 - Máximo 25 palavras por campo de texto.
 - Língua portuguesa de Portugal. Tutea o agricultor.
 

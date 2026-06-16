@@ -47,12 +47,15 @@ _MINIMAL_PROBE_STATS = {
 
 _NO_DEFICIT_PROBE_STATS = {
     **_MINIMAL_PROBE_STATS,
+    # Mirrors production: engine action is "skip" (the real "Não regar" value —
+    # the enum has no "no_irrigation") and depletion is well above the 5% floor,
+    # so only the action check can suppress urgent-irrigation advice.
     "latest_recommendation": {
-        "action": "no_irrigation",
-        "generated_at": "2026-06-11T05:00:00+00:00",
-        "depletion_mm": 0.0,
-        "taw_mm": 90.0,
-        "depletion_pct": 0.0,
+        "action": "skip",
+        "generated_at": "2026-06-16T05:00:00+00:00",
+        "depletion_mm": 49.4,
+        "taw_mm": 104.0,
+        "depletion_pct": 47.5,
         "irrigation_depth_mm": None,
     },
     "depths": [

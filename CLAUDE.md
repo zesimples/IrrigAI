@@ -85,7 +85,7 @@ Next.js 14 (frontend container)←  App Router UI, proxies /api/v1 → backend
 2. `render_structured(interpretation)` converts the structured output to `• Label: Value` bullet lines for the frontend.
 3. Frontend `parseResultBullets()` in `SectorAnalysis.tsx` parses these bullets into the styled card UI.
 
-**Probe-pattern interpretation guard:** `probe_signal.py` attaches the sector's `latest_recommendation` (engine action + `depletion_pct`) to the signal stats. After the LLM returns, `assistant._apply_probe_recommendation_guard()` deterministically overrides the advice when the engine reports no deficit (`action = no_irrigation` or `depletion_pct ≤ 5%`) — it forces `risk_level=low`, monitoring-only actions, and injects the engine evidence. This enforces the rule that the LLM never overrides the deterministic engine: an isolated "humidade crítica" depth is treated as a possible sensor discrepancy, not a reason to irrigate.
+**Probe-pattern interpretation guard:** `probe_signal.py` attaches the sector's `latest_recommendation` (engine action + `depletion_pct`) to the signal stats. After the LLM returns, `assistant._apply_probe_recommendation_guard()` deterministically overrides the advice when the engine reports no deficit (`action = no_irrigation` or `depletion_pct ≤ 5%`) — it forces `risk_level=low`, monitoring-only actions, and injects the engine evidence. This enforces the rule that the LLM never overrides the deterministic engine: an isolated "humidade crítica" depth is treated as a possible sensor discrepancy, not a reason to irrigate. Note: the engine reports "don't irrigate" via `RecommendationAction.skip` / `.defer` (see `core/enums.py`) — there is no `no_irrigation` value.
 
 ### Frontend (`frontend/src/`)
 

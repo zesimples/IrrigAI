@@ -439,12 +439,15 @@ class IrrigationAssistant:
         except (TypeError, ValueError):
             depletion_mm_f = None
 
-        no_deficit = (
-            action == "no_irrigation"
+        # "skip"/"defer" are the engine's two "do not irrigate now" decisions
+        # (the RecommendationAction enum has no "no_irrigation" value). The
+        # depletion floors are a secondary guard for near-saturation cases.
+        engine_says_no_irrigation = (
+            action in ("skip", "defer")
             or (depletion_pct_f is not None and depletion_pct_f <= 5.0)
             or (depletion_mm_f is not None and depletion_mm_f <= 1.0)
         )
-        if not no_deficit:
+        if not engine_says_no_irrigation:
             return interpretation
 
         interpretation.risk_level = "low"
@@ -460,14 +463,14 @@ class IrrigationAssistant:
         ]
         interpretation.confidence_score = max(interpretation.confidence_score, 0.75)
         interpretation.confidence_explanation = (
-            "Conselho alinhado com a recomendação mais recente do motor e com a depleção muito baixa."
+            "Conselho alinhado com a recomendação mais recente do motor (não regar)."
         )
 
         evidence = list(interpretation.evidence)
         guard_evidence = [
             AgronomicEvidence(
                 source="latest_recommendation.action",
-                value=f"recomendação actual: {action or 'sem rega'}",
+                value="recomendação actual: não regar",
             ),
             AgronomicEvidence(
                 source="latest_recommendation.depletion_pct",
