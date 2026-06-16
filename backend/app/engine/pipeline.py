@@ -435,7 +435,57 @@ class RecommendationPipeline:
         )
 
         # Step 7: Water balance
-        wb = water_balance.build_water_balance(ctx, probes.rootzone.swc_current)
+        swc_source = probes.rootzone.swc_source
+        swc_model_result = None
+        swc_for_wb = probes.rootzone.swc_current
+        if swc_for_wb is None and farm_id:
+            from app.engine.soil_water_data import load_daily_inputs
+            from app.engine.soil_water_model import model_soil_water
+            from app.models import Flowmeter
+
+            flowmeter = (await db.execute(
+                select(Flowmeter).where(
+                    Flowmeter.sector_id == sector_id,
+                    Flowmeter.is_active.is_(True),
+                )
+            )).scalar_one_or_none()
+            if flowmeter is not None:
+                # Optional, best-effort: a bad sector config (e.g. root_depth_m<=0) or a
+                # transient DB error must not crash the whole recommendation run — fall
+                # back to the default-SWC path, mirroring the GDD fallback above.
+                try:
+                    daily = await load_daily_inputs(
+                        sector_id=sector_id,
+                        farm_id=farm_id,
+                        flowmeter_id=flowmeter.id,
+                        today=target_date,
+                        db=db,
+                    )
+                    swc_model_result = model_soil_water(
+                        fc=ctx.field_capacity,
+                        pwp=ctx.wilting_point,
+                        root_depth_m=ctx.root_depth_m,
+                        kc=ctx.kc,
+                        rainfall_effectiveness=ctx.rainfall_effectiveness,
+                        application_efficiency=ctx.irrigation_efficiency,
+                        daily=daily,
+                        today=target_date,
+                    )
+                    swc_for_wb = swc_model_result.swc_current
+                    swc_source = "water_balance_model"
+                    log.append(
+                        f"SoilWaterModel: SWC={swc_for_wb}, source={swc_model_result.seed_kind}, "
+                        f"days_since_anchor={swc_model_result.days_since_anchor}, "
+                        f"conf={swc_model_result.confidence_factor}"
+                    )
+                except Exception:
+                    logger.warning(
+                        "SoilWaterModel skipped for sector %s (falling back to default SWC)",
+                        sector_id, exc_info=True,
+                    )
+                    swc_model_result = None
+
+        wb = water_balance.build_water_balance(ctx, swc_for_wb)
         rain_effective, rain_eff_note = compute_effective_rainfall(
             rainfall_mm=weather.today.rainfall_mm or 0.0,
             soil_texture=ctx.soil_texture,
@@ -532,6 +582,20 @@ class RecommendationPipeline:
             etc_mm=etc_val,
             kc=ctx.kc,
             swc_current=wb.swc_current,
+            swc_source=swc_source,
+            swc_model=(
+                {
+                    "seed_kind": swc_model_result.seed_kind,
+                    "last_anchor_date": (
+                        swc_model_result.last_anchor_date.isoformat()
+                        if swc_model_result.last_anchor_date else None
+                    ),
+                    "days_since_anchor": swc_model_result.days_since_anchor,
+                    "n_gap_days": swc_model_result.n_gap_days,
+                    "confidence_factor": swc_model_result.confidence_factor,
+                }
+                if swc_model_result is not None else None
+            ),
             depletion_mm=wb.depletion_mm,
             raw_mm=wb.raw_mm,
             taw_mm=wb.taw_mm,
