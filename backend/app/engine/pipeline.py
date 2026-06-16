@@ -485,6 +485,10 @@ class RecommendationPipeline:
                     )
                     swc_model_result = None
 
+        # Fell through to build_water_balance's static seed (no probe, no usable model).
+        if swc_for_wb is None:
+            swc_source = "default_estimate"
+
         wb = water_balance.build_water_balance(ctx, swc_for_wb)
         rain_effective, rain_eff_note = compute_effective_rainfall(
             rainfall_mm=weather.today.rainfall_mm or 0.0,
