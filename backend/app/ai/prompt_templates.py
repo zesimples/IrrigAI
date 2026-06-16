@@ -296,10 +296,16 @@ prática e directa da situação hídrica actual e indica o que o agricultor
 deve fazer a seguir.
 
 REGRAS OBRIGATÓRIAS:
-- NÃO enumeres padrões por profundidade — dá uma síntese do conjunto.
+- Descreve o PERFIL de profundidade: contrasta as camadas superficiais com as
+  mais fundas e refere as profundidades mais relevantes em cm (ex.: "humidade
+  crítica a 50 cm"). É uma síntese com detalhe — não uma lista robótica de todas
+  as profundidades.
+- Refere a tendência (a consumir/estável/a recarregar), a divergência entre
+  profundidades e, se houver, a resposta à rega recente.
 - Para descrever humidade usa APENAS termos qualitativos: "saturado",
   "próximo da capacidade de campo", "humidade elevada/adequada/baixa/crítica",
-  "a consumir", "estável". NUNCA uses valores VWC decimais.
+  "a consumir", "estável". Podes citar profundidades em cm, mas NUNCA uses
+  valores VWC decimais.
 - Se a sonda mostra tendência de consumo activo, indica urgência de rega.
 - Se o sinal está estável sem consumo, diz que não há necessidade imediata.
 - Se "latest_recommendation.action" for "skip" ou "defer" (o motor decidiu NÃO
@@ -310,12 +316,13 @@ REGRAS OBRIGATÓRIAS:
 - Uma profundidade isolada "humidade crítica" não justifica rega se o motor
   decidiu não regar; trata-a como possível discrepância local/sensorial a
   confirmar.
-- Máximo 25 palavras por campo de texto.
+- "summary": 1 a 2 frases (até ~40 palavras) com o perfil de profundidade.
+  "irrigation_advice": acção concreta, até ~30 palavras. Restantes campos: curtos.
 - Língua portuguesa de Portugal. Tutea o agricultor.
 
 FORMATO ESTRUTURADO OBRIGATÓRIO — responde APENAS com JSON válido, sem Markdown:
 {{
-  "summary": "1 frase: o que a sonda mostra agora",
+  "summary": "1-2 frases: perfil de profundidade — camadas superficiais vs fundas, tendência",
   "risk_level": "low | medium | high",
   "irrigation_advice": "o que o agricultor deve fazer — acção concreta",
   "evidence": [
@@ -334,9 +341,12 @@ Regras de evidence:
   "cross_depth_signals.divergencia_entre_profundidades",
   "last_irrigation_applied_mm", "n_irrigation_events_in_window",
   "latest_recommendation.action", "latest_recommendation.depletion_pct".
-- NÃO uses "depths[N]" como source genérico com value sendo o nome de um padrão
-  (ex: "Sinal Estável", "Equilíbrio hídrico", "Além das raízes").
-- Cada value deve ser uma observação qualitativa útil sobre os dados.
+- Prefere values que citem a profundidade em cm e o seu estado/tendência
+  (ex.: "humidade crítica a 50 cm, abaixo da zona radicular", "consumo activo a
+  15 cm"), além da divergência entre profundidades e da resposta à rega.
+- NÃO uses "depths[N]" como source com value sendo apenas o nome de um padrão
+  (ex: "Sinal Estável", "Equilíbrio hídrico", "Além das raízes") — o value tem de
+  ser uma observação qualitativa útil sobre os dados.
 
 ESTATÍSTICAS DA SONDA:
 {signal_json}

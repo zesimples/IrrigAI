@@ -239,7 +239,7 @@ async def test_interpret_probe_structured_uses_advisory_prompt(assistant):
 
     assert len(captured) == 1
     # Advisory prompt is present
-    assert "NÃO enumeres padrões por profundidade" in captured[0]
+    assert "Descreve o PERFIL de profundidade" in captured[0]
     # Old pattern enumeration heading is absent
     assert "PADRÕES A VERIFICAR" not in captured[0]
     # Returns a valid AgronomicInterpretation
@@ -268,16 +268,19 @@ async def test_interpret_probe_structured_evidence_no_depth_pattern_labels(assis
 
 @pytest.mark.asyncio
 async def test_interpret_probe_no_deficit_overrides_urgent_irrigation_advice(assistant):
-    """Probe interpretation must not tell the user to irrigate when depletion is 0%."""
+    """When the engine says skip/defer, the guard neutralises the irrigation advice
+    but PRESERVES the LLM's depth description (summary + depth evidence)."""
+
+    depth_summary = "Humidade elevada à superfície mas crítica a 50 cm, com consumo nas camadas fundas."
 
     async def _bad_model_output(system_prompt, user_message, **kwargs):
         return json.dumps({
-            "summary": "A sonda indica humidade elevada nas camadas superiores, mas crítica a 50 cm.",
+            "summary": depth_summary,
             "risk_level": "high",
             "irrigation_advice": "Rega urgente para evitar stress hídrico nas raízes.",
             "evidence": [
-                {"source": "depths[1].humidade_actual", "value": "humidade crítica"},
-                {"source": "depths[0].humidade_actual", "value": "humidade elevada"},
+                {"source": "depths[1].humidade_actual", "value": "humidade crítica a 50 cm"},
+                {"source": "depths[0].humidade_actual", "value": "humidade elevada a 5 cm"},
             ],
             "missing_data": [],
             "confidence_score": 0.7,
@@ -290,10 +293,15 @@ async def test_interpret_probe_no_deficit_overrides_urgent_irrigation_advice(ass
         assistant.client.complete = _bad_model_output
         result = await assistant.interpret_probe_patterns_structured("probe-001", db)
 
+    # Advice/risk/actions neutralised to align with the engine decision.
     assert result.risk_level == "low"
     assert "Não regues agora" in result.irrigation_advice
     assert all("urgente" not in action.lower() for action in result.recommended_actions)
-    assert any(ev.source == "latest_recommendation.depletion_pct" for ev in result.evidence)
+    # The engine decision is surfaced as evidence...
+    assert any(ev.source == "latest_recommendation" for ev in result.evidence)
+    # ...and the LLM's depth description is preserved (not replaced by generic text).
+    assert result.summary == depth_summary
+    assert any("50 cm" in ev.value for ev in result.evidence)
 
 
 def test_render_probe_interpretation_includes_summary_advice_evidence_and_action(assistant):

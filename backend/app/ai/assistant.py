@@ -450,41 +450,39 @@ class IrrigationAssistant:
         if not engine_says_no_irrigation:
             return interpretation
 
+        # Surgical override: keep the LLM's depth description (summary + depth
+        # evidence) but neutralise the irrigation advice so it can never contradict
+        # the engine's "do not irrigate" decision.
         interpretation.risk_level = "low"
-        interpretation.summary = (
-            "A sonda e o balanço hídrico indicam água suficiente no sector."
-        )
         interpretation.irrigation_advice = (
-            "Não regues agora; mantém a monitorização e só reavalia se a tendência passar a consumo activo."
+            "Não regues agora — o balanço hídrico tem reserva suficiente. Vigia a evolução das "
+            "camadas mais fundas e confirma sensores com leituras díspares."
         )
         interpretation.recommended_actions = [
-            "Monitorizar a tendência nas próximas 24 horas.",
-            "Confirmar qualquer profundidade discrepante antes de alterar a rega.",
+            "Monitorizar a tendência das camadas mais fundas nas próximas 24-48 horas.",
+            "Confirmar qualquer profundidade com leitura discrepante antes de alterar a rega.",
         ]
         interpretation.confidence_score = max(interpretation.confidence_score, 0.75)
         interpretation.confidence_explanation = (
             "Conselho alinhado com a recomendação mais recente do motor (não regar)."
         )
 
+        # Prepend a single combined engine-evidence item so the rendered Evidência
+        # (which shows ~3 items) keeps room for the LLM's depth observations.
+        engine_evidence = AgronomicEvidence(
+            source="latest_recommendation",
+            value=(
+                f"motor: não regar — depleção {depletion_pct_f:.0f}% da TAW"
+                if depletion_pct_f is not None
+                else "motor: não regar"
+            ),
+        )
         evidence = list(interpretation.evidence)
-        guard_evidence = [
-            AgronomicEvidence(
-                source="latest_recommendation.action",
-                value="recomendação actual: não regar",
-            ),
-            AgronomicEvidence(
-                source="latest_recommendation.depletion_pct",
-                value=(
-                    f"depleção {depletion_pct_f:.1f}%"
-                    if depletion_pct_f is not None
-                    else "depleção muito baixa"
-                ),
-            ),
-        ]
-        seen = {(ev.source, ev.value) for ev in evidence}
-        for ev in guard_evidence:
-            if (ev.source, ev.value) not in seen:
-                evidence.insert(0, ev)
+        if all(
+            (ev.source, ev.value) != (engine_evidence.source, engine_evidence.value)
+            for ev in evidence
+        ):
+            evidence.insert(0, engine_evidence)
         interpretation.evidence = evidence[:4]
         return interpretation
 
