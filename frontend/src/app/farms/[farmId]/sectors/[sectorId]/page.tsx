@@ -189,7 +189,16 @@ export default function SectorDetailPage({ params }: Props) {
   const depletionPctFromSnap = depletionMm != null && tawMm ? depletionMm / tawMm * 100 : null;
   const depletionPct = status.depletion_pct ?? depletionPctFromSnap;
   const moistureValue = depletionPct != null ? Math.max(0, Math.min(1, 1 - depletionPct / 100)) : null;
-  const marginMm = depletionMm != null && tawMm != null ? Math.max(0, tawMm * 0.55 - depletionMm) : null;
+  // Margin to the irrigation trigger. Use the engine's own RAW (TAW × actual MAD)
+  // from the snapshot; only fall back to the 0.55 MAD assumption if it's absent
+  // (older snapshots predate raw_mm being persisted).
+  const rawMm = snap?.raw_mm as number | null ?? null;
+  const marginMm =
+    rawMm != null && depletionMm != null
+      ? Math.max(0, rawMm - depletionMm)
+      : depletionMm != null && tawMm != null
+        ? Math.max(0, tawMm * 0.55 - depletionMm)
+        : null;
 
   const confidence = toConfidence(
     status.latest_confidence_level,
@@ -198,7 +207,11 @@ export default function SectorDetailPage({ params }: Props) {
   const confidencePct = status.latest_confidence_score != null ? Math.round(status.latest_confidence_score * 100) : 0;
   const showImproveCard = confidence === "baixa" || confidence === "media";
 
-  const projection = liveStress ?? rec?.stress_projection ?? null;
+  // Prefer the stored recommendation's projection so depletion, decision, and the
+  // 72h projection always come from the same coherent engine run. The live recompute
+  // (a separate calculation at a different time) is only a fallback when the stored
+  // recommendation has no projection.
+  const projection = rec?.stress_projection ?? liveStress ?? null;
   const aiLede = buildAiLede(rec, projection);
 
   const firstProbe = status.probes[0] ?? null;
