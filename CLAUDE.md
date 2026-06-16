@@ -50,7 +50,7 @@ export LLM_PROVIDER=mock PROBE_PROVIDER=mock WEATHER_PROVIDER=mock
 ```
 
 **Production deploys:**
-- Backend-only changes: `git pull && docker compose restart backend`
+- Backend-only changes: `git pull && docker compose up -d --build backend` (and `--build worker` if engine/scheduler code changed). The `backend`/`worker` services bake code into the image at build time — there is **no source volume mount** in production — so `docker compose restart` runs the *old* image and silently serves stale code. Always rebuild.
 - Frontend changes: `git pull && docker compose up -d --build frontend`
 - Schema changes: run `make migrate` after pulling
 
