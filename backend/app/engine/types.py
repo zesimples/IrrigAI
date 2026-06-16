@@ -197,3 +197,8 @@ class EngineRecommendation:
 
     # Crop coefficient actually used this run (stored in inputs_snapshot)
     kc: float | None = None
+
+    # How rootzone SWC was determined: "probe_weighted" | "water_balance_model" | "default_estimate"
+    swc_source: str | None = None
+    # Model metadata when swc_source == "water_balance_model" (stored in inputs_snapshot)
+    swc_model: dict | None = None
