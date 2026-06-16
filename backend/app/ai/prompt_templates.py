@@ -302,8 +302,15 @@ REGRAS OBRIGATÓRIAS:
   "a consumir", "estável". NUNCA uses valores VWC decimais.
 - Se a sonda mostra tendência de consumo activo, indica urgência de rega.
 - Se o sinal está estável sem consumo, diz que não há necessidade imediata.
+- Se "latest_recommendation.action" = "no_irrigation" OU
+  "latest_recommendation.depletion_pct" <= 5, NUNCA aconselhes rega urgente:
+  diz que há água suficiente e recomenda apenas monitorização/validação de
+  profundidades discrepantes.
 - Se houve rega recente, avalia se a resposta foi adequada.
 - Se há divergência significativa entre profundidades, menciona-a.
+- Uma profundidade isolada "humidade crítica" não justifica rega se o balanço
+  hídrico actual indica depleção muito baixa; trata-a como possível discrepância
+  local/sensorial a confirmar.
 - Máximo 25 palavras por campo de texto.
 - Língua portuguesa de Portugal. Tutea o agricultor.
 
@@ -326,7 +333,8 @@ Regras de evidence:
 - Sources devem referenciar caminhos reais do JSON de entrada, por exemplo:
   "depths[0].humidade_actual", "depths[0].tendencia",
   "cross_depth_signals.divergencia_entre_profundidades",
-  "last_irrigation_applied_mm", "n_irrigation_events_in_window".
+  "last_irrigation_applied_mm", "n_irrigation_events_in_window",
+  "latest_recommendation.action", "latest_recommendation.depletion_pct".
 - NÃO uses "depths[N]" como source genérico com value sendo o nome de um padrão
   (ex: "Sinal Estável", "Equilíbrio hídrico", "Além das raízes").
 - Cada value deve ser uma observação qualitativa útil sobre os dados.

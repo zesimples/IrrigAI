@@ -279,13 +279,14 @@ class IrrigationAssistant:
             f"Interpreta o comportamento da sonda '{stats.get('probe_external_id', probe_id)}' "
             f"no sector '{stats.get('sector_name', '')}'."
         )
-        return await self._complete_structured(
+        structured = await self._complete_structured(
             system_prompt=system_prompt,
             user_message=user_message,
             context={"probe_signal": stats},
             fallback_risk="medium",
             max_tokens=700,
         )
+        return self._apply_probe_recommendation_guard(stats, structured)
 
     async def chat(
         self,
@@ -410,6 +411,79 @@ class IrrigationAssistant:
             fallback_risk="medium",
             max_tokens=800,
         )
+
+    def _apply_probe_recommendation_guard(
+        self,
+        stats: dict,
+        interpretation: AgronomicInterpretation,
+    ) -> AgronomicInterpretation:
+        """Keep probe advice consistent with the latest engine water-balance decision.
+
+        Probe-pattern interpretation is useful for diagnosing sensor behaviour, but it
+        must not override a fresh sector recommendation that says there is no deficit.
+        """
+        latest = stats.get("latest_recommendation")
+        if not isinstance(latest, dict):
+            return interpretation
+
+        action = str(latest.get("action") or "")
+        depletion_pct = latest.get("depletion_pct")
+        depletion_mm = latest.get("depletion_mm")
+
+        try:
+            depletion_pct_f = float(depletion_pct) if depletion_pct is not None else None
+        except (TypeError, ValueError):
+            depletion_pct_f = None
+        try:
+            depletion_mm_f = float(depletion_mm) if depletion_mm is not None else None
+        except (TypeError, ValueError):
+            depletion_mm_f = None
+
+        no_deficit = (
+            action == "no_irrigation"
+            or (depletion_pct_f is not None and depletion_pct_f <= 5.0)
+            or (depletion_mm_f is not None and depletion_mm_f <= 1.0)
+        )
+        if not no_deficit:
+            return interpretation
+
+        interpretation.risk_level = "low"
+        interpretation.summary = (
+            "A sonda e o balanço hídrico indicam água suficiente no sector."
+        )
+        interpretation.irrigation_advice = (
+            "Não regues agora; mantém a monitorização e só reavalia se a tendência passar a consumo activo."
+        )
+        interpretation.recommended_actions = [
+            "Monitorizar a tendência nas próximas 24 horas.",
+            "Confirmar qualquer profundidade discrepante antes de alterar a rega.",
+        ]
+        interpretation.confidence_score = max(interpretation.confidence_score, 0.75)
+        interpretation.confidence_explanation = (
+            "Conselho alinhado com a recomendação mais recente do motor e com a depleção muito baixa."
+        )
+
+        evidence = list(interpretation.evidence)
+        guard_evidence = [
+            AgronomicEvidence(
+                source="latest_recommendation.action",
+                value=f"recomendação actual: {action or 'sem rega'}",
+            ),
+            AgronomicEvidence(
+                source="latest_recommendation.depletion_pct",
+                value=(
+                    f"depleção {depletion_pct_f:.1f}%"
+                    if depletion_pct_f is not None
+                    else "depleção muito baixa"
+                ),
+            ),
+        ]
+        seen = {(ev.source, ev.value) for ev in evidence}
+        for ev in guard_evidence:
+            if (ev.source, ev.value) not in seen:
+                evidence.insert(0, ev)
+        interpretation.evidence = evidence[:4]
+        return interpretation
 
     async def _complete_structured(
         self,

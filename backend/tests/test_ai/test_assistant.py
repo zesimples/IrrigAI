@@ -45,6 +45,38 @@ _MINIMAL_PROBE_STATS = {
     "cross_depth_signals": {},
 }
 
+_NO_DEFICIT_PROBE_STATS = {
+    **_MINIMAL_PROBE_STATS,
+    "latest_recommendation": {
+        "action": "no_irrigation",
+        "generated_at": "2026-06-11T05:00:00+00:00",
+        "depletion_mm": 0.0,
+        "taw_mm": 90.0,
+        "depletion_pct": 0.0,
+        "irrigation_depth_mm": None,
+    },
+    "depths": [
+        {
+            **_MINIMAL_PROBE_STATS["depths"][0],
+            "humidade_actual": "saturado / próximo da capacidade de campo",
+        },
+        {
+            "depth_cm": 50,
+            "n_readings": 24,
+            "humidade_actual": "humidade crítica / próximo do ponto de murchamento",
+            "tendencia": "estável",
+            "sinal_estavel": True,
+            "causa_sinal_estavel": "humidade estável sem consumo nem recarga activos — equilíbrio hídrico",
+            "profundidade_alem_raizes": False,
+            "variabilidade_sinal": "baixa",
+            "variacao_24h": "sem variação significativa",
+            "variacao_48h": "sem variação significativa",
+            "resposta_rega": None,
+            "horas_ate_pico_apos_rega": None,
+        },
+    ],
+}
+
 
 def _sector_ctx(**overrides) -> SectorAssistantContext:
     defaults = dict(
@@ -229,6 +261,36 @@ async def test_interpret_probe_structured_evidence_no_depth_pattern_labels(assis
             assert ev.value not in anti_pattern_values, (
                 f"evidence has depth-pattern label: source={ev.source!r}, value={ev.value!r}"
             )
+
+
+@pytest.mark.asyncio
+async def test_interpret_probe_no_deficit_overrides_urgent_irrigation_advice(assistant):
+    """Probe interpretation must not tell the user to irrigate when depletion is 0%."""
+
+    async def _bad_model_output(system_prompt, user_message, **kwargs):
+        return json.dumps({
+            "summary": "A sonda indica humidade elevada nas camadas superiores, mas crítica a 50 cm.",
+            "risk_level": "high",
+            "irrigation_advice": "Rega urgente para evitar stress hídrico nas raízes.",
+            "evidence": [
+                {"source": "depths[1].humidade_actual", "value": "humidade crítica"},
+                {"source": "depths[0].humidade_actual", "value": "humidade elevada"},
+            ],
+            "missing_data": [],
+            "confidence_score": 0.7,
+            "confidence_explanation": "Leituras recentes disponíveis.",
+            "recommended_actions": ["Aplicar rega imediatamente."],
+        })
+
+    db = AsyncMock()
+    with patch("app.ai.assistant.compute_probe_signal_stats", return_value=_NO_DEFICIT_PROBE_STATS):
+        assistant.client.complete = _bad_model_output
+        result = await assistant.interpret_probe_patterns_structured("probe-001", db)
+
+    assert result.risk_level == "low"
+    assert "Não regues agora" in result.irrigation_advice
+    assert all("urgente" not in action.lower() for action in result.recommended_actions)
+    assert any(ev.source == "latest_recommendation.depletion_pct" for ev in result.evidence)
 
 
 def test_render_probe_interpretation_includes_summary_advice_evidence_and_action(assistant):

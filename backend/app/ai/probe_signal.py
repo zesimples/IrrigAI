@@ -12,7 +12,15 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import IrrigationEvent, Plot, Probe, ProbeDepth, ProbeReading, Sector
+from app.models import (
+    IrrigationEvent,
+    Plot,
+    Probe,
+    ProbeDepth,
+    ProbeReading,
+    Recommendation,
+    Sector,
+)
 from app.models.sector_crop_profile import SectorCropProfile
 
 # m³/m³ plausible VWC range
@@ -51,6 +59,36 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
             rd = cp.root_depth_mature_m or cp.root_depth_young_m
             if rd:
                 root_depth_cm = int(rd * 100)
+
+    latest_recommendation: dict | None = None
+    if sector:
+        rec_result = await db.execute(
+            select(Recommendation)
+            .where(Recommendation.sector_id == probe.sector_id)
+            .order_by(Recommendation.generated_at.desc())
+            .limit(1)
+        )
+        rec = rec_result.scalar_one_or_none()
+        if rec:
+            snap = rec.inputs_snapshot or {}
+            depletion_mm = snap.get("depletion_mm")
+            taw_mm = snap.get("taw_mm")
+            depletion_pct = None
+            try:
+                if taw_mm and depletion_mm is not None and taw_mm > 0:
+                    depletion_pct = round(float(depletion_mm) / float(taw_mm) * 100, 1)
+            except (TypeError, ValueError):
+                depletion_pct = None
+
+            action = rec.action.value if hasattr(rec.action, "value") else str(rec.action)
+            latest_recommendation = {
+                "action": action,
+                "generated_at": rec.generated_at,
+                "depletion_mm": depletion_mm,
+                "taw_mm": taw_mm,
+                "depletion_pct": depletion_pct,
+                "irrigation_depth_mm": rec.irrigation_depth_mm,
+            }
 
     now = datetime.now(UTC)
     window_start = now - timedelta(hours=_ANALYSIS_HOURS)
@@ -229,6 +267,7 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         "analysis_window_hours": _ANALYSIS_HOURS,
         "n_irrigation_events_in_window": len(irrigation_events),
         "last_irrigation_applied_mm": last_event.applied_mm if last_event else None,
+        "latest_recommendation": latest_recommendation,
         "depths": depth_stats,
         "cross_depth_signals": cross_depth,
     }
