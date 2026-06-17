@@ -59,14 +59,13 @@ files; both compose files validate.
 
 ## 🔧 Open — candidates to pick up (priority order)
 
-### 1. Per-tenant OWNERSHIP enforcement  — HIGH (direct follow-up to done #B1)
-Authentication is enforced, but **any logged-in user can still read/write another
-user's resources by id** outside `farms.py`. Only `farms.py` checks
-`owner_id == current_user.id` (admin bypass). Need ownership checks across
-`sectors/plots/probes/recommendations/irrigation/dashboard/alerts/flowmeter/...`,
-walking `sector→plot→farm→owner_id`. Large (~15 routers); best as a shared
-dependency (e.g. `require_farm_access(farm_id)` + resource-id resolvers). See
-memory `api-auth-model.md`.
+### 1. Per-tenant OWNERSHIP enforcement — ✅ DONE (Codex, commit `5f80df0`)
+Closed. `backend/app/access.py` (`AccessController` / `Access` dependency)
+scopes farm/plot/sector/probe/recommendation/irrigation_event/alert/override/
+water_event to the owner chain; admins bypass; cross-tenant + missing both 404.
+Wired into 16 routers; `/audit-log` admin-only; global catalogs stay public to
+authed users. See `docs/handoff-claude-2026-06-17-ownership.md` and memory
+`api-auth-model.md`.
 
 ### 2. Rate limiting gaps — HIGH (security)
 Only 2 endpoints are limited (`backend/app/limiter.py`, recommendations). Add
