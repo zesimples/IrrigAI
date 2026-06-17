@@ -115,6 +115,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.orm import Session
 
+from app.auth import hash_password
 from app.config import get_settings
 from app.models import (
     CropProfileTemplate,
@@ -518,7 +519,7 @@ def seed(engine, only_farms: set[str] | None = None) -> None:
                 name="Dev User",
                 role="grower",
                 language="pt",
-                hashed_password="$2b$12$demo_hash_dev",  # not real — dev/seed only
+                hashed_password=hash_password("irrigai-dev"),  # dev/seed login: you@irrigai.dev
             )
             session.add(test_user)
             session.flush()
@@ -1070,7 +1071,7 @@ def seed(engine, only_farms: set[str] | None = None) -> None:
                 name="Dev User",
                 role="grower",
                 language="pt",
-                hashed_password="$2b$12$demo_hash_dev",  # not real — dev/seed only
+                hashed_password=hash_password("irrigai-dev"),  # dev/seed login: you@irrigai.dev
             )
             session.add(test_user)
             session.flush()
@@ -1633,7 +1634,7 @@ def seed_adl(engine) -> None:
                 name="Dev User",
                 role="grower",
                 language="pt",
-                hashed_password="$2b$12$demo_hash_dev",  # not real — dev/seed only
+                hashed_password=hash_password("irrigai-dev"),  # dev/seed login: you@irrigai.dev
             )
             session.add(test_user)
             session.flush()
