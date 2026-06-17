@@ -26,7 +26,7 @@ make test-e2e         # Playwright E2E (requires running stack)
 
 make lint             # ruff check + ruff format --check
 make format           # ruff format (auto-fix)
-make seed             # seed DB with test data
+make seed             # seed DB with test data (dev login: you@irrigai.dev / irrigai-dev)
 make shell-backend    # bash inside backend container
 make logs-backend     # follow backend logs
 ```
@@ -70,7 +70,7 @@ Next.js 14 (frontend container)←  App Router UI, proxies /api/v1 → backend
 
 | Directory | Purpose |
 |-----------|---------|
-| `engine/` | **Deterministic agronomic engine** — water balance, ET₀, crop demand, dosage, stress projection, trigger logic. Entry point: `engine/pipeline.py` (`RecommendationPipeline`). Every parameter comes from DB records, never hardcoded. |
+| `engine/` | **Deterministic agronomic engine** — water balance, ET₀, crop demand, dosage, stress projection, trigger logic. Entry point: `engine/pipeline.py` (`RecommendationPipeline`). Also `soil_water_model.py` + `soil_water_data.py`: a rain-anchored FAO-56 running balance that, for **probe-less sectors that have a flowmeter**, replaces the static 70%-of-TAW seed using measured irrigation + weather history (probes stay authoritative elsewhere). Every parameter comes from DB records, never hardcoded. |
 | `ai/` | **LLM explanation layer** — `assistant.py` orchestrates context → prompt → LLM; `context_builder.py` fetches all DB context before calling the LLM; `prompt_templates.py` defines structured output schemas; `probe_signal.py` computes signal statistics (flatline, drainage events). |
 | `adapters/` | **Provider abstraction** — `factory.py` selects mock/irriwatch/myirrigation at runtime via `PROBE_PROVIDER` / `WEATHER_PROVIDER` env vars. All adapters implement the interface in `base.py`. |
 | `api/v1/` | REST endpoints grouped by resource (farms, plots, sectors, probes, recommendations, chat, …). Unified by `router.py`. |
@@ -85,7 +85,11 @@ Next.js 14 (frontend container)←  App Router UI, proxies /api/v1 → backend
 2. `render_structured(interpretation)` converts the structured output to `• Label: Value` bullet lines for the frontend.
 3. Frontend `parseResultBullets()` in `SectorAnalysis.tsx` parses these bullets into the styled card UI.
 
-**Probe-pattern interpretation guard:** `probe_signal.py` attaches the sector's `latest_recommendation` (engine action + `depletion_pct`) to the signal stats. After the LLM returns, `assistant._apply_probe_recommendation_guard()` deterministically overrides the advice when the engine reports no deficit (`action = no_irrigation` or `depletion_pct ≤ 5%`) — it forces `risk_level=low`, monitoring-only actions, and injects the engine evidence. This enforces the rule that the LLM never overrides the deterministic engine: an isolated "humidade crítica" depth is treated as a possible sensor discrepancy, not a reason to irrigate. Note: the engine reports "don't irrigate" via `RecommendationAction.skip` / `.defer` (see `core/enums.py`) — there is no `no_irrigation` value.
+**Probe-pattern interpretation guard:** `probe_signal.py` attaches the sector's `latest_recommendation` (engine action + `depletion_pct`) to the signal stats. After the LLM returns, `assistant._apply_probe_recommendation_guard()` deterministically overrides the advice when the engine reports no deficit (`action` ∈ {`skip`, `defer`} or `depletion_pct ≤ 5%`) — it forces `risk_level=low`, monitoring-only actions, and injects the engine evidence. This enforces the rule that the LLM never overrides the deterministic engine: an isolated "humidade crítica" depth is treated as a possible sensor discrepancy, not a reason to irrigate. Note: the engine reports "don't irrigate" via `RecommendationAction.skip` / `.defer` (see `core/enums.py`) — there is no `no_irrigation` value.
+
+**Soil-water source (`swc_source`):** the pipeline records how rootzone SWC was obtained on each recommendation — `probe_weighted` (probe, authoritative), `water_balance_model` (the FAO-56 model for probe-less + flowmeter sectors), or `default_estimate` (static 70%-of-TAW seed). Surfaced in `Recommendation.inputs_snapshot` (`swc_source` + `swc_model` metadata). The model never runs when a probe is present, and degrades to the static seed on any error (per-sector try/except).
+
+**Per-farm MyIrrigation credentials:** stored **encrypted** in the `farm_credentials` table (`EncryptedString`), overriding the global `MYIRRIGATION_*` env vars per farm. There is no API/UI to edit them — use `scripts/set_farm_credentials.py` (env-driven, prints no secrets, `VERIFY=1` replays a real device-data call). The 406 "Client Signature Invalid" outage was a wrong stored credential, not a code bug.
 
 ### Frontend (`frontend/src/`)
 
