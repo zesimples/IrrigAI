@@ -10,7 +10,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 
-from app.config import get_settings
+from app.config import check_production_security, get_settings
 from app.database import engine
 from app.limiter import limiter
 from app.logging_config import request_id_var, setup_logging
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    check_production_security(settings)
     logger.info("IrrigAI backend starting up")
     yield
     logger.info("IrrigAI backend shutting down")

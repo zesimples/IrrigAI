@@ -45,6 +45,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   # Dedicated scheduler worker — the only process that runs APScheduler.
@@ -65,6 +71,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      # The worker has no HTTP server — probe the Redis scheduler heartbeat
+      # (stamped on startup and after every job tick). Fails if it goes stale.
+      test: ["CMD", "python", "-m", "app.worker_health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   frontend:

@@ -34,7 +34,13 @@ recommendations_generated_total = Counter(
 scheduler_job_runs_total = Counter(
     "irrigai_scheduler_job_runs_total",
     "Scheduler job execution attempts",
-    ["job", "status"],  # status: success | failure | skipped
+    ["job", "status"],  # status: success | partial_failure | failure | skipped
+)
+
+scheduler_farm_failures_total = Counter(
+    "irrigai_scheduler_farm_failures_total",
+    "Per-farm failures within a scheduler job (alert on a rising rate)",
+    ["job"],
 )
 
 flowmeter_device_ingestion_total = Counter(

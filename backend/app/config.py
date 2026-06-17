@@ -70,6 +70,37 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
 
+_INSECURE_SECRET_KEY = "change-me-in-production"
+
+
+def check_production_security(settings: Settings) -> None:
+    """Fail fast on insecure key configuration when running outside DEBUG.
+
+    Called at application startup. In production a dedicated ENCRYPTION_KEY is
+    mandatory — otherwise field encryption silently derives its key from
+    SECRET_KEY, so one leaked JWT secret also exposes every encrypted farm
+    credential. The placeholder SECRET_KEY is likewise rejected.
+    """
+    if settings.DEBUG:
+        return
+    problems: list[str] = []
+    if not settings.ENCRYPTION_KEY:
+        problems.append(
+            "ENCRYPTION_KEY is not set — refusing to derive the field-encryption "
+            "key from SECRET_KEY in production. Generate a dedicated key and set "
+            "ENCRYPTION_KEY."
+        )
+    if settings.SECRET_KEY == _INSECURE_SECRET_KEY:
+        problems.append(
+            "SECRET_KEY is still the placeholder default — set a unique secret."
+        )
+    if problems:
+        raise RuntimeError(
+            "Insecure production configuration (set DEBUG=true only for local/dev):\n- "
+            + "\n- ".join(problems)
+        )
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

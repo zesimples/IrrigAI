@@ -13,7 +13,7 @@ import asyncio
 import logging
 import signal
 
-from app.config import get_settings
+from app.config import check_production_security, get_settings
 from app.logging_config import setup_logging
 
 _settings = get_settings()
@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 async def main() -> None:
     from app.services.scheduler import start_scheduler, stop_scheduler
+
+    # Refuse to boot the ingestion worker with insecure key config — it reads
+    # the same encrypted per-farm credentials as the backend.
+    check_production_security(_settings)
 
     logger.info("IrrigAI worker starting...")
     start_scheduler()
