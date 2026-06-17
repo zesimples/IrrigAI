@@ -106,11 +106,11 @@ Cada linha: máximo 20 palavras. Sem introdução. Sem conclusão. Sem parágraf
 REGRAS CRÍTICAS — lê com atenção:
 - A decisão do motor é o campo "recommendation_action" em cada sector.
   • "irrigate"      → sector precisa de rega agora.
-  • "no_irrigation" → sector NÃO precisa de rega, independentemente de qualquer outro valor.
+  • "skip" ou "defer" → sector NÃO precisa de rega, independentemente de qualquer outro valor ("defer" = adiar, p.ex. chuva prevista cobre o défice).
   • Ausente / null  → sem recomendação gerada.
 - O campo "irrigation_depth_mm" é apenas o volume calculado; NÃO indica necessidade de rega se "recommendation_action" ≠ "irrigate".
 - Para "Rega urgente": lista EXCLUSIVAMENTE os sectores com "recommendation_action": "irrigate", com o "irrigation_depth_mm" respectivo.
-- Para "Sem necessidade": agrupa numa só linha todos os sectores com "recommendation_action": "no_irrigation".
+- Para "Sem necessidade": agrupa numa só linha todos os sectores com "recommendation_action": "skip" ou "defer".
 - Se nenhum sector tiver "recommendation_action": "irrigate", não cries ponto "Rega urgente" — substitui por "Sem necessidade: todos os sectores".
 - Se há previsão de chuva relevante (> 5 mm), diz se vale a pena esperar.
 - Se há alertas activos, menciona-os em ponto próprio.
@@ -134,11 +134,11 @@ Each line: 20 words maximum. No intro. No conclusion. No paragraphs.
 CRITICAL RULES — read carefully:
 - The engine decision is the "recommendation_action" field on each sector.
   • "irrigate"      → sector needs irrigation now.
-  • "no_irrigation" → sector does NOT need irrigation, regardless of any other value.
+  • "skip" or "defer" → sector does NOT need irrigation, regardless of any other value ("defer" = wait, e.g. forecast rain covers the deficit).
   • Absent / null   → no recommendation generated yet.
 - The "irrigation_depth_mm" field is only the calculated volume; it does NOT indicate irrigation need if "recommendation_action" ≠ "irrigate".
 - For "Irrigation needed": list ONLY sectors where "recommendation_action": "irrigate", with their "irrigation_depth_mm".
-- For "No action": group all sectors with "recommendation_action": "no_irrigation" into one line.
+- For "No action": group all sectors with "recommendation_action": "skip" or "defer" into one line.
 - If no sector has "recommendation_action": "irrigate", skip "Irrigation needed" — write "No action: all sectors" instead.
 - If relevant rainfall is forecast (> 5 mm), say whether it is worth waiting.
 - If there are active alerts, mention them in a dedicated bullet.

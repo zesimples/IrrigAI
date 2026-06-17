@@ -326,3 +326,22 @@ def test_render_probe_interpretation_includes_summary_advice_evidence_and_action
     assert "• Conselho: Não há necessidade de regar agora." in rendered
     assert "• Evidência: humidade adequada; estável" in rendered
     assert "• Próxima ação: Monitorizar a tendência nas próximas 24h." in rendered
+
+
+@pytest.mark.parametrize("language", ["pt", "en"])
+def test_farm_summary_prompt_gates_on_real_recommendation_actions(language):
+    """The farm-summary prompt must key 'no irrigation needed' off the real engine
+    values (skip/defer), never the phantom 'no_irrigation' that the enum never emits.
+
+    context_builder passes rec.action verbatim, so a prompt that tells the LLM to
+    match 'no_irrigation' matches nothing — the same phantom-value class of bug that
+    broke the sector probe-guard (commit 1fad961)."""
+    from app.ai.prompt_templates import get_farm_summary_template
+    from app.core.enums import RecommendationAction
+
+    template = get_farm_summary_template(language)
+
+    assert "no_irrigation" not in template
+    # The real "Não regar" decisions must be named so the LLM can group them.
+    assert RecommendationAction.SKIP.value in template
+    assert RecommendationAction.DEFER.value in template
