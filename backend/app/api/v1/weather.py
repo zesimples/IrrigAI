@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
-from app.models import Farm, WeatherForecast, WeatherObservation
+from app.models import WeatherForecast, WeatherObservation
 from app.schemas.common import MessageResponse
 from app.schemas.weather import Et0Point, Et0Response, WeatherForecastOut, WeatherObservationOut
 
@@ -13,12 +14,11 @@ router = APIRouter(tags=["weather"])
 @router.get("/farms/{farm_id}/weather/observations", response_model=list[WeatherObservationOut])
 async def get_observations(
     farm_id: str,
+    access: Access,
     limit: int = Query(7, ge=1, le=30),
     db: AsyncSession = Depends(get_db),
 ):
-    farm = await db.get(Farm, farm_id)
-    if not farm:
-        raise HTTPException(404, detail="Farm not found")
+    await access.farm(farm_id)
     rows = (
         await db.execute(
             select(WeatherObservation)
@@ -31,10 +31,8 @@ async def get_observations(
 
 
 @router.get("/farms/{farm_id}/weather/forecast", response_model=list[WeatherForecastOut])
-async def get_forecast(farm_id: str, db: AsyncSession = Depends(get_db)):
-    farm = await db.get(Farm, farm_id)
-    if not farm:
-        raise HTTPException(404, detail="Farm not found")
+async def get_forecast(farm_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    await access.farm(farm_id)
     rows = (
         await db.execute(
             select(WeatherForecast)
@@ -48,12 +46,11 @@ async def get_forecast(farm_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/farms/{farm_id}/weather/et0", response_model=Et0Response)
 async def get_et0(
     farm_id: str,
+    access: Access,
     limit: int = Query(14, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
 ):
-    farm = await db.get(Farm, farm_id)
-    if not farm:
-        raise HTTPException(404, detail="Farm not found")
+    await access.farm(farm_id)
     rows = (
         await db.execute(
             select(WeatherObservation)
@@ -70,10 +67,8 @@ async def get_et0(
 
 
 @router.post("/farms/{farm_id}/weather/trigger-fetch", response_model=MessageResponse)
-async def trigger_weather_fetch(farm_id: str, db: AsyncSession = Depends(get_db)):
-    farm = await db.get(Farm, farm_id)
-    if not farm:
-        raise HTTPException(404, detail="Farm not found")
+async def trigger_weather_fetch(farm_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    await access.farm(farm_id)
     from app.services.ingestion import ingest_farm
     result = await ingest_farm(farm_id, db)
     return MessageResponse(

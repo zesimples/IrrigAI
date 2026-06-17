@@ -12,9 +12,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
 from app.engine.auto_calibration import AutoCalibrationResult, AutoCalibrationService
-from app.models import Plot, Sector, SectorCropProfile, SoilPreset
+from app.models import Plot, SectorCropProfile, SoilPreset
 from app.services.audit_service import audit
 
 router = APIRouter(tags=["auto-calibration"])
@@ -62,10 +63,8 @@ class AutoCalibrationOut(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/sectors/{sector_id}/auto-calibration", response_model=AutoCalibrationOut)
-async def get_auto_calibration(sector_id: str, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def get_auto_calibration(sector_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    sector = await access.sector(sector_id)
 
     # Check if suppressed
     now = datetime.now(UTC)
@@ -89,10 +88,12 @@ async def get_auto_calibration(sector_id: str, db: AsyncSession = Depends(get_db
 
 
 @router.post("/sectors/{sector_id}/auto-calibration/accept", response_model=dict)
-async def accept_auto_calibration(sector_id: str, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def accept_auto_calibration(
+    sector_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    sector = await access.sector(sector_id)
 
     result = await _service.analyze_sector(sector_id, db)
     if result is None:
@@ -161,10 +162,12 @@ async def accept_auto_calibration(sector_id: str, db: AsyncSession = Depends(get
 
 
 @router.post("/sectors/{sector_id}/auto-calibration/dismiss", response_model=dict)
-async def dismiss_auto_calibration(sector_id: str, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def dismiss_auto_calibration(
+    sector_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    sector = await access.sector(sector_id)
 
     dismissed_until = datetime.now(UTC) + timedelta(days=30)
     sector.auto_calibration_dismissed_until = dismissed_until
@@ -179,7 +182,7 @@ async def dismiss_auto_calibration(sector_id: str, db: AsyncSession = Depends(ge
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _to_out(result: AutoCalibrationResult) -> AutoCalibrationOut:
-    from app.engine.auto_calibration import ObservedSoilPoints, SoilMatchResult, SoilPresetMatch
+    from app.engine.auto_calibration import SoilPresetMatch
 
     def _match_out(m: SoilPresetMatch) -> SoilPresetMatchOut:
         return SoilPresetMatchOut(

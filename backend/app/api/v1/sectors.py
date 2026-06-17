@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
 from app.models import (
     Alert,
@@ -35,13 +36,12 @@ router = APIRouter(tags=["sectors"])
 @router.get("/plots/{plot_id}/sectors", response_model=PaginatedResponse[SectorOut])
 async def list_sectors(
     plot_id: str,
+    access: Access,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    plot = await db.get(Plot, plot_id)
-    if not plot:
-        raise HTTPException(404, detail="Plot not found")
+    await access.plot(plot_id)
 
     offset = (page - 1) * page_size
     total = (
@@ -63,10 +63,8 @@ async def list_sectors(
 
 
 @router.get("/sectors/{sector_id}", response_model=SectorDetail)
-async def get_sector(sector_id: str, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def get_sector(sector_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    sector = await access.sector(sector_id)
 
     irrig_result = await db.execute(
         select(IrrigationSystem).where(IrrigationSystem.sector_id == sector_id)
@@ -86,10 +84,8 @@ async def get_sector(sector_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/sectors/{sector_id}/status", response_model=SectorStatus)
-async def get_sector_status(sector_id: str, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def get_sector_status(sector_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    sector = await access.sector(sector_id)
 
     now = datetime.now(UTC)
 
@@ -212,10 +208,13 @@ async def get_sector_status(sector_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/plots/{plot_id}/sectors", response_model=SectorOut, status_code=201)
-async def create_sector(plot_id: str, body: SectorCreate, db: AsyncSession = Depends(get_db)):
-    plot = await db.get(Plot, plot_id)
-    if not plot:
-        raise HTTPException(404, detail="Plot not found")
+async def create_sector(
+    plot_id: str,
+    body: SectorCreate,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.plot(plot_id)
     sector = Sector(plot_id=plot_id, **body.model_dump())
     db.add(sector)
     await db.flush()
@@ -255,11 +254,10 @@ async def create_sector(plot_id: str, body: SectorCreate, db: AsyncSession = Dep
 async def create_or_replace_irrigation_system(
     sector_id: str,
     body: IrrigationSystemCreate,
+    access: Access,
     db: AsyncSession = Depends(get_db),
 ):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+    await access.sector(sector_id)
     # Remove existing if any
     existing = (
         await db.execute(select(IrrigationSystem).where(IrrigationSystem.sector_id == sector_id))
@@ -275,16 +273,20 @@ async def create_or_replace_irrigation_system(
 
 
 @router.get("/sectors/{sector_id}/stress-projection", response_model=StressProjectionOut)
-async def get_live_stress_projection(sector_id: str, db: AsyncSession = Depends(get_db)):
+async def get_live_stress_projection(
+    sector_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
     """Compute a fresh stress projection for a sector using current sensor + forecast data."""
     from datetime import date as _date
+
+    from app.engine import et0 as et0_mod
+    from app.engine import probe_interpreter, water_balance
     from app.engine.pipeline import build_sector_context, build_weather_context
-    from app.engine import et0 as et0_mod, probe_interpreter, water_balance
     from app.engine.stress_projection import StressProjector
 
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+    sector = await access.sector(sector_id)
 
     plot = await db.get(Plot, sector.plot_id)
     if not plot:
@@ -334,10 +336,13 @@ async def get_live_stress_projection(sector_id: str, db: AsyncSession = Depends(
 
 
 @router.put("/sectors/{sector_id}", response_model=SectorOut)
-async def update_sector(sector_id: str, body: SectorUpdate, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def update_sector(
+    sector_id: str,
+    body: SectorUpdate,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    sector = await access.sector(sector_id)
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(sector, k, v)
     await db.commit()
@@ -346,10 +351,8 @@ async def update_sector(sector_id: str, body: SectorUpdate, db: AsyncSession = D
 
 
 @router.post("/sectors/{sector_id}/archive", response_model=SectorOut)
-async def archive_sector(sector_id: str, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def archive_sector(sector_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    sector = await access.sector(sector_id)
     sector.is_archived = True
     sector.archived_at = datetime.now(UTC)
     await db.commit()
@@ -358,10 +361,8 @@ async def archive_sector(sector_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/sectors/{sector_id}/unarchive", response_model=SectorOut)
-async def unarchive_sector(sector_id: str, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def unarchive_sector(sector_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    sector = await access.sector(sector_id)
     sector.is_archived = False
     sector.archived_at = None
     await db.commit()

@@ -22,9 +22,8 @@ from app.models import DetectedWaterEvent, Farm, Plot, Probe, Sector
 from app.models.user import User
 from app.services.water_event_service import detect_and_persist_water_events
 
-# A dedicated user the auth override get-or-creates, so it exists regardless of
-# which seed data the target DB happens to have (local demo seed vs. CI fresh DB).
-_TEST_AUTH_EMAIL = "api-test-fixture@irrigai.test"
+# Seeded probe fixtures below are owned by the demo seed user.
+_TEST_AUTH_EMAIL = "you@irrigai.dev"
 
 
 async def _get_or_create_test_user(session_factory) -> User:

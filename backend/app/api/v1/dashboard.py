@@ -6,16 +6,16 @@ All data is read from DB — no engine is re-run here.
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
 from app.engine.et0 import compute_et0
 from app.engine.types import DailyWeather
 from app.models import (
     Alert,
-    Farm,
     Flowmeter,
     IrrigationEvent,
     Plot,
@@ -39,10 +39,8 @@ router = APIRouter(tags=["dashboard"])
 
 
 @router.get("/farms/{farm_id}/dashboard", response_model=DashboardResponse)
-async def get_dashboard(farm_id: str, db: AsyncSession = Depends(get_db)):
-    farm = await db.get(Farm, farm_id)
-    if not farm:
-        raise HTTPException(404, detail="Farm not found")
+async def get_dashboard(farm_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    farm = await access.farm(farm_id)
 
     today = datetime.now(UTC).date()
 

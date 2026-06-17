@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
 from app.engine.water_event_detector import detect_water_events
 from app.models import (
@@ -22,10 +23,10 @@ from app.schemas.probe import (
     DepthReadings,
     DetectedWaterEventOut,
     IngestionRunOut,
-    ProbeDepthDiagnostics,
     ProbeCreate,
-    ProbeDetail,
+    ProbeDepthDiagnostics,
     ProbeDepthOut,
+    ProbeDetail,
     ProbeOut,
     ProbeReadingGap,
     ProbeReadingsDiagnosticsResponse,
@@ -44,10 +45,8 @@ router = APIRouter(tags=["probes"])
 
 
 @router.get("/sectors/{sector_id}/probes", response_model=list[ProbeOut])
-async def list_probes(sector_id: str, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def list_probes(sector_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    await access.sector(sector_id)
     probes = (
         await db.execute(select(Probe).where(Probe.sector_id == sector_id))
     ).scalars().all()
@@ -55,10 +54,8 @@ async def list_probes(sector_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/probes/{probe_id}", response_model=ProbeDetail)
-async def get_probe(probe_id: str, db: AsyncSession = Depends(get_db)):
-    probe = await db.get(Probe, probe_id)
-    if not probe:
-        raise HTTPException(404, detail="Probe not found")
+async def get_probe(probe_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    probe = await access.probe(probe_id)
     depths = (
         await db.execute(select(ProbeDepth).where(ProbeDepth.probe_id == probe_id))
     ).scalars().all()
@@ -71,13 +68,12 @@ async def get_probe(probe_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/probes/{probe_id}/readings/diagnostics", response_model=ProbeReadingsDiagnosticsResponse)
 async def get_probe_readings_diagnostics(
     probe_id: str,
+    access: Access,
     since: datetime | None = Query(None, description="ISO timestamp, defaults to 7d ago"),
     until: datetime | None = Query(None, description="ISO timestamp, defaults to now"),
     db: AsyncSession = Depends(get_db),
 ):
-    probe = await db.get(Probe, probe_id)
-    if not probe:
-        raise HTTPException(404, detail="Probe not found")
+    probe = await access.probe(probe_id)
 
     now = datetime.now(UTC)
     since = _ensure_utc(since or (now - timedelta(days=7)))
@@ -142,15 +138,14 @@ async def get_probe_readings_diagnostics(
 @router.get("/probes/{probe_id}/readings", response_model=ProbeReadingsResponse)
 async def get_probe_readings(
     probe_id: str,
+    access: Access,
     since: datetime | None = Query(None, description="ISO timestamp, defaults to 48h ago"),
     until: datetime | None = Query(None, description="ISO timestamp, defaults to now"),
     depth_cm: str | None = Query(None, description="Comma-separated depths, e.g. '10,30,60'"),
     interval: str | None = Query(None, description="Downsampling: '1h', '6h', '1d'"),
     db: AsyncSession = Depends(get_db),
 ):
-    probe = await db.get(Probe, probe_id)
-    if not probe:
-        raise HTTPException(404, detail="Probe not found")
+    probe = await access.probe(probe_id)
 
     # Time range defaults
     now = datetime.now(UTC)
@@ -266,10 +261,13 @@ async def get_probe_readings(
 
 
 @router.post("/sectors/{sector_id}/probes", response_model=ProbeOut, status_code=201)
-async def create_probe(sector_id: str, body: ProbeCreate, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def create_probe(
+    sector_id: str,
+    body: ProbeCreate,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.sector(sector_id)
     probe = Probe(sector_id=sector_id, **body.model_dump())
     db.add(probe)
     await db.commit()
@@ -278,10 +276,13 @@ async def create_probe(sector_id: str, body: ProbeCreate, db: AsyncSession = Dep
 
 
 @router.put("/probes/{probe_id}", response_model=ProbeOut)
-async def update_probe(probe_id: str, body: ProbeUpdate, db: AsyncSession = Depends(get_db)):
-    probe = await db.get(Probe, probe_id)
-    if not probe:
-        raise HTTPException(404, detail="Probe not found")
+async def update_probe(
+    probe_id: str,
+    body: ProbeUpdate,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    probe = await access.probe(probe_id)
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(probe, k, v)
     await db.commit()
@@ -296,15 +297,14 @@ async def update_probe(probe_id: str, body: ProbeUpdate, db: AsyncSession = Depe
 @router.get("/probes/{probe_id}/ingestion-runs", response_model=list[IngestionRunOut])
 async def list_probe_ingestion_runs(
     probe_id: str,
+    access: Access,
     limit: int = Query(20, ge=1, le=100),
     since: datetime | None = Query(None),
     until: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the most recent ProviderIngestionRun rows for a probe."""
-    probe = await db.get(Probe, probe_id)
-    if not probe:
-        raise HTTPException(404, detail="Probe not found")
+    await access.probe(probe_id)
 
     stmt = (
         select(ProviderIngestionRun)
@@ -332,15 +332,14 @@ async def list_probe_ingestion_runs(
 @router.get("/probes/{probe_id}/water-events", response_model=list[DetectedWaterEventOut])
 async def list_probe_water_events(
     probe_id: str,
+    access: Access,
     since: datetime | None = Query(None),
     until: datetime | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
     """Return persisted DetectedWaterEvent rows for a probe."""
-    probe = await db.get(Probe, probe_id)
-    if not probe:
-        raise HTTPException(404, detail="Probe not found")
+    await access.probe(probe_id)
     if since is not None and since.tzinfo is None:
         since = since.replace(tzinfo=UTC)
     if until is not None and until.tzinfo is None:
@@ -352,14 +351,13 @@ async def list_probe_water_events(
 @router.post("/probes/{probe_id}/water-events/refresh", response_model=list[DetectedWaterEventOut])
 async def refresh_probe_water_events(
     probe_id: str,
+    access: Access,
     since: datetime | None = Query(None),
     until: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Explicitly run detection and persist water events for a probe."""
-    probe = await db.get(Probe, probe_id)
-    if not probe:
-        raise HTTPException(404, detail="Probe not found")
+    await access.probe(probe_id)
     if since is not None:
         since = _ensure_utc(since)
     if until is not None:
@@ -378,12 +376,11 @@ async def refresh_probe_water_events(
 @router.post("/water-events/{event_id}/confirm", response_model=DetectedWaterEventOut)
 async def confirm_water_event(
     event_id: str,
+    access: Access,
     body: WaterEventConfirmBody = WaterEventConfirmBody(),
     db: AsyncSession = Depends(get_db),
 ):
-    event = await db.get(DetectedWaterEvent, event_id)
-    if event is None:
-        raise HTTPException(404, detail="Water event not found")
+    event = await access.water_event(event_id)
     event.status = "confirmed"
     event.confirmed_at = datetime.now(UTC)
     if body.notes:
@@ -398,12 +395,11 @@ async def confirm_water_event(
 @router.post("/water-events/{event_id}/reject", response_model=DetectedWaterEventOut)
 async def reject_water_event(
     event_id: str,
+    access: Access,
     body: WaterEventConfirmBody = WaterEventConfirmBody(),
     db: AsyncSession = Depends(get_db),
 ):
-    event = await db.get(DetectedWaterEvent, event_id)
-    if event is None:
-        raise HTTPException(404, detail="Water event not found")
+    event = await access.water_event(event_id)
     event.status = "rejected"
     event.confirmed_at = datetime.now(UTC)
     if body.notes:

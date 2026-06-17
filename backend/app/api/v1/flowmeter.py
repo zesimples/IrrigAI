@@ -12,8 +12,9 @@ from sqlalchemy import func as sql_func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
-from app.models import Farm, Flowmeter, FlowmeterReading, IrrigationEventDetected, Plot, Sector
+from app.models import Flowmeter, FlowmeterReading, IrrigationEventDetected, Plot, Sector
 from app.schemas.flowmeter import (
     CropSummary,
     FlowmeterAnalysisRequest,
@@ -97,18 +98,21 @@ def _validate_date_range(since: datetime, until: datetime) -> None:
 
 
 @router.get("/sectors/{sector_id}/flowmeter", response_model=FlowmeterOut)
-async def get_sector_flowmeter(sector_id: str, db: AsyncSession = Depends(get_db)):
+async def get_sector_flowmeter(sector_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    await access.sector(sector_id)
     return await _get_flowmeter_or_404(sector_id, db)
 
 
 @router.get("/sectors/{sector_id}/flowmeter/readings", response_model=FlowmeterReadingsResponse)
 async def get_flowmeter_readings(
     sector_id: str,
+    access: Access,
     since: datetime | None = Query(None),
     until: datetime | None = Query(None),
     interval: Literal["15m", "1h", "1d"] = Query("15m"),
     db: AsyncSession = Depends(get_db),
 ):
+    await access.sector(sector_id)
     flowmeter = await _get_flowmeter_or_404(sector_id, db)
 
     sector = await db.get(Sector, sector_id)
@@ -170,10 +174,12 @@ async def get_flowmeter_readings(
 @router.get("/sectors/{sector_id}/flowmeter/events", response_model=FlowmeterEventsResponse)
 async def get_flowmeter_events(
     sector_id: str,
+    access: Access,
     since: datetime | None = Query(None),
     until: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
+    await access.sector(sector_id)
     flowmeter = await _get_flowmeter_or_404(sector_id, db)
 
     now = datetime.now(UTC)
@@ -216,12 +222,11 @@ async def get_flowmeter_events(
 @router.get("/farms/{farm_id}/flowmeter-dashboard", response_model=FlowmeterDashboardResponse)
 async def get_flowmeter_dashboard(
     farm_id: str,
+    access: Access,
     period: Literal["7d", "30d", "season"] = Query("7d"),
     db: AsyncSession = Depends(get_db),
 ):
-    farm = await db.get(Farm, farm_id)
-    if farm is None:
-        raise HTTPException(404, detail="Farm not found")
+    farm = await access.farm(farm_id)
 
     now = datetime.now(UTC)
 
@@ -348,6 +353,7 @@ async def get_flowmeter_dashboard(
 )
 async def farm_flowmeter_analysis(
     farm_id: str,
+    access: Access,
     body: FlowmeterAnalysisRequest = FlowmeterAnalysisRequest(),
     db: AsyncSession = Depends(get_db),
 ) -> FlowmeterAnalysisResponse:
@@ -363,6 +369,7 @@ async def farm_flowmeter_analysis(
     from app.services.flowmeter_cache import get_analysis_cache, set_analysis_cache
 
     settings = get_settings()
+    await access.farm(farm_id)
 
     # Always compute fresh statistics (fast DB queries)
     svc = FlowmeterAnalyticsService()
@@ -412,6 +419,7 @@ async def farm_flowmeter_analysis(
 )
 async def sector_flowmeter_analysis(
     sector_id: str,
+    access: Access,
     body: FlowmeterAnalysisRequest = FlowmeterAnalysisRequest(),
     db: AsyncSession = Depends(get_db),
 ) -> FlowmeterSectorAnalysisResponse:
@@ -423,6 +431,7 @@ async def sector_flowmeter_analysis(
     from app.services.flowmeter_cache import get_analysis_cache, set_analysis_cache
 
     settings = get_settings()
+    await access.sector(sector_id)
 
     svc = FlowmeterAnalyticsService()
     try:
@@ -440,9 +449,10 @@ async def sector_flowmeter_analysis(
             return FlowmeterSectorAnalysisResponse(analysis=cached_text, statistics=stats)
 
     # Load flow rate reference for this sector, if available
+    from sqlalchemy import select as _select
+
     from app.models import Flowmeter as _Flowmeter
     from app.models.flowmeter_reference import FlowmeterReference
-    from sqlalchemy import select as _select
 
     _fm_result = await db.execute(
         _select(_Flowmeter).where(_Flowmeter.sector_id == sector_id, _Flowmeter.is_active.is_(True))
@@ -489,6 +499,7 @@ async def sector_flowmeter_analysis(
 @router.get("/farms/{farm_id}/flowmeter-deviations", response_model=FlowmeterDeviationsResponse)
 async def get_flowmeter_deviations(
     farm_id: str,
+    access: Access,
     db: AsyncSession = Depends(get_db),
 ):
     """Return per-sector deviation summary vs crop interior-event averages (7-day window).
@@ -496,9 +507,7 @@ async def get_flowmeter_deviations(
     Pure computation — no LLM, no cache, no DB writes. Used by the inline
     FlowmeterDeviationWarnings frontend component.
     """
-    farm = await db.get(Farm, farm_id)
-    if farm is None:
-        raise HTTPException(404, detail="Farm not found")
+    await access.farm(farm_id)
 
     from app.alerts.flowmeter_checker import FlowmeterAlertChecker
     return await FlowmeterAlertChecker().compute_deviations(farm_id, db)

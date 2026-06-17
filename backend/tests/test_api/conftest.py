@@ -7,10 +7,10 @@ pytest-asyncio gives each test function its own event loop.
 The `db` fixture yields a direct AsyncSession for seeding data; committed rows
 are visible to subsequent client requests (postgres MVCC).
 
-Auth: the v1 API now requires authentication on every endpoint. The default
-`client` fixture authenticates as the seed-fixture user (so data-focused tests
-stay green); `noauth_client` leaves `get_current_user` intact for tests that
-exercise the real token flow (see test_auth_permissions.py).
+Auth: the v1 API requires authentication on every endpoint and tenant ownership
+on farm resources. The default `client` fixture authenticates as the demo seed
+owner; `noauth_client` leaves `get_current_user` intact for tests that exercise
+the real token flow (see test_auth_permissions.py).
 """
 
 import pytest
@@ -25,9 +25,9 @@ from app.database import get_db
 from app.main import app
 from app.models.user import User
 
-# A dedicated user the auth override get-or-creates, so it exists regardless of
-# which seed data the target DB happens to have (local demo seed vs. CI fresh DB).
-_TEST_AUTH_EMAIL = "api-test-fixture@irrigai.test"
+# Seeded demo farms are owned by this user. Data-focused API tests should access
+# those resources as the owning tenant, not as a cross-tenant fixture user.
+_TEST_AUTH_EMAIL = "you@irrigai.dev"
 
 
 async def _get_or_create_test_user(session_factory) -> User:
@@ -86,12 +86,7 @@ async def noauth_client(settings):
 
 @pytest.fixture
 async def client(settings):
-    """HTTP client authenticated as the seed user, DB overridden to NullPool.
-
-    Data-focused API tests don't care *which* user is logged in (endpoints
-    enforce authentication, not per-tenant ownership), so we authenticate as the
-    seeded fixture user to keep them green after global auth was introduced.
-    """
+    """HTTP client authenticated as the seeded demo owner, DB overridden to NullPool."""
     engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

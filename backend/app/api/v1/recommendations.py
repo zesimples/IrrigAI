@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.limiter import limiter
-
+from app.access import Access
 from app.database import get_db
-from app.models import Farm, Probe, Recommendation, RecommendationReason, Sector
+from app.limiter import limiter
+from app.models import Probe, Recommendation, RecommendationReason
 from app.models.sector_override import SectorOverride
-from app.schemas.common import MessageResponse, PaginatedResponse
+from app.schemas.common import PaginatedResponse
 from app.schemas.recommendation import (
     AcceptRequest,
     OverrideRequest,
@@ -19,13 +19,12 @@ from app.schemas.recommendation import (
     RejectRequest,
     StressProjectionOut,
 )
-from app.services.audit_service import audit
 from app.services.audit_service import (
+    OVERRIDE_CREATED,
     RECOMMENDATION_ACCEPTED,
-    RECOMMENDATION_GENERATED,
     RECOMMENDATION_OVERRIDDEN,
     RECOMMENDATION_REJECTED,
-    OVERRIDE_CREATED,
+    audit,
 )
 from app.services.recommendation_service import generate_for_farm, generate_recommendation
 
@@ -35,13 +34,12 @@ router = APIRouter(tags=["recommendations"])
 @router.get("/sectors/{sector_id}/recommendations", response_model=PaginatedResponse[RecommendationOut])
 async def list_sector_recommendations(
     sector_id: str,
+    access: Access,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+    await access.sector(sector_id)
 
     offset = (page - 1) * page_size
     total = (
@@ -69,10 +67,8 @@ async def list_sector_recommendations(
 
 
 @router.get("/recommendations/{rec_id}", response_model=RecommendationDetail)
-async def get_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)):
-    rec = await db.get(Recommendation, rec_id)
-    if not rec:
-        raise HTTPException(404, detail="Recommendation not found")
+async def get_recommendation(rec_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    rec = await access.recommendation(rec_id)
     reasons = (
         await db.execute(
             select(RecommendationReason)
@@ -112,10 +108,13 @@ async def get_recommendation(rec_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/sectors/{sector_id}/recommendations/generate", response_model=RecommendationOut, status_code=201)
 @limiter.limit("10/minute")
-async def generate_sector_recommendation(request: Request, sector_id: str, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def generate_sector_recommendation(
+    request: Request,
+    sector_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.sector(sector_id)
     try:
         rec, _ = await generate_recommendation(sector_id, db)
     except Exception as exc:
@@ -125,10 +124,13 @@ async def generate_sector_recommendation(request: Request, sector_id: str, db: A
 
 @router.post("/farms/{farm_id}/recommendations/generate", response_model=list[RecommendationOut], status_code=201)
 @limiter.limit("3/minute")
-async def generate_farm_recommendations(request: Request, farm_id: str, db: AsyncSession = Depends(get_db)):
-    farm = await db.get(Farm, farm_id)
-    if not farm:
-        raise HTTPException(404, detail="Farm not found")
+async def generate_farm_recommendations(
+    request: Request,
+    farm_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.farm(farm_id)
     try:
         results = await generate_for_farm(farm_id, db)
     except Exception as exc:
@@ -137,10 +139,13 @@ async def generate_farm_recommendations(request: Request, farm_id: str, db: Asyn
 
 
 @router.post("/recommendations/{rec_id}/accept", response_model=RecommendationOut)
-async def accept_recommendation(rec_id: str, body: AcceptRequest, db: AsyncSession = Depends(get_db)):
-    rec = await db.get(Recommendation, rec_id)
-    if not rec:
-        raise HTTPException(404, detail="Recommendation not found")
+async def accept_recommendation(
+    rec_id: str,
+    body: AcceptRequest,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    rec = await access.recommendation(rec_id)
     before = {"is_accepted": rec.is_accepted}
     rec.is_accepted = True
     rec.accepted_at = datetime.now(UTC)
@@ -154,10 +159,13 @@ async def accept_recommendation(rec_id: str, body: AcceptRequest, db: AsyncSessi
 
 
 @router.post("/recommendations/{rec_id}/reject", response_model=RecommendationOut)
-async def reject_recommendation(rec_id: str, body: RejectRequest, db: AsyncSession = Depends(get_db)):
-    rec = await db.get(Recommendation, rec_id)
-    if not rec:
-        raise HTTPException(404, detail="Recommendation not found")
+async def reject_recommendation(
+    rec_id: str,
+    body: RejectRequest,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    rec = await access.recommendation(rec_id)
     before = {"is_accepted": rec.is_accepted}
     rec.is_accepted = False
     if body.notes:
@@ -171,11 +179,12 @@ async def reject_recommendation(rec_id: str, body: RejectRequest, db: AsyncSessi
 
 @router.post("/recommendations/{rec_id}/override", response_model=RecommendationOut)
 async def override_recommendation(
-    rec_id: str, body: OverrideRequest, db: AsyncSession = Depends(get_db)
+    rec_id: str,
+    body: OverrideRequest,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
 ):
-    rec = await db.get(Recommendation, rec_id)
-    if not rec:
-        raise HTTPException(404, detail="Recommendation not found")
+    rec = await access.recommendation(rec_id)
 
     # Capture original values for audit
     before = {

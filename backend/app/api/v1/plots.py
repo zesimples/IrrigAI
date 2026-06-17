@@ -1,11 +1,12 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
-from app.models import Farm, Plot, Sector, SoilPreset
+from app.models import Plot, Sector, SoilPreset
 from app.schemas.common import PaginatedResponse
 from app.schemas.plot import PlotCreate, PlotDetail, PlotOut, PlotUpdate
 
@@ -15,13 +16,12 @@ router = APIRouter(tags=["plots"])
 @router.get("/farms/{farm_id}/plots", response_model=PaginatedResponse[PlotOut])
 async def list_plots(
     farm_id: str,
+    access: Access,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    farm = await db.get(Farm, farm_id)
-    if not farm:
-        raise HTTPException(404, detail="Farm not found")
+    await access.farm(farm_id)
 
     offset = (page - 1) * page_size
     total = (
@@ -41,10 +41,8 @@ async def list_plots(
 
 
 @router.get("/plots/{plot_id}", response_model=PlotDetail)
-async def get_plot(plot_id: str, db: AsyncSession = Depends(get_db)):
-    plot = await db.get(Plot, plot_id)
-    if not plot:
-        raise HTTPException(404, detail="Plot not found")
+async def get_plot(plot_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    plot = await access.plot(plot_id)
     sector_count = (
         await db.execute(
             select(func.count()).select_from(Sector).where(Sector.plot_id == plot_id)
@@ -54,10 +52,13 @@ async def get_plot(plot_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/farms/{farm_id}/plots", response_model=PlotOut, status_code=201)
-async def create_plot(farm_id: str, body: PlotCreate, db: AsyncSession = Depends(get_db)):
-    farm = await db.get(Farm, farm_id)
-    if not farm:
-        raise HTTPException(404, detail="Farm not found")
+async def create_plot(
+    farm_id: str,
+    body: PlotCreate,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.farm(farm_id)
     plot = Plot(farm_id=farm_id, **body.model_dump())
     # Inherit soil hydraulic properties from the chosen preset when not given
     # explicitly, so the plot has usable FC/PWP straight away.
@@ -77,10 +78,13 @@ async def create_plot(farm_id: str, body: PlotCreate, db: AsyncSession = Depends
 
 
 @router.put("/plots/{plot_id}", response_model=PlotOut)
-async def update_plot(plot_id: str, body: PlotUpdate, db: AsyncSession = Depends(get_db)):
-    plot = await db.get(Plot, plot_id)
-    if not plot:
-        raise HTTPException(404, detail="Plot not found")
+async def update_plot(
+    plot_id: str,
+    body: PlotUpdate,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    plot = await access.plot(plot_id)
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(plot, k, v)
     await db.commit()
@@ -89,10 +93,8 @@ async def update_plot(plot_id: str, body: PlotUpdate, db: AsyncSession = Depends
 
 
 @router.post("/plots/{plot_id}/archive", response_model=PlotOut)
-async def archive_plot(plot_id: str, db: AsyncSession = Depends(get_db)):
-    plot = await db.get(Plot, plot_id)
-    if not plot:
-        raise HTTPException(404, detail="Plot not found")
+async def archive_plot(plot_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    plot = await access.plot(plot_id)
     plot.is_archived = True
     plot.archived_at = datetime.now(UTC)
     await db.commit()
@@ -101,10 +103,8 @@ async def archive_plot(plot_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/plots/{plot_id}/unarchive", response_model=PlotOut)
-async def unarchive_plot(plot_id: str, db: AsyncSession = Depends(get_db)):
-    plot = await db.get(Plot, plot_id)
-    if not plot:
-        raise HTTPException(404, detail="Plot not found")
+async def unarchive_plot(plot_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    plot = await access.plot(plot_id)
     plot.is_archived = False
     plot.archived_at = None
     await db.commit()

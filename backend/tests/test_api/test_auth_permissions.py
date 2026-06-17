@@ -8,7 +8,7 @@ Exit criteria:
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -17,8 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import create_access_token, hash_password
 from app.config import get_settings
+from app.models.alert import Alert
 from app.models.base import new_uuid
 from app.models.farm import Farm
+from app.models.irrigation_event import IrrigationEvent
+from app.models.plot import Plot
+from app.models.probe import Probe
+from app.models.recommendation import Recommendation
+from app.models.sector import Sector
 from app.models.user import User
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -45,6 +51,20 @@ async def _make_farm(db: AsyncSession, owner: User) -> Farm:
     db.add(farm)
     await db.commit()
     return farm
+
+
+async def _make_sector_tree(db: AsyncSession, owner: User) -> tuple[Farm, Plot, Sector]:
+    farm = await _make_farm(db, owner)
+    plot = Plot(id=new_uuid(), farm_id=farm.id, name=f"Plot-{uuid.uuid4()}", area_ha=1.0)
+    sector = Sector(
+        id=new_uuid(),
+        plot_id=plot.id,
+        name=f"Sector-{uuid.uuid4()}",
+        crop_type="olive",
+    )
+    db.add_all([plot, sector])
+    await db.commit()
+    return farm, plot, sector
 
 
 # ── 401 — unauthenticated ─────────────────────────────────────────────────────
@@ -132,6 +152,122 @@ async def test_user_cannot_update_other_users_farm(noauth_client: AsyncClient, d
         f"/api/v1/farms/{bobs_farm.id}",
         json={"name": "Stolen"},
         headers=_bearer(create_access_token(alice.id)),
+    )
+    assert resp.status_code == 404
+
+
+async def test_user_cannot_read_other_users_dashboard(
+    noauth_client: AsyncClient,
+    db: AsyncSession,
+):
+    alice = await _make_user(db, "alice-dashboard")
+    bob = await _make_user(db, "bob-dashboard")
+    bobs_farm = await _make_farm(db, bob)
+
+    resp = await noauth_client.get(
+        f"/api/v1/farms/{bobs_farm.id}/dashboard",
+        headers=_bearer(create_access_token(alice.id)),
+    )
+    assert resp.status_code == 404
+
+
+async def test_user_cannot_traverse_other_users_nested_resources(
+    noauth_client: AsyncClient,
+    db: AsyncSession,
+):
+    alice = await _make_user(db, "alice-nested")
+    bob = await _make_user(db, "bob-nested")
+    bobs_farm, bobs_plot, bobs_sector = await _make_sector_tree(db, bob)
+    probe = Probe(id=new_uuid(), sector_id=bobs_sector.id, external_id=f"probe-{uuid.uuid4()}")
+    db.add(probe)
+    await db.commit()
+
+    token = _bearer(create_access_token(alice.id))
+    checks = [
+        f"/api/v1/farms/{bobs_farm.id}/plots",
+        f"/api/v1/plots/{bobs_plot.id}",
+        f"/api/v1/plots/{bobs_plot.id}/sectors",
+        f"/api/v1/sectors/{bobs_sector.id}",
+        f"/api/v1/sectors/{bobs_sector.id}/probes",
+        f"/api/v1/probes/{probe.id}",
+    ]
+    for path in checks:
+        resp = await noauth_client.get(path, headers=token)
+        assert resp.status_code == 404, path
+
+
+async def test_user_cannot_mutate_other_users_recommendation(
+    noauth_client: AsyncClient,
+    db: AsyncSession,
+):
+    alice = await _make_user(db, "alice-rec")
+    bob = await _make_user(db, "bob-rec")
+    _, _, bobs_sector = await _make_sector_tree(db, bob)
+    rec = Recommendation(
+        id=new_uuid(),
+        sector_id=bobs_sector.id,
+        generated_at=datetime.now(UTC),
+        target_date=date.today(),
+        action="skip",
+        confidence_score=0.8,
+        confidence_level="medium",
+        inputs_snapshot={},
+        computation_log={},
+    )
+    db.add(rec)
+    await db.commit()
+
+    resp = await noauth_client.post(
+        f"/api/v1/recommendations/{rec.id}/accept",
+        json={"notes": "should not work"},
+        headers=_bearer(create_access_token(alice.id)),
+    )
+    assert resp.status_code == 404
+
+
+async def test_user_cannot_mutate_other_users_alert_or_irrigation_event(
+    noauth_client: AsyncClient,
+    db: AsyncSession,
+):
+    alice = await _make_user(db, "alice-mutate")
+    bob = await _make_user(db, "bob-mutate")
+    bobs_farm, _, bobs_sector = await _make_sector_tree(db, bob)
+    alert = Alert(
+        id=new_uuid(),
+        farm_id=bobs_farm.id,
+        sector_id=bobs_sector.id,
+        alert_type="missing_data",
+        severity="warning",
+        title_pt="Aviso",
+        title_en="Warning",
+        description_pt="Descricao",
+        description_en="Description",
+    )
+    event = IrrigationEvent(
+        id=new_uuid(),
+        sector_id=bobs_sector.id,
+        start_time=datetime.now(UTC),
+        source="manual",
+    )
+    db.add_all([alert, event])
+    await db.commit()
+
+    token = _bearer(create_access_token(alice.id))
+    alert_resp = await noauth_client.post(f"/api/v1/alerts/{alert.id}/resolve", headers=token)
+    event_resp = await noauth_client.put(
+        f"/api/v1/irrigation-events/{event.id}",
+        json={"notes": "should not work"},
+        headers=token,
+    )
+    assert alert_resp.status_code == 404
+    assert event_resp.status_code == 404
+
+
+async def test_audit_log_requires_admin(noauth_client: AsyncClient, db: AsyncSession):
+    user = await _make_user(db, "audit-nonadmin")
+    resp = await noauth_client.get(
+        "/api/v1/audit-log",
+        headers=_bearer(create_access_token(user.id)),
     )
     assert resp.status_code == 404
 

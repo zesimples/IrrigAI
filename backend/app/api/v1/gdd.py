@@ -5,15 +5,14 @@ GET  /farms/{farm_id}/gdd-status            — get GDD status for all farm sect
 POST /sectors/{sector_id}/gdd-status/confirm — confirm suggested phenological stage
 """
 
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
 from app.engine.gdd_tracker import GDDStatus, GDDTracker
-from app.models import Farm, Sector
 from app.services.audit_service import audit
 
 router = APIRouter(tags=["gdd"])
@@ -52,10 +51,8 @@ class ConfirmStageRequest(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/sectors/{sector_id}/gdd-status", response_model=GDDStatusOut)
-async def get_sector_gdd_status(sector_id: str, db: AsyncSession = Depends(get_db)):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+async def get_sector_gdd_status(sector_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    await access.sector(sector_id)
 
     status = await _tracker.compute_accumulated_gdd(sector_id, db)
     if status is None:
@@ -68,10 +65,8 @@ async def get_sector_gdd_status(sector_id: str, db: AsyncSession = Depends(get_d
 
 
 @router.get("/farms/{farm_id}/gdd-status", response_model=list[GDDStatusOut])
-async def get_farm_gdd_status(farm_id: str, db: AsyncSession = Depends(get_db)):
-    farm = await db.get(Farm, farm_id)
-    if not farm:
-        raise HTTPException(404, detail="Farm not found")
+async def get_farm_gdd_status(farm_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    await access.farm(farm_id)
 
     statuses = await _tracker.compute_gdd_for_all_sectors(farm_id, db)
     return [_to_out(s) for s in statuses]
@@ -81,11 +76,10 @@ async def get_farm_gdd_status(farm_id: str, db: AsyncSession = Depends(get_db)):
 async def confirm_gdd_stage(
     sector_id: str,
     body: ConfirmStageRequest,
+    access: Access,
     db: AsyncSession = Depends(get_db),
 ):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+    sector = await access.sector(sector_id)
 
     if body.stage:
         new_stage = body.stage

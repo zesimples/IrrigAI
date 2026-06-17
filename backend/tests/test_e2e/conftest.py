@@ -45,12 +45,15 @@ async def client(settings):
 
     async def override_get_current_user() -> User:
         # E2E tests run against the seeded DB; authenticate as the seed owner
-        # (you@irrigai.dev), who owns the demo farm. expire_on_commit=False keeps
-        # the loaded attributes usable after the session closes.
+        # (you@irrigai.dev), who owns the demo farm. Mark it admin in-memory
+        # because the full pipeline verifies the global audit-log endpoint.
+        # expire_on_commit=False keeps loaded attributes usable after close.
         async with session_factory() as session:
-            return (
+            user = (
                 await session.execute(select(User).where(User.email == "you@irrigai.dev"))
             ).scalar_one()
+            user.role = "admin"
+            return user
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_get_current_user

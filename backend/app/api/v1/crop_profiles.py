@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
 from app.models import CropProfileTemplate, SoilPreset
 from app.models.plot import Plot
@@ -45,7 +46,12 @@ async def list_soil_presets(db: AsyncSession = Depends(get_db)):
 # ── Sector Crop Profile ───────────────────────────────────────────────────────
 
 @router.get("/sectors/{sector_id}/crop-profile", response_model=SectorCropProfileOut)
-async def get_sector_crop_profile(sector_id: str, db: AsyncSession = Depends(get_db)):
+async def get_sector_crop_profile(
+    sector_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.sector(sector_id)
     profile = (
         await db.execute(
             select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
@@ -60,8 +66,10 @@ async def get_sector_crop_profile(sector_id: str, db: AsyncSession = Depends(get
 async def update_sector_crop_profile(
     sector_id: str,
     body: SectorCropProfileUpdate,
+    access: Access,
     db: AsyncSession = Depends(get_db),
 ):
+    await access.sector(sector_id)
     profile = (
         await db.execute(
             select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
@@ -97,8 +105,10 @@ async def update_sector_crop_profile(
 async def reset_sector_crop_profile(
     sector_id: str,
     body: SectorCropProfileReset,
+    access: Access,
     db: AsyncSession = Depends(get_db),
 ):
+    await access.sector(sector_id)
     tpl = await db.get(CropProfileTemplate, body.template_id)
     if not tpl:
         raise HTTPException(404, detail="Template not found")

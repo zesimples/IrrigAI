@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
-from app.models import Farm, Flowmeter, Plot, Sector
+from app.models import Flowmeter, Plot, Sector
 from app.models.flowmeter_reference import FlowmeterReference
 from app.schemas.flowmeter import FlowmeterReferenceManualSet, FlowmeterReferenceOut
 
@@ -47,7 +48,12 @@ def _ref_to_out(ref: FlowmeterReference, sector: Sector | None = None) -> Flowme
 
 
 @router.get("/sectors/{sector_id}/flowmeter-reference", response_model=FlowmeterReferenceOut)
-async def get_flowmeter_reference(sector_id: str, db: AsyncSession = Depends(get_db)):
+async def get_flowmeter_reference(
+    sector_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.sector(sector_id)
     fm, sector = await _get_flowmeter_and_sector(sector_id, db)
     result = await db.execute(
         select(FlowmeterReference).where(FlowmeterReference.flowmeter_id == str(fm.id))
@@ -62,7 +68,12 @@ async def get_flowmeter_reference(sector_id: str, db: AsyncSession = Depends(get
     "/sectors/{sector_id}/flowmeter-reference/recompute",
     response_model=FlowmeterReferenceOut,
 )
-async def recompute_flowmeter_reference(sector_id: str, db: AsyncSession = Depends(get_db)):
+async def recompute_flowmeter_reference(
+    sector_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.sector(sector_id)
     fm, sector = await _get_flowmeter_and_sector(sector_id, db)
     from app.services.flowmeter_reference import FlowmeterReferenceService
     svc = FlowmeterReferenceService()
@@ -80,10 +91,12 @@ async def recompute_flowmeter_reference(sector_id: str, db: AsyncSession = Depen
 async def set_manual_flowmeter_reference(
     sector_id: str,
     body: FlowmeterReferenceManualSet,
+    access: Access,
     db: AsyncSession = Depends(get_db),
 ):
     from app.models.base import new_uuid
 
+    await access.sector(sector_id)
     fm, sector = await _get_flowmeter_and_sector(sector_id, db)
     result = await db.execute(
         select(FlowmeterReference).where(FlowmeterReference.flowmeter_id == str(fm.id))
@@ -122,10 +135,12 @@ async def set_manual_flowmeter_reference(
 
 
 @router.get("/farms/{farm_id}/flowmeter-references", response_model=list[FlowmeterReferenceOut])
-async def get_farm_flowmeter_references(farm_id: str, db: AsyncSession = Depends(get_db)):
-    farm = await db.get(Farm, farm_id)
-    if farm is None:
-        raise HTTPException(404, detail="Farm not found")
+async def get_farm_flowmeter_references(
+    farm_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.farm(farm_id)
 
     result = await db.execute(
         select(FlowmeterReference, Flowmeter, Sector)
@@ -140,10 +155,12 @@ async def get_farm_flowmeter_references(farm_id: str, db: AsyncSession = Depends
 
 
 @router.get("/farms/{farm_id}/flowmeter-flow-rate-alerts")
-async def get_farm_flow_rate_alerts(farm_id: str, db: AsyncSession = Depends(get_db)):
-    farm = await db.get(Farm, farm_id)
-    if farm is None:
-        raise HTTPException(404, detail="Farm not found")
+async def get_farm_flow_rate_alerts(
+    farm_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.farm(farm_id)
 
     from datetime import timedelta
 

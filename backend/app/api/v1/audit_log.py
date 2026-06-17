@@ -4,9 +4,10 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.schemas.common import PaginatedResponse
@@ -30,6 +31,7 @@ class AuditLogOut(BaseModel):
 
 @router.get("/audit-log", response_model=PaginatedResponse[AuditLogOut])
 async def list_audit_log(
+    access: Access,
     entity_type: str | None = Query(None),
     action: str | None = Query(None),
     entity_id: str | None = Query(None),
@@ -37,6 +39,7 @@ async def list_audit_log(
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
+    await access.require_admin()
     q = select(AuditLog)
     count_q = select(func.count()).select_from(AuditLog)
 

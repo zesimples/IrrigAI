@@ -2,13 +2,13 @@
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access import Access
 from app.database import get_db
-from app.models import Sector
 from app.models.sector_override import SectorOverride
 from app.services.audit_service import OVERRIDE_CREATED, OVERRIDE_REMOVED, audit
 
@@ -54,12 +54,11 @@ class SectorOverrideOut(BaseModel):
 @router.get("/sectors/{sector_id}/overrides", response_model=list[SectorOverrideOut])
 async def list_sector_overrides(
     sector_id: str,
+    access: Access,
     active_only: bool = True,
     db: AsyncSession = Depends(get_db),
 ):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+    await access.sector(sector_id)
 
     q = select(SectorOverride).where(SectorOverride.sector_id == sector_id)
     if active_only:
@@ -75,11 +74,10 @@ async def list_sector_overrides(
 async def create_sector_override(
     sector_id: str,
     body: OverrideCreateRequest,
+    access: Access,
     db: AsyncSession = Depends(get_db),
 ):
-    sector = await db.get(Sector, sector_id)
-    if not sector:
-        raise HTTPException(404, detail="Sector not found")
+    await access.sector(sector_id)
 
     override = SectorOverride(
         sector_id=sector_id,
@@ -108,10 +106,12 @@ async def create_sector_override(
 
 
 @router.delete("/overrides/{override_id}", status_code=204)
-async def remove_sector_override(override_id: str, db: AsyncSession = Depends(get_db)):
-    override = await db.get(SectorOverride, override_id)
-    if not override:
-        raise HTTPException(404, detail="Override not found")
+async def remove_sector_override(
+    override_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    override = await access.override(override_id)
 
     before = {"is_active": override.is_active}
     override.is_active = False
