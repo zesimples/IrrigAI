@@ -78,7 +78,8 @@ Next.js 14 (frontend container)←  App Router UI, proxies /api/v1 → backend
 | `schemas/` | Pydantic v2 request/response schemas, including `schemas/ai.py` for structured LLM output. |
 | `alerts/engine.py` | Alert generation from recommendation state changes. |
 | `anomaly/` | Rule-based anomaly detection on probe readings. |
-| `services/scheduler.py` | APScheduler job definitions (ingestion, recommendation generation). Uses Redis locks (`job_lock.py`) to prevent duplicate runs. |
+| `services/scheduler.py` | APScheduler jobs (data + flowmeter ingestion, daily recommendations, alert check, reference recompute). Redis locks (`job_lock.py`) prevent duplicate runs. Per-farm jobs run through `_run_per_farm_job` → `classify_per_farm_run` records `success` / `partial_failure` / `failure` (an all-farms-failed run no longer logs "success") plus the `scheduler_farm_failures_total` metric. Stamps a Redis liveness heartbeat (`app/heartbeat.py`) on startup and after every job. |
+| `access.py` | Per-tenant authorization controller — see **API security** below. |
 
 **AI structured output flow:**
 1. `IrrigationAssistant` (in `ai/assistant.py`) calls `context_builder` → builds `AgronomicInterpretation` (Pydantic schema in `schemas/ai.py`) via structured OpenAI output.
@@ -89,7 +90,11 @@ Next.js 14 (frontend container)←  App Router UI, proxies /api/v1 → backend
 
 **Soil-water source (`swc_source`):** the pipeline records how rootzone SWC was obtained on each recommendation — `probe_weighted` (probe, authoritative), `water_balance_model` (the FAO-56 model for probe-less + flowmeter sectors), or `default_estimate` (static 70%-of-TAW seed). Surfaced in `Recommendation.inputs_snapshot` (`swc_source` + `swc_model` metadata). The model never runs when a probe is present, and degrades to the static seed on any error (per-sector try/except).
 
-**Per-farm MyIrrigation credentials:** stored **encrypted** in the `farm_credentials` table (`EncryptedString`), overriding the global `MYIRRIGATION_*` env vars per farm. There is no API/UI to edit them — use `scripts/set_farm_credentials.py` (env-driven, prints no secrets, `VERIFY=1` replays a real device-data call). The 406 "Client Signature Invalid" outage was a wrong stored credential, not a code bug.
+**Per-farm MyIrrigation credentials:** stored **encrypted** in the `farm_credentials` table (`EncryptedString`), overriding the global `MYIRRIGATION_*` env vars per farm. There is no API/UI to edit them — use `scripts/set_farm_credentials.py` (env-driven, prints no secrets, `VERIFY=1` replays a real device-data call). The 406 "Client Signature Invalid" outage was a wrong stored credential, not a code bug. The Fernet key comes from `ENCRYPTION_KEY` (see below) — **changing it makes existing ciphertext undecryptable** (`decrypt()` returns `None`, not an error), so keep it stable or re-run `set_farm_credentials.py` after a rotation.
+
+**API security (authentication + ownership):** every `/api/v1` endpoint requires a valid bearer token — `router.py` attaches `Depends(get_current_user)` to every router group **except `auth`** (token issue/register). New routers added there inherit auth automatically; don't rely on per-endpoint `current_user` params for the gate. Authorization is per-tenant via `app/access.py` `AccessController` (dependency `Access`), which resolves farm/plot/sector/probe/recommendation/irrigation_event/alert/override/water_event scoped to the caller's owned farm chain (`farm.owner_id`); **`role == "admin"` bypasses ownership** and sees all farms. Missing *and* cross-tenant resources both return **404** (no existence leak). Global catalogs (`crop-profile-templates`, `soil-presets`) stay readable by any authed user; `/audit-log` is **admin-only**. Operator/staff accounts (e.g. `you@irrigai.dev`) should be `admin`; client accounts own their own farm. Note: agronomist is *not* admin-bypassed — an agronomist owning no farms currently sees nothing.
+
+**Startup security guard:** `config.check_production_security()` runs in the backend lifespan and `worker.main()` and **aborts boot** when `DEBUG=false` and `ENCRYPTION_KEY` is unset (would derive the encryption key from `SECRET_KEY`) or `SECRET_KEY` is still the `change-me-in-production` placeholder. A crash-looping backend behind nginx surfaces as 500s on every API call.
 
 ### Frontend (`frontend/src/`)
 
@@ -119,17 +124,24 @@ Next.js 14 (frontend container)←  App Router UI, proxies /api/v1 → backend
 | `WEATHER_PROVIDER` | `mock` / `openweathermap` |
 | `LLM_PROVIDER` | `mock` / `openai` |
 | `DEFAULT_LANGUAGE` | `pt` (default, Portuguese) |
+| `DEBUG` | `false` in prod — arms the startup security guard |
+| `SECRET_KEY` | JWT signing; must be a strong unique value in prod (not the placeholder) |
+| `ENCRYPTION_KEY` | Fernet key for `farm_credentials`; **mandatory when `DEBUG=false`** (falls back to `SECRET_KEY` only in dev). Keep stable — see per-farm credentials above |
 
 CI always uses `mock` for all three providers.
+
+**Container health:** `docker-compose.yml` healthchecks the backend (`/health`) and the worker (`python -m app.worker_health`, which reads the scheduler heartbeat — the worker has no HTTP server). In prod, nginx waits for the backend to be `service_healthy`.
 
 ---
 
 ## Testing
 
 - Backend tests use `pytest-asyncio` (`asyncio_mode = "auto"`). All async test functions run automatically.
-- Tests under `tests/test_api/` use an in-memory async SQLite or test Postgres — see `conftest.py`.
+- Tests under `tests/test_api/` run against test Postgres (NullPool per request) — see `conftest.py`.
+- **Auth in tests:** since global auth landed, data-focused fixtures override `get_current_user`. `test_api/conftest.py` exposes `client` (authenticated as the seeded owner `you@irrigai.dev`, get-or-created) and `noauth_client` (real token flow, used by `test_auth_permissions.py`). CI runs `python -m app.seed` before pytest, which creates that owner. The e2e fixture flags the seeded user `admin` in-memory for the global audit-log assertion.
 - Frontend unit tests: Vitest (`npm run test:run`).
 - E2E: Playwright (`npm run e2e`), requires the full stack running.
+- CI (`.github/workflows/ci.yml`) runs the backend suite and `frontend-lint`; it does **not** run backend `ruff` (pre-existing project-wide `B008` on FastAPI `Depends()` defaults is not gated).
 
 ---
 
@@ -138,3 +150,19 @@ CI always uses `mock` for all three providers.
 - **Python**: ruff, line-length 100, target py312. Rules: E, F, I (isort), UP (pyupgrade), B (bugbear), SIM.
 - **TypeScript**: ESLint (`.eslintrc.json`), strict TypeScript.
 - Migrations are always **autogenerated** (`make makemigration`), never hand-written — verify the diff before committing.
+
+---
+
+## Roadmap / next topics
+
+Detailed tracking in `docs/handoff-codex-2026-06-17.md`.
+
+**Done in the 2026-06-17 security/ops cycle:** farm-summary prompt `no_irrigation` fix; API authentication on all v1 endpoints; per-tenant ownership (`access.py`); mandatory-prod `ENCRYPTION_KEY` startup guard; backend + worker healthchecks; scheduler partial-failure observability + heartbeat.
+
+**Open, roughly prioritized:**
+1. **Rate limiting** on `/auth/*` (token, register) and `/chat/*` — only the recommendation endpoints are limited today (`app/limiter.py`); credential-stuffing and LLM-cost exposure. *(Next up.)*
+2. **E2E Playwright job** — stabilize stack-boot and make it a required check, or stop treating it as a gate (currently red/never-green on main; backend suite is green).
+3. **Frontend data-fetching & coverage** — `useEffect` fetch waterfalls + races on rapid param change (`ProbeReadingsInline.tsx`); all-or-nothing `Promise.all` (`FlowmeterDashboard.tsx`). Adopt React Query/SWR or at least `Promise.allSettled` + `AbortController`. Thin Vitest coverage on core components; large `sectors/[sectorId]/page.tsx`.
+4. **Engine-correctness review (UNVERIFIED — confirm before acting):** zero-TAW division (`engine/trigger.py`), probe-unit validation accepting VWC when `unit != vwc_m3m3` (`engine/probe_interpreter.py`), ingestion dedup idempotency on partial/crashed runs (`services/ingestion.py`).
+5. **Agronomist-role access** — `AccessController` only bypasses for `admin`; agronomist accounts owning no farms see nothing. Decide whether agronomists need read access (make admin, grant ownership, or extend the controller).
+6. **Lower:** dependency pinning + lockfile CI check; `pytest-cov` coverage gate; frontend Dockerfile `--legacy-peer-deps`; CORS reject-origin test.
