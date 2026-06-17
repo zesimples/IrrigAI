@@ -15,6 +15,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 
+def classify_flowmeter_run(readings_inserted: int, devices_failed: int) -> str:
+    """Scheduler-metric status for one flowmeter ingestion run.
+
+    Returns ``"failure"`` only when devices failed *and* nothing was ingested —
+    the silent all-406 case that previously logged ``"success"`` and hid a
+    multi-day outage. A run that ingested anything (or had no devices to process)
+    is ``"success"``; per-device failures are surfaced separately on the
+    flowmeter_device_ingestion_total metric so alerting can catch partial loss.
+    """
+    if devices_failed > 0 and readings_inserted == 0:
+        return "failure"
+    return "success"
+
+
 # ---------------------------------------------------------------------------
 # Event detection
 # ---------------------------------------------------------------------------
@@ -230,6 +244,8 @@ class FlowmeterIngestionService:
         now = datetime.now(UTC)
         total_inserted = 0
         total_events = 0
+        devices_succeeded = 0
+        devices_failed = 0
 
         for flowmeter in flowmeters:
             since = _adaptive_since(flowmeter.last_reading_at, 2, now)
@@ -245,21 +261,29 @@ class FlowmeterIngestionService:
                         flowmeter, earliest_ts, latest_ts, db
                     )
                     total_events += events_added
+                devices_succeeded += 1
             except Exception:
-                logger.exception(
-                    "FlowmeterIngestion: failed for device %s (flowmeter %s)",
-                    flowmeter.external_device_id, flowmeter.id,
-                )
+                # ingest_device already logged the traceback; just count it here so
+                # the run reports the failure instead of silently reporting success.
+                devices_failed += 1
 
         await db.commit()
         logger.info(
-            "FlowmeterIngestion farm=%s: %d readings inserted, %d events detected",
-            farm_id, total_inserted, total_events,
+            "FlowmeterIngestion farm=%s: %d readings inserted, %d events detected, "
+            "%d/%d devices ok",
+            farm_id, total_inserted, total_events, devices_succeeded, len(flowmeters),
         )
+        if devices_failed:
+            logger.warning(
+                "FlowmeterIngestion farm=%s: %d/%d device(s) failed",
+                farm_id, devices_failed, len(flowmeters),
+            )
         return {
             "flowmeters_processed": len(flowmeters),
             "readings_inserted": total_inserted,
             "events_detected": total_events,
+            "devices_succeeded": devices_succeeded,
+            "devices_failed": devices_failed,
         }
 
     async def ingest_device(
@@ -292,13 +316,17 @@ class FlowmeterIngestionService:
                 params={"use_key_index": ""},
             )
         except Exception:
+            # Re-raise so the caller (ingest_farm) counts this as a failed device.
+            # Previously this returned (0, None, None), making an all-failed run
+            # (e.g. 406 on every device) indistinguishable from "no new data" and
+            # letting the scheduler record the run as a success.
             logger.exception(
                 "FlowmeterIngestion: API call failed for device %s (%s..%s)",
                 flowmeter.external_device_id,
                 since.isoformat(),
                 until.isoformat(),
             )
-            return 0, None, None
+            raise
 
         readings = parse_flowmeter_data(raw, flowmeter.external_device_id)
         if not readings:

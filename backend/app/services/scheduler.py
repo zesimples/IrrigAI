@@ -129,20 +129,30 @@ async def _run_flowmeter_ingestion() -> None:
             return
 
         from app.database import get_db
+        from app.metrics import flowmeter_device_ingestion_total
         from app.models import Farm
-        from app.services.flowmeter_ingestion import FlowmeterIngestionService
+        from app.services.flowmeter_ingestion import (
+            FlowmeterIngestionService,
+            classify_flowmeter_run,
+        )
         from sqlalchemy import select
 
         logger.info("Scheduler: flowmeter ingestion at %s", datetime.now(UTC))
         service = FlowmeterIngestionService()
 
         try:
+            total_inserted = 0
+            devices_ok = 0
+            devices_failed = 0
             async for db in get_db():
                 try:
                     farms = (await db.execute(select(Farm))).scalars().all()
                     for farm in farms:
                         try:
-                            await service.ingest_farm(farm.id, db)
+                            summary = await service.ingest_farm(farm.id, db)
+                            total_inserted += summary.get("readings_inserted", 0)
+                            devices_ok += summary.get("devices_succeeded", 0)
+                            devices_failed += summary.get("devices_failed", 0)
                         except Exception:
                             logger.exception(
                                 "Flowmeter ingestion failed for farm %s", farm.id
@@ -156,7 +166,14 @@ async def _run_flowmeter_ingestion() -> None:
                             )
                 except Exception:
                     logger.exception("Flowmeter ingestion job failed")
-            scheduler_job_runs_total.labels("flowmeter_ingestion", "success").inc()
+            if devices_ok:
+                flowmeter_device_ingestion_total.labels("success").inc(devices_ok)
+            if devices_failed:
+                flowmeter_device_ingestion_total.labels("failure").inc(devices_failed)
+            # Record the real outcome: an all-devices-failed run (e.g. 406 on every
+            # device) is a failure, not a success — even though the job didn't raise.
+            status = classify_flowmeter_run(total_inserted, devices_failed)
+            scheduler_job_runs_total.labels("flowmeter_ingestion", status).inc()
         except Exception:
             scheduler_job_runs_total.labels("flowmeter_ingestion", "failure").inc()
             raise

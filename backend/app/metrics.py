@@ -37,6 +37,12 @@ scheduler_job_runs_total = Counter(
     ["job", "status"],  # status: success | failure | skipped
 )
 
+flowmeter_device_ingestion_total = Counter(
+    "irrigai_flowmeter_device_ingestion_total",
+    "Per-device flowmeter ingestion outcomes (alert on a rising failure rate)",
+    ["result"],  # result: success | failure
+)
+
 # ── AI / LLM ─────────────────────────────────────────────────────────────────
 
 ai_requests_total = Counter(

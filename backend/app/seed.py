@@ -107,6 +107,7 @@ PROBE_CONQ_O05  = "1597/3832"  # Turno 5 (S20) — olive
 
 import copy
 import math
+import os
 import random
 import re
 import uuid
@@ -117,6 +118,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import hash_password
 from app.config import get_settings
+from app.seed_credentials import CRED_FIELDS, resolve_seed_credentials
 from app.models import (
     CropProfileTemplate,
     Farm,
@@ -136,6 +138,22 @@ from app.models import (
 )
 
 settings = get_settings()
+
+
+def _existing_cred_values(farm: Farm | None) -> dict[str, str | None] | None:
+    """Snapshot a farm's stored MyIrrigation credentials before a re-seed deletes
+    the farm (and cascade-deletes its credential row).
+
+    Re-seeding clears and recreates the demo farms; without this snapshot the
+    baked (typo'd) credential in seed.py would overwrite a credential that was
+    manually corrected on production via scripts/set_farm_credentials.py — exactly
+    the regression that re-triggered the MyIrrigation 406 outage. Pass the result
+    to resolve_seed_credentials() so an existing credential is preserved verbatim.
+    """
+    if farm is None or farm.credentials is None:
+        return None
+    return {field: getattr(farm.credentials, field) for field in CRED_FIELDS}
+
 
 # ---------------------------------------------------------------------------
 # Crop profile template data (from project brief)
@@ -441,6 +459,7 @@ def seed(engine, only_farms: set[str] | None = None) -> None:
         existing_farm = session.execute(
             select(Farm).where(Farm.name == "Herdade do Esporão")
         ).scalar_one_or_none()
+        existing_esporao_creds = _existing_cred_values(existing_farm)
 
         if existing_farm:
             print("  Clearing existing demo data...")
@@ -541,11 +560,18 @@ def seed(engine, only_farms: set[str] | None = None) -> None:
         session.add(FarmCredentials(
             id=str(uuid.uuid4()),
             farm_id=farm.id,
-            username="esporao_api",
-            password="esporao_api",
-            client_id="7JTTP4XGVZ9S1M7PEABD",
-            client_secret="PKVSK5BPNNYE4JE2KOQ2",
-            weather_device_id="1583",
+            **resolve_seed_credentials(
+                existing_esporao_creds,
+                {
+                    "username": "esporao_api",
+                    "password": "esporao_api",
+                    "client_id": "7JTTP4XGVZ9S1M7PEABD",
+                    "client_secret": "PKVSK5BPNNYE4JE2KOQ2",
+                    "weather_device_id": "1583",
+                },
+                env=os.environ,
+                env_prefix="SEED_ESPORAO_",
+            ),
         ))
         session.flush()
 
@@ -1024,6 +1050,7 @@ def seed(engine, only_farms: set[str] | None = None) -> None:
         existing_conq = session.execute(
             select(Farm).where(Farm.name == "Herdade dos Conqueiros")
         ).scalar_one_or_none()
+        existing_conq_creds = _existing_cred_values(existing_conq)
 
         if existing_conq:
             print("  Clearing existing Conqueiros data...")
@@ -1110,11 +1137,21 @@ def seed(engine, only_farms: set[str] | None = None) -> None:
         session.add(FarmCredentials(
             id=str(uuid.uuid4()),
             farm_id=farm_conq.id,
-            username="conqueiros_api",
-            password="conqueiros_api",
-            client_id="YYRIcSNREmmcFwNbt1i02w",
-            client_secret="BTF77w9Yf6gUjabINuiFRA",
-            weather_device_id="824",
+            **resolve_seed_credentials(
+                existing_conq_creds,
+                {
+                    "username": "conqueiros_api",
+                    "password": "conqueiros_api",
+                    # NOTE: this baked client_id carries the I/l typo that caused the
+                    # 406 outage — kept only as a last-resort fallback. A real stored
+                    # credential is always preserved (see resolve_seed_credentials).
+                    "client_id": "YYRIcSNREmmcFwNbt1i02w",
+                    "client_secret": "BTF77w9Yf6gUjabINuiFRA",
+                    "weather_device_id": "824",
+                },
+                env=os.environ,
+                env_prefix="SEED_CONQUEIROS_",
+            ),
         ))
         session.flush()
 
@@ -1588,6 +1625,7 @@ def seed_adl(engine) -> None:
         existing_adl = session.execute(
             select(Farm).where(Farm.name == "Herdade das Amendoas do Lago")
         ).scalar_one_or_none()
+        existing_adl_creds = _existing_cred_values(existing_adl)
 
         if existing_adl:
             print("  Clearing existing Amendoas do Lago data...")
@@ -1664,11 +1702,18 @@ def seed_adl(engine) -> None:
         session.add(FarmCredentials(
             id=str(uuid.uuid4()),
             farm_id=farm_adl.id,
-            username="amendoaslago_api",
-            password="amendoaslago_api",
-            client_id="8xjCxtrmHAbTQtQ5icbV0g",
-            client_secret="b98AvVG7HzPhcO24xAAxTA",
-            weather_device_id="4919",
+            **resolve_seed_credentials(
+                existing_adl_creds,
+                {
+                    "username": "amendoaslago_api",
+                    "password": "amendoaslago_api",
+                    "client_id": "8xjCxtrmHAbTQtQ5icbV0g",
+                    "client_secret": "b98AvVG7HzPhcO24xAAxTA",
+                    "weather_device_id": "4919",
+                },
+                env=os.environ,
+                env_prefix="SEED_ADL_",
+            ),
         ))
         session.flush()
 
