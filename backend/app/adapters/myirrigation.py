@@ -119,6 +119,20 @@ async def _with_backoff(coro_factory, label: str):
     raise last_exc  # type: ignore[misc]
 
 
+def _is_client_signature_invalid(resp: httpx.Response) -> bool:
+    """True for the 406 MyIrrigation returns when the bearer token's client
+    signature is rejected — which happens when a competing login for the same
+    client_id has invalidated this token. Unlike a transient burst 406, this is
+    an auth failure: the cure is to re-authenticate, not to retry the dead token.
+    """
+    if resp.status_code != 406:
+        return False
+    try:
+        return "client signature invalid" in resp.text.lower()
+    except Exception:  # noqa: BLE001 - never let body inspection raise
+        return False
+
+
 class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
     """Adapter for MyIrrigation REST API.
 
@@ -236,7 +250,7 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
                     params=params,
                     headers=self._auth_headers(),
                 )
-                if resp.status_code in (401, 403):
+                if resp.status_code in (401, 403) or _is_client_signature_invalid(resp):
                     logger.warning("MyIrrigation: %s on GET %s — re-authenticating", resp.status_code, path)
                     self._token = None
                     self._token_expires_at = None
@@ -268,7 +282,7 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
                     params=params,
                     headers=self._auth_headers(),
                 )
-                if resp.status_code in (401, 403):
+                if resp.status_code in (401, 403) or _is_client_signature_invalid(resp):
                     logger.warning("MyIrrigation: %s on POST %s — re-authenticating", resp.status_code, path)
                     self._token = None
                     self._token_expires_at = None

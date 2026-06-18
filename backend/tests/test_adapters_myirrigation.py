@@ -520,6 +520,61 @@ async def test_post_form_json_retries_on_401():
 
 
 @pytest.mark.asyncio
+async def test_post_form_json_reauths_on_406_client_signature_invalid():
+    """A 406 'Client Signature Invalid' means the cached token was invalidated by a
+    competing login for the same client — drop it, re-authenticate, and retry with the
+    fresh token (instead of blindly retrying the same dead token)."""
+    adapter = make_adapter()
+    adapter._token = FAKE_TOKEN
+    adapter._token_expires_at = datetime.now(UTC) + timedelta(hours=1)
+
+    first_406 = mock_response(406, {"errors": ["Client Signature Invalid"]}, method="POST")
+    second_ok = mock_response(200, [], method="POST")
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+            mock_client.post.side_effect = [
+                first_406,                            # device data POST → 406 signature invalid
+                mock_response(200, TOKEN_RESPONSE),   # re-auth POST (new token)
+                second_ok,                            # retry device data POST → 200
+            ]
+
+            result = await adapter._post_form_json(
+                "/data/devices/4664/data", {"start_date": "x", "end_date": "y"}
+            )
+
+    assert result == []
+    assert mock_client.post.call_count == 3  # 406 + re-auth + retry
+
+
+@pytest.mark.asyncio
+async def test_get_json_reauths_on_406_client_signature_invalid():
+    """Same self-heal on the GET path (e.g. weather forecast) — 406 signature invalid
+    re-authenticates once and retries."""
+    adapter = make_adapter()
+    adapter._token = FAKE_TOKEN
+    adapter._token_expires_at = datetime.now(UTC) + timedelta(hours=1)
+
+    first_406 = mock_response(406, {"errors": ["Client Signature Invalid"]}, method="GET")
+    second_ok = mock_response(200, PROJECTS, method="GET")
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+            mock_client.post.return_value = mock_response(200, TOKEN_RESPONSE)  # re-auth
+            mock_client.get.side_effect = [first_406, second_ok]
+
+            result = await adapter._get_json("/data/projects")
+
+    assert result == PROJECTS
+    mock_client.post.assert_called_once()       # re-auth happened
+    assert mock_client.get.call_count == 2      # 406 + retry
+
+
+@pytest.mark.asyncio
 async def test_health_check_returns_true_on_success():
     adapter = make_adapter()
     adapter._token = FAKE_TOKEN
