@@ -75,3 +75,21 @@ groups:
         annotations:
           summary: "Recommendation engine is producing failures"
           description: "More than 5 recommendation failures in the last 30 minutes."
+
+      # ── Flowmeter device ingestion failures ─────────────────────────────────
+      # The signature of the recurring MyIrrigation 406 "Client Signature Invalid"
+      # credential outage: per-device data POSTs fail every run. The job itself
+      # does not crash (the failure is per-device), so SchedulerJobFailing alone
+      # missed it for days — this watches the per-device outcome counter directly.
+      # ~49 devices × 3 runs/h ⇒ a full outage produces ~147 failures/h; the >10
+      # threshold catches a full or large-partial outage while tolerating the odd
+      # one-off device error.
+      - alert: FlowmeterDeviceIngestionFailing
+        expr: |
+          increase(irrigai_flowmeter_device_ingestion_total{result="failure"}[1h]) > 10
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Flowmeter device ingestion is failing"
+          description: "More than 10 per-device flowmeter ingestion failures in the last hour — likely a MyIrrigation 406 credential/signature outage. Check `set_farm_credentials.py` (VERIFY=1)."
