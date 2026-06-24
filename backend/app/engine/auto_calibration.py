@@ -366,6 +366,112 @@ class AutoCalibrationService:
             status=status,
         )
 
+    async def compute_sector_calibration(
+        self, sector_id: str, db: AsyncSession
+    ) -> ProbeCalibrationResult | None:
+        """Calibrate FC / refill bounds to a sector's own VWC envelope.
+
+        Prefers cycle-based reference points (≥ CALIB_MIN_CYCLES clean cycles);
+        otherwise falls back to a percentile envelope proxy. Returns None when
+        there is too little data or the result fails plausibility guards (the
+        caller then keeps the preset FC).
+        """
+        from app.models import (
+            IrrigationEvent, Probe, ProbeDepth, ProbeReading, Sector,
+        )
+
+        sector = await db.get(Sector, sector_id)
+        if sector is None:
+            return None
+
+        since = datetime.now(UTC) - timedelta(days=CALIB_WINDOW_DAYS)
+
+        probes = (await db.execute(
+            select(Probe).where(Probe.sector_id == sector_id)
+        )).scalars().all()
+        if not probes:
+            return None
+
+        depth_ids_by_depth: dict[int, str] = {}
+        for probe in probes:
+            depths = (await db.execute(
+                select(ProbeDepth).where(
+                    ProbeDepth.probe_id == probe.id,
+                    ProbeDepth.sensor_type == "moisture",
+                )
+            )).scalars().all()
+            for d in depths:
+                depth_ids_by_depth.setdefault(d.depth_cm, d.id)
+
+        shallow_ids = {dc: did for dc, did in depth_ids_by_depth.items() if dc <= SHALLOW_MAX_DEPTH_CM}
+        if not shallow_ids:
+            shallow_ids = {dc: did for dc, did in depth_ids_by_depth.items() if dc <= 60}
+        if not shallow_ids:
+            return None
+
+        readings = (await db.execute(
+            select(ProbeReading)
+            .where(
+                ProbeReading.probe_depth_id.in_(list(shallow_ids.values())),
+                ProbeReading.timestamp >= since,
+                ProbeReading.unit == "vwc_m3m3",
+                ProbeReading.quality_flag == "ok",
+            )
+            .order_by(ProbeReading.timestamp)
+        )).scalars().all()
+        if len(readings) < CALIB_MIN_READINGS:
+            return None
+
+        id_to_depth = {did: dc for dc, did in shallow_ids.items()}
+
+        def _val(r):
+            v = r.calibrated_value if r.calibrated_value is not None else r.raw_value
+            return v
+
+        result: ProbeCalibrationResult | None = None
+
+        # --- Try cycle-based calibration first ---
+        events = (await db.execute(
+            select(IrrigationEvent).where(
+                IrrigationEvent.sector_id == sector_id,
+                IrrigationEvent.start_time >= since,
+            ).order_by(IrrigationEvent.start_time)
+        )).scalars().all()
+        detected = self._detect_irrigation_events_from_probes(readings, id_to_depth)
+        event_times = sorted(set([e.start_time for e in events] + detected))
+
+        if len(event_times) >= CALIB_MIN_CYCLES:
+            cycles = self._build_cycles(readings, id_to_depth, event_times)
+            if len(cycles) >= CALIB_MIN_CYCLES:
+                obs = self.compute_observed_reference_points(cycles)
+                result = ProbeCalibrationResult(
+                    observed_fc=round(obs.observed_fc_pct / 100, 4),
+                    observed_refill=round(obs.observed_refill_pct / 100, 4),
+                    method="cycles",
+                    num_cycles=obs.num_cycles,
+                    consistency=obs.consistency,
+                    window_days=CALIB_WINDOW_DAYS,
+                )
+
+        # --- Envelope fallback ---
+        if result is None:
+            vwc_values = [_val(r) for r in readings if _val(r) is not None]
+            if len(vwc_values) < CALIB_MIN_READINGS:
+                return None
+            fc, refill = compute_envelope_points(vwc_values)
+            result = ProbeCalibrationResult(
+                observed_fc=fc,
+                observed_refill=refill,
+                method="envelope",
+                num_cycles=0,
+                consistency=0.5,
+                window_days=CALIB_WINDOW_DAYS,
+            )
+
+        if not is_plausible_calibration(result.observed_fc, result.observed_refill):
+            return None
+        return result
+
 
 def _build_calibration_suggestion(
     match: SoilMatchResult,
