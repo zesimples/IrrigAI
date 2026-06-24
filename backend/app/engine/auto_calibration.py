@@ -395,7 +395,10 @@ class AutoCalibrationService:
             depths = (await db.execute(
                 select(ProbeDepth).where(
                     ProbeDepth.probe_id == probe.id,
-                    ProbeDepth.sensor_type == "moisture",
+                    # Real data uses "soil_moisture"; older/mock data uses "moisture".
+                    # Tension depths are excluded here and again by the vwc_m3m3 unit
+                    # filter on the readings query below.
+                    ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
                 )
             )).scalars().all()
             for d in depths:

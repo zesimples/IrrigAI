@@ -55,7 +55,9 @@ async def _make_pinned_sector(db: AsyncSession, vwc: float) -> str:
     probe = Probe(sector_id=sector.id, external_id="calib-probe")
     db.add(probe)
     await db.flush()
-    depth = ProbeDepth(probe_id=probe.id, depth_cm=20, sensor_type="moisture")
+    # Real probe data uses sensor_type "soil_moisture" (not "moisture"); the engine's
+    # probe_interpreter selects depths by unit, not sensor_type. Calibration must match.
+    depth = ProbeDepth(probe_id=probe.id, depth_cm=20, sensor_type="soil_moisture")
     db.add(depth)
     await db.flush()
     # End the series near "now" so probe_interpreter treats the sector as having
