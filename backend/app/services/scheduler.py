@@ -212,6 +212,24 @@ async def _run_reference_recompute() -> None:
     )
 
 
+async def _run_recompute_probe_calibration() -> None:
+    from app.services.probe_calibration_service import ProbeCalibrationService
+
+    svc = ProbeCalibrationService()
+
+    async def handle(farm, db) -> None:
+        n = await svc.compute_all_for_farm(str(farm.id), db)
+        await db.commit()
+        logger.info("Probe calibration: farm=%s calibrated %d sectors", farm.id, n)
+
+    await _run_per_farm_job(
+        job_name="probe_calibration",
+        lock_name="probe_calibration",
+        ttl=3_600,
+        handle_farm=handle,
+    )
+
+
 def start_scheduler() -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is not None and _scheduler.running:
@@ -251,6 +269,13 @@ def start_scheduler() -> AsyncIOScheduler:
         _run_reference_recompute,
         trigger=CronTrigger(day_of_week="mon", hour=3, minute=0, timezone="UTC"),
         id="reference_recompute",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    _scheduler.add_job(
+        _run_recompute_probe_calibration,
+        trigger=CronTrigger(day_of_week="mon", hour=4, minute=0, timezone="UTC"),
+        id="probe_calibration",
         replace_existing=True,
         misfire_grace_time=3600,
     )

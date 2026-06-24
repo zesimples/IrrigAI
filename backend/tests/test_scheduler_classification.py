@@ -25,3 +25,19 @@ def test_all_farms_failed_is_failure():
 
 def test_some_farms_failed_is_partial_failure():
     assert classify_per_farm_run(farms_ok=3, farms_failed=2) == "partial_failure"
+
+
+def test_probe_calibration_job_is_registered():
+    import asyncio
+
+    from app.services.scheduler import start_scheduler, stop_scheduler
+
+    async def _check() -> set[str]:
+        sched = start_scheduler()
+        try:
+            return {j.id for j in sched.get_jobs()}
+        finally:
+            stop_scheduler()
+
+    ids = asyncio.run(_check())
+    assert "probe_calibration" in ids
