@@ -1,8 +1,14 @@
 """Soil reference-point (FC / lower bound) resolution.
 
-Precedence: explicit SCP override > probe-calibrated envelope > plot/preset > default.
-Kept pure and separate from build_sector_context so the precedence is unit-testable
-without a DB session.
+Precedence: probe-calibrated envelope > SCP value > plot/preset > default.
+
+Calibration is measured from the sector's own probe envelope and is the most
+authoritative FC we have, so it outranks the configured SCP/plot values — those
+are auto-populated from generic soil-texture presets on every sector (the very
+thing that caused the "always 100%" pin), not deliberate per-sector overrides.
+A future explicit "FC locked by user" flag would be the only thing to rank above
+calibration. Kept pure and separate from build_sector_context so the precedence
+is unit-testable without a DB session.
 """
 from __future__ import annotations
 
@@ -30,13 +36,16 @@ def resolve_soil_bounds(
     plot_fc: float | None,
     plot_pwp: float | None,
 ) -> ResolvedSoilBounds:
-    # 1. Explicit SCP override (user-set) — highest precedence.
-    if scp_fc is not None and scp_pwp is not None:
-        return ResolvedSoilBounds(scp_fc, scp_pwp, "scp", None)
-    # 2. Probe-calibrated bounds — calibrate FC *and* the lower bound together, so
-    #    TAW shrinks to the real operating band instead of ballooning against PWP.
+    # 1. Probe-calibrated bounds — measured from the sector's own sensor, most
+    #    authoritative. Calibrate FC *and* the lower bound together, so TAW shrinks
+    #    to the real operating band instead of ballooning against PWP. Outranks the
+    #    configured SCP/plot values, which are preset-derived (the pinning cause),
+    #    not deliberate overrides.
     if calib_fc is not None and calib_refill is not None:
         return ResolvedSoilBounds(calib_fc, calib_refill, "probe_calibrated", calib_meta)
+    # 2. SCP value (per-sector soil config).
+    if scp_fc is not None and scp_pwp is not None:
+        return ResolvedSoilBounds(scp_fc, scp_pwp, "scp", None)
     # 3. Plot / preset.
     if plot_fc is not None and plot_pwp is not None:
         return ResolvedSoilBounds(plot_fc, plot_pwp, "plot_preset", None)

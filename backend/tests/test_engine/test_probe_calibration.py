@@ -50,12 +50,26 @@ def test_plausible_calibration_rejects_tiny_spread():
     assert is_plausible_calibration(observed_fc=0.40, observed_refill=0.39) is False
 
 
-def test_scp_override_wins():
+def test_calibration_outranks_scp_preset():
+    # Probe calibration is measured from the sector's own sensor and must outrank
+    # the auto-populated SCP/plot FC (the preset values that caused the pin).
     from app.engine.soil_bounds import resolve_soil_bounds
 
     b = resolve_soil_bounds(
         scp_fc=0.30, scp_pwp=0.15,
         calib_fc=0.45, calib_refill=0.30, calib_meta={"method": "cycles"},
+        plot_fc=0.16, plot_pwp=0.07,
+    )
+    assert (b.fc, b.pwp, b.source) == (0.45, 0.30, "probe_calibrated")
+    assert b.calibration == {"method": "cycles"}
+
+
+def test_scp_used_when_no_calibration():
+    from app.engine.soil_bounds import resolve_soil_bounds
+
+    b = resolve_soil_bounds(
+        scp_fc=0.30, scp_pwp=0.15,
+        calib_fc=None, calib_refill=None, calib_meta=None,
         plot_fc=0.16, plot_pwp=0.07,
     )
     assert (b.fc, b.pwp, b.source) == (0.30, 0.15, "scp")

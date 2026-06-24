@@ -19,6 +19,7 @@ from app.models import (
     ProbeDepth,
     ProbeReading,
     Sector,
+    SectorCropProfile,
     User,
 )
 from app.services.probe_calibration_service import ProbeCalibrationService
@@ -139,6 +140,13 @@ async def test_compute_and_save_upserts_one_row(db: AsyncSession):
 @pytest.mark.asyncio
 async def test_build_sector_context_uses_calibration(db: AsyncSession):
     sector_id = await _make_pinned_sector(db, vwc=0.44)   # plot preset FC=0.16
+    # Mirror prod: the sector also has an SCP with a preset-derived field_capacity.
+    # Calibration must still win over it (this is the bug that pinned prod).
+    db.add(SectorCropProfile(
+        sector_id=sector_id, crop_type="almond", mad=0.5,
+        root_depth_mature_m=0.6, root_depth_young_m=0.3,
+        field_capacity=0.16, wilting_point=0.07, stages=[],
+    ))
     # Persist a calibration row well above the preset.
     db.add(ProbeCalibration(
         sector_id=sector_id, observed_fc=0.46, observed_refill=0.30,
@@ -148,7 +156,7 @@ async def test_build_sector_context_uses_calibration(db: AsyncSession):
     await db.flush()
 
     ctx = await build_sector_context(sector_id, db)
-    assert ctx.field_capacity == 0.46              # calibrated, not preset 0.16
+    assert ctx.field_capacity == 0.46              # calibrated, not preset SCP 0.16
     assert ctx.wilting_point == 0.30               # refill used as lower bound
     assert ctx.field_capacity_source == "probe_calibrated"
     assert ctx.fc_calibration is not None
