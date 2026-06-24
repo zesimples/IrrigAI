@@ -122,3 +122,48 @@ async def test_ingestion_run_records_failure(async_db_session: AsyncSession):
     # (adapter returned data but we had nowhere to land it).
     assert run.status == "failed"
     assert run.error_message is not None
+
+
+@pytest.mark.asyncio
+async def test_last_reading_at_does_not_regress_on_older_backfill(
+    async_db_session: AsyncSession,
+):
+    """Re-ingesting an OLDER window (gap backfill) must not move probe.last_reading_at
+    backwards when newer readings already exist — the bug that made the probe header
+    show a stale 'last communication' while the chart had fresher data.
+    """
+    probe_ext_id = "1044/4663"
+    probe = (
+        await async_db_session.execute(
+            select(Probe).where(Probe.external_id == probe_ext_id)
+        )
+    ).scalar_one()
+    from app.models import Plot, Sector
+    sector = await async_db_session.get(Sector, probe.sector_id)
+    plot = await async_db_session.get(Plot, sector.plot_id)
+    farm_id = plot.farm_id
+
+    provider = MockProbeProvider(soil_type="clay_loam", anomaly_rate=0.0)
+
+    # 1) Ingest a NEWER window → last_reading_at advances to ~NOW.
+    await ingest_probe_readings(
+        async_db_session, provider, probe_ext_id,
+        NOW - timedelta(hours=3), NOW, farm_id=farm_id, provider_name="mock",
+    )
+    await async_db_session.commit()
+    await async_db_session.refresh(probe)
+    newer_lra = probe.last_reading_at
+    assert newer_lra is not None
+
+    # 2) Ingest an OLDER, non-overlapping window (gap backfill).
+    await ingest_probe_readings(
+        async_db_session, provider, probe_ext_id,
+        NOW - timedelta(hours=12), NOW - timedelta(hours=6),
+        farm_id=farm_id, provider_name="mock",
+    )
+    await async_db_session.commit()
+    await async_db_session.refresh(probe)
+
+    assert probe.last_reading_at >= newer_lra, (
+        f"last_reading_at regressed: {probe.last_reading_at} < {newer_lra}"
+    )

@@ -352,11 +352,13 @@ async def ingest_probe_readings(
             session.add_all(to_insert)
             await session.flush()
 
-            # Update probe.last_reading_at
+            # Advance probe.last_reading_at monotonically — re-ingesting an older
+            # window (gap backfill) must never move it backwards past newer readings.
             latest_ts = max(r.timestamp for r in to_insert)
-            probe.last_reading_at = latest_ts
+            if probe.last_reading_at is None or latest_ts > probe.last_reading_at:
+                probe.last_reading_at = latest_ts
 
-            # Update per-depth freshness on ProbeDepth
+            # Update per-depth freshness on ProbeDepth (also monotonic).
             now_utc = datetime.now(UTC)
             for pd_id, depth_inserts in per_depth_inserted.items():
                 pd_record = next(
@@ -365,13 +367,14 @@ async def ingest_probe_readings(
                 if pd_record is None:
                     continue
                 latest = max(depth_inserts, key=lambda r: r.timestamp)
-                pd_record.last_reading_at = latest.timestamp
-                pd_record.last_quality_flag = latest.quality_flag
-                pd_record.last_unit = latest.unit
+                if pd_record.last_reading_at is None or latest.timestamp > pd_record.last_reading_at:
+                    pd_record.last_reading_at = latest.timestamp
+                    pd_record.last_quality_flag = latest.quality_flag
+                    pd_record.last_unit = latest.unit
                 pd_record.readings_count_total = (
                     (pd_record.readings_count_total or 0) + len(depth_inserts)
                 )
-                pd_record.data_status = _derive_data_status(latest.timestamp, now_utc)
+                pd_record.data_status = _derive_data_status(pd_record.last_reading_at, now_utc)
 
         # Also refresh data_status for depths that received no rows this run —
         # this rolls "ok" forward to "stale" without waiting for the next
@@ -824,7 +827,10 @@ def ingest_probe_readings_sync(
         if to_insert:
             session.add_all(to_insert)
             session.flush()
-            probe.last_reading_at = max(r.timestamp for r in to_insert)
+            # Monotonic: never regress past newer readings on an older backfill.
+            latest_ts = max(r.timestamp for r in to_insert)
+            if probe.last_reading_at is None or latest_ts > probe.last_reading_at:
+                probe.last_reading_at = latest_ts
 
             now_utc = datetime.now(UTC)
             for pd_id, depth_inserts in per_depth_inserted.items():
@@ -832,13 +838,14 @@ def ingest_probe_readings_sync(
                 if pd_record is None:
                     continue
                 latest = max(depth_inserts, key=lambda r: r.timestamp)
-                pd_record.last_reading_at = latest.timestamp
-                pd_record.last_quality_flag = latest.quality_flag
-                pd_record.last_unit = latest.unit
+                if pd_record.last_reading_at is None or latest.timestamp > pd_record.last_reading_at:
+                    pd_record.last_reading_at = latest.timestamp
+                    pd_record.last_quality_flag = latest.quality_flag
+                    pd_record.last_unit = latest.unit
                 pd_record.readings_count_total = (
                     (pd_record.readings_count_total or 0) + len(depth_inserts)
                 )
-                pd_record.data_status = _derive_data_status(latest.timestamp, now_utc)
+                pd_record.data_status = _derive_data_status(pd_record.last_reading_at, now_utc)
 
         return summary
     finally:
