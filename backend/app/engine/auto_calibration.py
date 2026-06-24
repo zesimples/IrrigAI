@@ -25,6 +25,16 @@ SPIKE_THRESHOLD_M3M3 = 0.03             # 3 vol% increase in < 4h
 PEAK_WINDOW_H = (6, 24)                 # look for peak 6–24h after irrigation
 SHALLOW_MAX_DEPTH_CM = 30               # prefer depths ≤30cm; fall back to ≤60cm
 
+# --- Probe-calibrated field-capacity (m³/m³) ---
+CALIB_WINDOW_DAYS = 60
+CALIB_MIN_READINGS = 48
+CALIB_MIN_CYCLES = 3
+CALIB_FC_MIN_M3M3 = 0.10
+CALIB_FC_MAX_M3M3 = 0.60
+CALIB_MIN_SPREAD_M3M3 = 0.03
+ENVELOPE_FC_PCTL = 95.0
+ENVELOPE_REFILL_PCTL = 10.0
+
 
 @dataclass
 class IrrigationCycle:
@@ -43,6 +53,16 @@ class ObservedSoilPoints:
     num_cycles: int
     consistency: float                  # 0-1, higher = more consistent
     analysis_depths_cm: list[int]
+
+
+@dataclass
+class ProbeCalibrationResult:
+    observed_fc: float          # m³/m³ — drained upper limit
+    observed_refill: float      # m³/m³ — refill / lower bound
+    method: str                 # "cycles" | "envelope"
+    num_cycles: int
+    consistency: float          # 0–1
+    window_days: int
 
 
 @dataclass
@@ -396,3 +416,38 @@ def _build_calibration_suggestion(
         )
 
     return pt, en
+
+
+def percentile(values: list[float], pct: float) -> float:
+    """Linear-interpolation percentile (pct in 0–100). `values` need not be sorted."""
+    if not values:
+        raise ValueError("percentile of empty sequence")
+    s = sorted(values)
+    if len(s) == 1:
+        return s[0]
+    rank = (pct / 100.0) * (len(s) - 1)
+    lo = int(rank)
+    hi = min(lo + 1, len(s) - 1)
+    frac = rank - lo
+    return s[lo] + (s[hi] - s[lo]) * frac
+
+
+def compute_envelope_points(vwc_values: list[float]) -> tuple[float, float]:
+    """Envelope-proxy calibration → (observed_fc, observed_refill) in m³/m³.
+
+    FC ≈ high percentile of the trailing VWC envelope (drained upper limit);
+    refill ≈ low percentile (operating lower bound). Used when there are fewer
+    than CALIB_MIN_CYCLES clean irrigation cycles for cycle-based calibration.
+    """
+    fc = percentile(vwc_values, ENVELOPE_FC_PCTL)
+    refill = percentile(vwc_values, ENVELOPE_REFILL_PCTL)
+    return round(fc, 4), round(refill, 4)
+
+
+def is_plausible_calibration(observed_fc: float, observed_refill: float) -> bool:
+    """Reject implausible calibrations so the caller falls back to the preset FC."""
+    if not (CALIB_FC_MIN_M3M3 <= observed_fc <= CALIB_FC_MAX_M3M3):
+        return False
+    if (observed_fc - observed_refill) < CALIB_MIN_SPREAD_M3M3:
+        return False
+    return True
