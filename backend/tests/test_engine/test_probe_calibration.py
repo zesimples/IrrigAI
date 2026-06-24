@@ -48,3 +48,50 @@ def test_plausible_calibration_rejects_out_of_range_fc():
 def test_plausible_calibration_rejects_tiny_spread():
     # FC and refill within 0.03 m³/m³ → unusable (TAW would be ~0).
     assert is_plausible_calibration(observed_fc=0.40, observed_refill=0.39) is False
+
+
+def test_scp_override_wins():
+    from app.engine.soil_bounds import resolve_soil_bounds
+
+    b = resolve_soil_bounds(
+        scp_fc=0.30, scp_pwp=0.15,
+        calib_fc=0.45, calib_refill=0.30, calib_meta={"method": "cycles"},
+        plot_fc=0.16, plot_pwp=0.07,
+    )
+    assert (b.fc, b.pwp, b.source) == (0.30, 0.15, "scp")
+    assert b.calibration is None
+
+
+def test_calibration_wins_over_plot_preset():
+    from app.engine.soil_bounds import resolve_soil_bounds
+
+    meta = {"method": "envelope", "observed_fc": 0.45}
+    b = resolve_soil_bounds(
+        scp_fc=None, scp_pwp=None,
+        calib_fc=0.45, calib_refill=0.30, calib_meta=meta,
+        plot_fc=0.16, plot_pwp=0.07,
+    )
+    assert (b.fc, b.pwp, b.source) == (0.45, 0.30, "probe_calibrated")
+    assert b.calibration == meta
+
+
+def test_plot_preset_used_when_no_calibration():
+    from app.engine.soil_bounds import resolve_soil_bounds
+
+    b = resolve_soil_bounds(
+        scp_fc=None, scp_pwp=None,
+        calib_fc=None, calib_refill=None, calib_meta=None,
+        plot_fc=0.16, plot_pwp=0.07,
+    )
+    assert (b.fc, b.pwp, b.source) == (0.16, 0.07, "plot_preset")
+
+
+def test_default_when_nothing_configured():
+    from app.engine.soil_bounds import DEFAULT_FC, DEFAULT_PWP, resolve_soil_bounds
+
+    b = resolve_soil_bounds(
+        scp_fc=None, scp_pwp=None,
+        calib_fc=None, calib_refill=None, calib_meta=None,
+        plot_fc=None, plot_pwp=None,
+    )
+    assert (b.fc, b.pwp, b.source) == (DEFAULT_FC, DEFAULT_PWP, "default")

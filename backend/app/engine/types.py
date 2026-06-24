@@ -55,6 +55,10 @@ class SectorContext:
     defaults_used: list[str] = field(default_factory=list)
     missing_config: list[str] = field(default_factory=list)
 
+    # Soil-bounds provenance (probe-calibrated FC support)
+    field_capacity_source: str = "default"   # "scp" | "probe_calibrated" | "plot_preset" | "default"
+    fc_calibration: dict | None = None        # calibration metadata when source == "probe_calibrated"
+
 
 @dataclass
 class TimestampedReading:
