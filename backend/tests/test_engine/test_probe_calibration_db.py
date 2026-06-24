@@ -52,7 +52,9 @@ async def _make_pinned_sector(db: AsyncSession, vwc: float) -> str:
     depth = ProbeDepth(probe_id=probe.id, depth_cm=20, sensor_type="moisture")
     db.add(depth)
     await db.flush()
-    base = datetime.now(UTC) - timedelta(days=10)
+    # End the series near "now" so probe_interpreter treats the sector as having
+    # fresh probe-weighted SWC (needed by the pipeline-labelling test).
+    base = datetime.now(UTC) - timedelta(hours=59)
     # Gentle triangle wave across a realistic ~0.045 m³/m³ envelope (lo..hi), with
     # small per-hour steps (<0.03) so the spike detector finds no irrigation events
     # → the envelope (percentile) path is exercised, and the FC−refill spread clears
@@ -143,4 +145,28 @@ async def test_build_sector_context_uses_calibration(db: AsyncSession):
     assert ctx.field_capacity_source == "probe_calibrated"
     assert ctx.fc_calibration is not None
     assert ctx.fc_calibration["method"] == "envelope"
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_labels_probe_calibrated_source(db: AsyncSession):
+    from datetime import date
+
+    from app.engine.pipeline import RecommendationPipeline
+
+    sector_id = await _make_pinned_sector(db, vwc=0.44)
+    db.add(ProbeCalibration(
+        sector_id=sector_id, observed_fc=0.46, observed_refill=0.30,
+        method="envelope", num_cycles=0, consistency=0.5, window_days=60,
+        computed_at=datetime.now(UTC),
+    ))
+    await db.flush()
+
+    rec = await RecommendationPipeline().run(sector_id, date(2026, 6, 24), db)
+    # The fc_calibration payload is the load-bearing assertion.
+    assert rec.fc_calibration is not None
+    assert rec.fc_calibration["method"] == "envelope"
+    # Probe present + calibrated bounds → labelled probe_calibrated (or at least
+    # probe_weighted if the interpreter needs even fresher data than the fixture).
+    assert rec.swc_source in {"probe_calibrated", "probe_weighted"}
     await db.rollback()

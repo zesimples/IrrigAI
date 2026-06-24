@@ -95,3 +95,34 @@ def test_default_when_nothing_configured():
         plot_fc=None, plot_pwp=None,
     )
     assert (b.fc, b.pwp, b.source) == (DEFAULT_FC, DEFAULT_PWP, "default")
+
+
+def _wb_ctx(field_capacity, wilting_point, root_depth_m=0.6, mad=0.6):
+    # build_water_balance reads only these four attributes off ctx.
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        field_capacity=field_capacity,
+        wilting_point=wilting_point,
+        root_depth_m=root_depth_m,
+        mad=mad,
+    )
+
+
+def test_preset_fc_pins_probe_sector_at_zero_depletion():
+    from app.engine.water_balance import build_water_balance
+
+    # T63-like: VWC sensor reads 0.44 m³/m³, preset FC is 0.16 → clamp pins depletion at 0.
+    wb = build_water_balance(_wb_ctx(field_capacity=0.16, wilting_point=0.07), swc_probe=0.44)
+    assert wb.depletion_mm == 0.0          # "100% da água disponível" forever
+
+
+def test_calibrated_fc_unpins_probe_sector():
+    from app.engine.water_balance import build_water_balance, compute_taw
+
+    # Same probe, calibrated bounds FC=0.46 / refill=0.30 → real deficit appears.
+    wb = build_water_balance(_wb_ctx(field_capacity=0.46, wilting_point=0.30), swc_probe=0.40)
+    assert wb.depletion_mm > 0.0
+    # Refill line as the lower bound keeps TAW in the real operating band, not ballooned.
+    ballooned = compute_taw(0.46, 0.07, 0.6)
+    assert wb.taw_mm < ballooned

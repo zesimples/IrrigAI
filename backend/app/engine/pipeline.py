@@ -521,6 +521,11 @@ class RecommendationPipeline:
         if swc_for_wb is None:
             swc_source = "default_estimate"
 
+        # A probe-authoritative SWC combined with calibrated soil bounds is the case
+        # that fixes the "always 100%" pinning — surface it as its own source label.
+        if swc_source == "probe_weighted" and ctx.field_capacity_source == "probe_calibrated":
+            swc_source = "probe_calibrated"
+
         wb = water_balance.build_water_balance(ctx, swc_for_wb)
         rain_effective, rain_eff_note = compute_effective_rainfall(
             rainfall_mm=weather.today.rainfall_mm or 0.0,
@@ -635,6 +640,7 @@ class RecommendationPipeline:
                 }
                 if swc_model_result is not None else None
             ),
+            fc_calibration=ctx.fc_calibration,
             depletion_mm=wb.depletion_mm,
             raw_mm=wb.raw_mm,
             taw_mm=wb.taw_mm,
