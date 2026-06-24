@@ -376,9 +376,7 @@ class AutoCalibrationService:
         there is too little data or the result fails plausibility guards (the
         caller then keeps the preset FC).
         """
-        from app.models import (
-            IrrigationEvent, Probe, ProbeDepth, ProbeReading, Sector,
-        )
+        from app.models import IrrigationEvent, Probe, ProbeDepth, ProbeReading, Sector
 
         sector = await db.get(Sector, sector_id)
         if sector is None:
@@ -554,6 +552,4 @@ def is_plausible_calibration(observed_fc: float, observed_refill: float) -> bool
     """Reject implausible calibrations so the caller falls back to the preset FC."""
     if not (CALIB_FC_MIN_M3M3 <= observed_fc <= CALIB_FC_MAX_M3M3):
         return False
-    if (observed_fc - observed_refill) < CALIB_MIN_SPREAD_M3M3:
-        return False
-    return True
+    return (observed_fc - observed_refill) >= CALIB_MIN_SPREAD_M3M3

@@ -1,7 +1,7 @@
 # Probe-calibrated field capacity — design
 
 **Date:** 2026-06-24
-**Status:** Approved, pending implementation plan
+**Status:** Implemented (2026-06-24) — see docs/superpowers/plans/2026-06-24-probe-calibrated-field-capacity.md
 **Scope:** Backend engine (Phases 1–2 of the recommendation-quality fix)
 
 ## Problem

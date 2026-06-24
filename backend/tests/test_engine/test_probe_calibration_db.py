@@ -5,15 +5,21 @@ Requires the test Postgres (NullPool) — same db fixture style as test_pipeline
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
 from app.engine.auto_calibration import AutoCalibrationService
 from app.engine.pipeline import build_sector_context
 from app.models import (
-    Farm, Plot, Probe, ProbeCalibration, ProbeDepth, ProbeReading, Sector, User,
+    Farm,
+    Plot,
+    Probe,
+    ProbeCalibration,
+    ProbeDepth,
+    ProbeReading,
+    Sector,
+    User,
 )
 from app.services.probe_calibration_service import ProbeCalibrationService
 
