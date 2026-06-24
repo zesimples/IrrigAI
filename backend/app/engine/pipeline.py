@@ -22,6 +22,7 @@ from app.engine import (
     water_balance,
 )
 from app.engine.rainfall_effectiveness import compute_effective_rainfall
+from app.engine.soil_bounds import resolve_soil_bounds
 from app.engine.stress_projection import StressProjector
 from app.engine.types import (
     ConfidenceResult,
@@ -74,22 +75,51 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
     plot = await db.get(Plot, sector.plot_id)
     soil_texture = plot.soil_texture if plot else None
 
-    # SCP soil overrides take precedence over plot-level values (set per-sector by user)
+    # Soil reference points. Precedence: explicit SCP override > probe-calibrated
+    # envelope > plot/preset > clay-loam default. Resolution is in resolve_soil_bounds.
     scp_soil_result = await db.execute(
         select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
     )
     scp_soil = scp_soil_result.scalar_one_or_none()
-    if scp_soil and scp_soil.field_capacity is not None and scp_soil.wilting_point is not None:
-        fc = scp_soil.field_capacity
-        pwp = scp_soil.wilting_point
-    else:
-        fc = plot.field_capacity if plot and plot.field_capacity is not None else None
-        pwp = plot.wilting_point if plot and plot.wilting_point is not None else None
+    scp_fc = scp_soil.field_capacity if scp_soil else None
+    scp_pwp = scp_soil.wilting_point if scp_soil else None
 
-    if fc is None or pwp is None:
-        fc = _FALLBACK_FC
-        pwp = _FALLBACK_PWP
+    from app.models.probe_calibration import ProbeCalibration
+    calib = (await db.execute(
+        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
+    )).scalar_one_or_none()
+    calib_meta = (
+        {
+            "observed_fc": calib.observed_fc,
+            "observed_refill": calib.observed_refill,
+            "method": calib.method,
+            "num_cycles": calib.num_cycles,
+            "consistency": calib.consistency,
+            "window_days": calib.window_days,
+            "computed_at": calib.computed_at.isoformat() if calib.computed_at else None,
+        }
+        if calib is not None else None
+    )
+
+    bounds = resolve_soil_bounds(
+        scp_fc=scp_fc,
+        scp_pwp=scp_pwp,
+        calib_fc=calib.observed_fc if calib else None,
+        calib_refill=calib.observed_refill if calib else None,
+        calib_meta=calib_meta,
+        plot_fc=plot.field_capacity if plot and plot.field_capacity is not None else None,
+        plot_pwp=plot.wilting_point if plot and plot.wilting_point is not None else None,
+    )
+    fc = bounds.fc
+    pwp = bounds.pwp
+    field_capacity_source = bounds.source
+    fc_calibration = bounds.calibration
+    if bounds.source == "default":
         defaults_used.append("soil FC/PWP (not configured, using clay-loam defaults)")
+    elif bounds.source == "probe_calibrated":
+        defaults_used.append(
+            f"FC/refill calibrated from probe envelope ({calib.method}, FC={fc:.2f})"
+        )
 
     # --- SectorCropProfile ---
     scp_result = await db.execute(
@@ -216,6 +246,8 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
         rainfall_effectiveness=sector.rainfall_effectiveness,
         defaults_used=defaults_used,
         missing_config=missing_config,
+        field_capacity_source=field_capacity_source,
+        fc_calibration=fc_calibration,
     )
 
 
@@ -489,6 +521,11 @@ class RecommendationPipeline:
         if swc_for_wb is None:
             swc_source = "default_estimate"
 
+        # A probe-authoritative SWC combined with calibrated soil bounds is the case
+        # that fixes the "always 100%" pinning — surface it as its own source label.
+        if swc_source == "probe_weighted" and ctx.field_capacity_source == "probe_calibrated":
+            swc_source = "probe_calibrated"
+
         wb = water_balance.build_water_balance(ctx, swc_for_wb)
         rain_effective, rain_eff_note = compute_effective_rainfall(
             rainfall_mm=weather.today.rainfall_mm or 0.0,
@@ -603,6 +640,7 @@ class RecommendationPipeline:
                 }
                 if swc_model_result is not None else None
             ),
+            fc_calibration=ctx.fc_calibration,
             depletion_mm=wb.depletion_mm,
             raw_mm=wb.raw_mm,
             taw_mm=wb.taw_mm,
