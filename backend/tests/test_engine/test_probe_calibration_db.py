@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.engine.auto_calibration import AutoCalibrationService
+from app.engine.pipeline import build_sector_context
 from app.models import (
     Farm, Plot, Probe, ProbeCalibration, ProbeDepth, ProbeReading, Sector, User,
 )
@@ -122,4 +123,24 @@ async def test_compute_and_save_upserts_one_row(db: AsyncSession):
     )).scalars().all()
     assert len(rows) == 1
     assert rows[0].computed_at >= first_computed_at
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_build_sector_context_uses_calibration(db: AsyncSession):
+    sector_id = await _make_pinned_sector(db, vwc=0.44)   # plot preset FC=0.16
+    # Persist a calibration row well above the preset.
+    db.add(ProbeCalibration(
+        sector_id=sector_id, observed_fc=0.46, observed_refill=0.30,
+        method="envelope", num_cycles=0, consistency=0.5, window_days=60,
+        computed_at=datetime.now(UTC),
+    ))
+    await db.flush()
+
+    ctx = await build_sector_context(sector_id, db)
+    assert ctx.field_capacity == 0.46              # calibrated, not preset 0.16
+    assert ctx.wilting_point == 0.30               # refill used as lower bound
+    assert ctx.field_capacity_source == "probe_calibrated"
+    assert ctx.fc_calibration is not None
+    assert ctx.fc_calibration["method"] == "envelope"
     await db.rollback()
