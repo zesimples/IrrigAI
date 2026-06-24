@@ -221,11 +221,20 @@ async def get_probe_readings(
 
         depth_results.append(DepthReadings(depth_cm=depth_cm_val, readings=points))
 
-    # Reference lines from the sector's plot
+    # Reference lines must match the FC/refill the recommendation engine uses:
+    # probe-calibrated envelope > SCP > plot/preset. Using only plot FC here made
+    # the chart draw CC from the stale preset while the engine used calibration, so
+    # a dry sector looked saturated. Share the engine's resolver.
+    from app.engine.pipeline import resolve_sector_soil_bounds
+
     sector = await db.get(Sector, probe.sector_id)
     plot = await db.get(Plot, sector.plot_id) if sector else None
-    fc = plot.field_capacity if plot else None
-    pwp = plot.wilting_point if plot else None
+    if sector is not None:
+        bounds = await resolve_sector_soil_bounds(str(sector.id), db, plot=plot)
+        fc = bounds.fc
+        pwp = bounds.pwp
+    else:
+        fc = pwp = None
     optimal = [round(pwp + (fc - pwp) * 0.4, 3), round(pwp + (fc - pwp) * 0.8, 3)] if fc and pwp else None
 
     # Read-only: event persistence happens after ingestion or via explicit refresh.

@@ -58,6 +58,49 @@ _FALLBACK_ROOT_DEPTH = 0.60
 _FALLBACK_EFFICIENCY = 0.90
 
 
+async def resolve_sector_soil_bounds(sector_id: str, db: AsyncSession, plot=None):
+    """Resolve a sector's FC/refill bounds: calibration > SCP > plot > default.
+
+    Single source of truth shared by the recommendation engine
+    (`build_sector_context`) and the probe-readings chart (`api/v1/probes`), so the
+    chart's CC/PMP reference lines can never diverge from the FC the engine actually
+    uses. Returns a ResolvedSoilBounds (fc, pwp, source, calibration).
+    """
+    from app.models.probe_calibration import ProbeCalibration
+
+    if plot is None:
+        sector = await db.get(Sector, sector_id)
+        plot = await db.get(Plot, sector.plot_id) if sector else None
+
+    scp = (await db.execute(
+        select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
+    )).scalar_one_or_none()
+    calib = (await db.execute(
+        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
+    )).scalar_one_or_none()
+    calib_meta = (
+        {
+            "observed_fc": calib.observed_fc,
+            "observed_refill": calib.observed_refill,
+            "method": calib.method,
+            "num_cycles": calib.num_cycles,
+            "consistency": calib.consistency,
+            "window_days": calib.window_days,
+            "computed_at": calib.computed_at.isoformat() if calib.computed_at else None,
+        }
+        if calib is not None else None
+    )
+    return resolve_soil_bounds(
+        scp_fc=scp.field_capacity if scp else None,
+        scp_pwp=scp.wilting_point if scp else None,
+        calib_fc=calib.observed_fc if calib else None,
+        calib_refill=calib.observed_refill if calib else None,
+        calib_meta=calib_meta,
+        plot_fc=plot.field_capacity if plot and plot.field_capacity is not None else None,
+        plot_pwp=plot.wilting_point if plot and plot.wilting_point is not None else None,
+    )
+
+
 async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContext:
     """Load all engine inputs for a sector from user-configured DB records.
 
@@ -75,41 +118,10 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
     plot = await db.get(Plot, sector.plot_id)
     soil_texture = plot.soil_texture if plot else None
 
-    # Soil reference points. Precedence: explicit SCP override > probe-calibrated
-    # envelope > plot/preset > clay-loam default. Resolution is in resolve_soil_bounds.
-    scp_soil_result = await db.execute(
-        select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
-    )
-    scp_soil = scp_soil_result.scalar_one_or_none()
-    scp_fc = scp_soil.field_capacity if scp_soil else None
-    scp_pwp = scp_soil.wilting_point if scp_soil else None
-
-    from app.models.probe_calibration import ProbeCalibration
-    calib = (await db.execute(
-        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
-    )).scalar_one_or_none()
-    calib_meta = (
-        {
-            "observed_fc": calib.observed_fc,
-            "observed_refill": calib.observed_refill,
-            "method": calib.method,
-            "num_cycles": calib.num_cycles,
-            "consistency": calib.consistency,
-            "window_days": calib.window_days,
-            "computed_at": calib.computed_at.isoformat() if calib.computed_at else None,
-        }
-        if calib is not None else None
-    )
-
-    bounds = resolve_soil_bounds(
-        scp_fc=scp_fc,
-        scp_pwp=scp_pwp,
-        calib_fc=calib.observed_fc if calib else None,
-        calib_refill=calib.observed_refill if calib else None,
-        calib_meta=calib_meta,
-        plot_fc=plot.field_capacity if plot and plot.field_capacity is not None else None,
-        plot_pwp=plot.wilting_point if plot and plot.wilting_point is not None else None,
-    )
+    # Soil reference points. Precedence: probe-calibrated envelope > SCP > plot/preset
+    # > clay-loam default. Resolved by the shared resolve_sector_soil_bounds helper so
+    # the chart's CC/PMP can never diverge from the FC the engine uses.
+    bounds = await resolve_sector_soil_bounds(sector_id, db, plot=plot)
     fc = bounds.fc
     pwp = bounds.pwp
     field_capacity_source = bounds.source
@@ -117,8 +129,9 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
     if bounds.source == "default":
         defaults_used.append("soil FC/PWP (not configured, using clay-loam defaults)")
     elif bounds.source == "probe_calibrated":
+        method = (bounds.calibration or {}).get("method", "?")
         defaults_used.append(
-            f"FC/refill calibrated from probe envelope ({calib.method}, FC={fc:.2f})"
+            f"FC/refill calibrated from probe envelope ({method}, FC={fc:.2f})"
         )
 
     # --- SectorCropProfile ---
