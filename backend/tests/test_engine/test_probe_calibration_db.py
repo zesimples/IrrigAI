@@ -7,11 +7,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from sqlalchemy import select
+
 from app.config import get_settings
 from app.engine.auto_calibration import AutoCalibrationService
 from app.models import (
-    Farm, Plot, Probe, ProbeDepth, ProbeReading, Sector, User,
+    Farm, Plot, Probe, ProbeCalibration, ProbeDepth, ProbeReading, Sector, User,
 )
+from app.services.probe_calibration_service import ProbeCalibrationService
 
 
 @pytest.fixture
@@ -99,4 +102,24 @@ async def test_no_calibration_when_no_probe(db: AsyncSession):
     await db.flush()
     result = await AutoCalibrationService().compute_sector_calibration(sector.id, db)
     assert result is None
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_compute_and_save_upserts_one_row(db: AsyncSession):
+    sector_id = await _make_pinned_sector(db, vwc=0.44)
+    svc = ProbeCalibrationService()
+
+    row1 = await svc.compute_and_save(sector_id, db)
+    assert row1 is not None
+    first_computed_at = row1.computed_at
+
+    # Second run must update the same row, not insert a duplicate.
+    row2 = await svc.compute_and_save(sector_id, db)
+    assert row2 is not None
+    rows = (await db.execute(
+        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
+    )).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].computed_at >= first_computed_at
     await db.rollback()
