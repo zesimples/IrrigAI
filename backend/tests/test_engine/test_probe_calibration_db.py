@@ -191,6 +191,31 @@ async def test_resolve_sector_soil_bounds_matches_engine(db: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_customized_scp_overrides_calibration_db(db: AsyncSession):
+    """A deliberate user soil setting (is_customized=True) wins over calibration."""
+    from app.engine.pipeline import resolve_sector_soil_bounds
+
+    sector_id = await _make_pinned_sector(db, vwc=0.44)
+    db.add(SectorCropProfile(
+        sector_id=sector_id, crop_type="almond", mad=0.5,
+        root_depth_mature_m=0.6, root_depth_young_m=0.3,
+        field_capacity=0.32, wilting_point=0.14, stages=[], is_customized=True,
+    ))
+    db.add(ProbeCalibration(
+        sector_id=sector_id, observed_fc=0.46, observed_refill=0.30,
+        method="envelope", num_cycles=0, consistency=0.5, window_days=60,
+        computed_at=datetime.now(UTC),
+    ))
+    await db.flush()
+
+    bounds = await resolve_sector_soil_bounds(sector_id, db)
+    assert bounds.source == "scp_override"
+    assert bounds.fc == 0.32          # user's deliberate choice, not calibrated 0.46
+    assert bounds.pwp == 0.14
+    await db.rollback()
+
+
+@pytest.mark.asyncio
 async def test_pipeline_labels_probe_calibrated_source(db: AsyncSession):
     from datetime import date
 

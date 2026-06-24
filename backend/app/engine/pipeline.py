@@ -93,6 +93,7 @@ async def resolve_sector_soil_bounds(sector_id: str, db: AsyncSession, plot=None
     return resolve_soil_bounds(
         scp_fc=scp.field_capacity if scp else None,
         scp_pwp=scp.wilting_point if scp else None,
+        scp_customized=bool(scp.is_customized) if scp else False,
         calib_fc=calib.observed_fc if calib else None,
         calib_refill=calib.observed_refill if calib else None,
         calib_meta=calib_meta,
