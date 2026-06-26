@@ -22,6 +22,8 @@ const CATEGORY_MAP: Record<string, { label: string; color: string }> = {
   trigger:            { label: "Reserva",       color: "text-ink-2" },
   reserva:            { label: "Reserva",       color: "text-ink-2" },
   stress:             { label: "Stress",        color: "text-[#c9a34a]" },
+  config:             { label: "Configuração",  color: "text-[#c9a34a]" },
+  configuracao:       { label: "Configuração",  color: "text-[#c9a34a]" },
   confidence:         { label: "Fiabilidade",   color: "text-[#c9a34a]" },
   fiabilidade:        { label: "Fiabilidade",   color: "text-[#c9a34a]" },
   limitation:         { label: "Limitação",     color: "text-[#c9a34a]" },

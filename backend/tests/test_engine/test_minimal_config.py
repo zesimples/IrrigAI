@@ -8,17 +8,12 @@ stages, and no soil config should:
 - Have runtime_min = None
 """
 
-import pytest
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.engine.types import (
     ConfidenceResult,
     DailyWeather,
-    DepthStatus,
-    EngineRecommendation,
     ProbeSnapshot,
-    ReasonEntry,
     RootzoneStatus,
     SectorContext,
     WeatherContext,
@@ -193,3 +188,49 @@ class TestMinimalConfigRuntime:
         dose = compute_dosage(wb, ctx)
         assert dose.irrigation_net_mm > 0
         assert dose.irrigation_gross_mm >= dose.irrigation_net_mm
+
+
+class TestReasonLanguage:
+    def test_portuguese_reasons_translate_engine_notes(self):
+        from app.engine.pipeline import _build_reasons
+        from app.engine.water_balance import WaterBalanceResult
+
+        ctx = make_minimal_ctx()
+        ctx.defaults_used = [
+            "FC/refill calibrated from probe envelope (cycles, FC=0.23)",
+            "Kc=1.10 (default (stage not set, using highest Kc as mid-season proxy))",
+        ]
+        ctx.missing_config = ["irrigation system not configured"]
+
+        reasons = _build_reasons(
+            ctx=ctx,
+            wb=WaterBalanceResult(
+                swc_current=0.18,
+                depletion_mm=25.0,
+                taw_mm=84.0,
+                raw_mm=42.0,
+                fc=0.28,
+                pwp=0.14,
+                root_depth_m=0.60,
+            ),
+            et0_val=4.6,
+            etc_val=2.3,
+            trigger_reason="O solo já perdeu água suficiente — chegou a hora de regar",
+            fc_impact={"rain_next_48h_mm": 0.0},
+            conf=ConfidenceResult(
+                score=0.5,
+                level="medium",
+                penalties=[],
+                warnings=[],
+            ),
+            dose=None,
+        )
+
+        config_messages = [r.message_pt for r in reasons if r.category == "config"]
+        rendered = " ".join(config_messages)
+
+        assert "FC/refill calibrated from probe envelope" not in rendered
+        assert "irrigation system not configured" not in rendered
+        assert "default (stage not set" not in rendered
+        assert "CC e linha de recarga efectiva calibradas pela sonda" in rendered
+        assert "sistema de rega não configurado" in rendered

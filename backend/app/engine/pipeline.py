@@ -6,6 +6,7 @@ a full EngineRecommendation. Every parameter is sourced from the user's DB recor
 """
 
 import logging
+import re
 from datetime import UTC, date, datetime
 
 from sqlalchemy import select
@@ -354,8 +355,9 @@ async def build_weather_context(farm_id: str, db: AsyncSession) -> WeatherContex
 # ---------------------------------------------------------------------------
 
 async def build_irrigation_context(sector_id: str, db: AsyncSession) -> RecentIrrigationContext:
-    from app.engine.types import IrrigationEventSummary
     from datetime import timedelta
+
+    from app.engine.types import IrrigationEventSummary
 
     since = datetime.now(UTC) - timedelta(days=7)
     result = await db.execute(
@@ -459,7 +461,6 @@ class RecommendationPipeline:
             weather = await build_weather_context(farm_id, db)
             log.append(f"Weather: ET0={weather.today.et0_mm}, forecast days={len(weather.forecast)}")
         else:
-            from datetime import timedelta
             weather = WeatherContext(
                 farm_id="",
                 lat=None,
@@ -800,19 +801,23 @@ def _build_reasons(
         ))
 
     if ctx.defaults_used:
+        defaults_pt = _format_engine_notes_pt(ctx.defaults_used)
+        defaults_en = _format_engine_notes_en(ctx.defaults_used)
         reasons.append(ReasonEntry(
             order=next_order(),
             category="config",
-            message_pt=f"Alguns valores foram estimados por defeito (configure-os para maior precisão): {'; '.join(ctx.defaults_used)}",
-            message_en=f"Some values were estimated as defaults (configure them for better accuracy): {'; '.join(ctx.defaults_used)}",
+            message_pt=f"Alguns parâmetros foram inferidos pelo motor (revê a configuração para maior precisão): {'; '.join(defaults_pt)}",
+            message_en=f"Some parameters were inferred by the engine (review configuration for better accuracy): {'; '.join(defaults_en)}",
         ))
 
     if ctx.missing_config:
+        missing_pt = _format_engine_notes_pt(ctx.missing_config)
+        missing_en = _format_engine_notes_en(ctx.missing_config)
         reasons.append(ReasonEntry(
             order=next_order(),
             category="config",
-            message_pt=f"Configuração incompleta — a recomendação pode ser menos precisa: {'; '.join(ctx.missing_config)}",
-            message_en=f"Incomplete configuration — recommendation may be less accurate: {'; '.join(ctx.missing_config)}",
+            message_pt=f"Configuração incompleta — a recomendação pode ser menos precisa: {'; '.join(missing_pt)}",
+            message_en=f"Incomplete configuration — recommendation may be less accurate: {'; '.join(missing_en)}",
         ))
 
     conf_label = {"high": "alta", "medium": "média", "low": "baixa"}.get(conf.level, conf.level)
@@ -831,3 +836,90 @@ def _build_reasons(
     ))
 
     return reasons
+
+
+def _format_engine_notes_pt(notes: list[str]) -> list[str]:
+    """Render internal engine note tokens as user-facing Portuguese."""
+    return [_format_engine_note_pt(note) for note in notes]
+
+
+def _format_engine_notes_en(notes: list[str]) -> list[str]:
+    """Keep English API text readable when internal notes are terse tokens."""
+    return [_format_engine_note_en(note) for note in notes]
+
+
+def _format_engine_note_pt(note: str) -> str:
+    if note == "soil FC/PWP (not configured, using clay-loam defaults)":
+        return "CC/PMP do solo não configurados; usados valores por defeito de solo franco-argiloso"
+    if note == "Kc/MAD/root_depth (no crop profile found)":
+        return "Kc, MAD e profundidade radicular estimados porque não há perfil de cultura"
+    if note == "crop profile not created":
+        return "perfil de cultura não criado"
+    if note == "irrigation system not configured":
+        return "sistema de rega não configurado"
+
+    calib_match = re.fullmatch(
+        r"FC/refill calibrated from probe envelope \((?P<method>[^,]+), FC=(?P<fc>[^)]+)\)",
+        note,
+    )
+    if calib_match:
+        method = {
+            "cycles": "ciclos",
+            "envelope": "envolvente",
+        }.get(calib_match.group("method"), calib_match.group("method"))
+        return (
+            "CC e linha de recarga efectiva calibradas pela sonda "
+            f"(método: {method}, CC={calib_match.group('fc')})"
+        )
+
+    kc_match = re.fullmatch(r"Kc=(?P<kc>[0-9.]+) \((?P<source>.+)\)", note)
+    if kc_match:
+        return f"Kc={kc_match.group('kc')} ({_translate_note_fragment_pt(kc_match.group('source'))})"
+
+    root_match = re.fullmatch(
+        r"root_depth=(?P<depth>[0-9.]+)m \(young tree, age (?P<age>[0-9]+)yr\)",
+        note,
+    )
+    if root_match:
+        return (
+            f"profundidade radicular={root_match.group('depth')} m "
+            f"(árvore jovem, {root_match.group('age')} anos)"
+        )
+
+    gdd_match = re.fullmatch(
+        r"GDD-estimated stage \((?P<stage>[^,]+), (?P<gdd>[0-9.]+) GDD\)",
+        note,
+    )
+    if gdd_match:
+        return (
+            f"fase estimada por GDD ({gdd_match.group('stage')}, "
+            f"{gdd_match.group('gdd')} GDD)"
+        )
+
+    return _translate_note_fragment_pt(note)
+
+
+def _format_engine_note_en(note: str) -> str:
+    if note.startswith("FC/refill calibrated from probe envelope"):
+        return note.replace("FC/refill", "FC/effective refill line", 1)
+    return note
+
+
+def _translate_note_fragment_pt(text: str) -> str:
+    replacements = {
+        "default": "valor por defeito",
+        "stage not set": "fase não definida",
+        "using highest Kc as mid-season proxy": "usado o Kc mais alto como aproximação de meia estação",
+        "no crop profile": "sem perfil de cultura",
+        "check sector setup": "verifica a configuração do sector",
+        "profile stage": "fase do perfil",
+        "stage average": "média da fase",
+        "irrigation system": "sistema de rega",
+        "not configured": "não configurado",
+        "crop profile": "perfil de cultura",
+        "created": "criado",
+    }
+    translated = text
+    for source, target in replacements.items():
+        translated = translated.replace(source, target)
+    return translated
