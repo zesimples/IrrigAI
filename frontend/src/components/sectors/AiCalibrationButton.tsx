@@ -27,13 +27,31 @@ export function AiCalibrationButton({ sectorId, onCalibrated, className }: Props
     setRunning(true);
     try {
       const r = await calibrationApi.run(sectorId);
-      toast("Calibração concluída", {
-        variant: "success",
-        description:
-          `CC calibrada ${(r.observed_fc * 100).toFixed(0)} vol% · ` +
-          `linha de recarga efetiva ${(r.observed_refill * 100).toFixed(0)} vol% ` +
-          `(${r.method === "cycles" ? "ciclos de rega" : "envelope"})`,
-      });
+      const cc = (r.observed_fc * 100).toFixed(0);
+      const refill = (r.observed_refill * 100).toFixed(0);
+      if (!r.changed) {
+        // Already calibrated and the recompute matched — say so honestly instead
+        // of showing an "updated" toast with identical numbers.
+        toast("Sem alterações", {
+          variant: "info",
+          description: `Já calibrado — CC ${cc} vol% · linha de recarga efetiva ${refill} vol%`,
+        });
+        return;
+      }
+      if (r.previous_fc != null) {
+        toast("Calibração atualizada", {
+          variant: "success",
+          description:
+            `CC ${(r.previous_fc * 100).toFixed(0)}→${cc} vol% · ` +
+            `linha de recarga efetiva ${refill} vol%`,
+        });
+      } else {
+        toast("Calibração concluída", {
+          variant: "success",
+          description: `CC calibrada ${cc} vol% · linha de recarga efetiva ${refill} vol%`,
+        });
+      }
+      // Only refresh the recommendation when the bounds actually moved.
       await onCalibrated?.();
     } catch (e) {
       const insufficient = e instanceof ApiError && e.status === 422;

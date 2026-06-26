@@ -32,18 +32,24 @@ describe("AiCalibrationButton", () => {
     expect(screen.getByRole("button", { name: /Calibração AI/i })).toBeInTheDocument();
   });
 
-  it("calls the run API and refreshes on success", async () => {
-    mockRun.mockResolvedValue({
-      sector_id: "s1",
-      observed_fc: 0.46,
-      observed_refill: 0.3,
-      method: "envelope",
-      num_cycles: 0,
-      consistency: 0.5,
-      window_days: 60,
-      computed_at: "2026-06-26T00:00:00Z",
-      max_age_days: 90,
-    });
+  const result = (over: Record<string, unknown> = {}) => ({
+    sector_id: "s1",
+    observed_fc: 0.46,
+    observed_refill: 0.3,
+    method: "envelope",
+    num_cycles: 0,
+    consistency: 0.5,
+    window_days: 60,
+    computed_at: "2026-06-26T00:00:00Z",
+    max_age_days: 90,
+    previous_fc: null,
+    previous_refill: null,
+    changed: true,
+    ...over,
+  });
+
+  it("calls the run API and refreshes on first calibration", async () => {
+    mockRun.mockResolvedValue(result());
     const onCalibrated = vi.fn();
     render(<AiCalibrationButton sectorId="s1" onCalibrated={onCalibrated} />);
 
@@ -57,6 +63,38 @@ describe("AiCalibrationButton", () => {
     );
   });
 
+  it("shows an updated toast with the delta when bounds moved", async () => {
+    mockRun.mockResolvedValue(result({ previous_fc: 0.41, previous_refill: 0.28, changed: true }));
+    const onCalibrated = vi.fn();
+    render(<AiCalibrationButton sectorId="s1" onCalibrated={onCalibrated} />);
+
+    fireEvent.click(screen.getByRole("button"));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        "Calibração atualizada",
+        expect.objectContaining({ variant: "success", description: expect.stringContaining("41→46") }),
+      ),
+    );
+    expect(onCalibrated).toHaveBeenCalled();
+  });
+
+  it("shows a no-change toast and does NOT refresh when nothing moved", async () => {
+    mockRun.mockResolvedValue(result({ previous_fc: 0.46, previous_refill: 0.3, changed: false }));
+    const onCalibrated = vi.fn();
+    render(<AiCalibrationButton sectorId="s1" onCalibrated={onCalibrated} />);
+
+    fireEvent.click(screen.getByRole("button"));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        "Sem alterações",
+        expect.objectContaining({ variant: "info" }),
+      ),
+    );
+    expect(onCalibrated).not.toHaveBeenCalled();
+  });
+
   it("shows loading state and disables while running", async () => {
     let resolve!: (v: unknown) => void;
     mockRun.mockReturnValue(new Promise((r) => (resolve = r)));
@@ -68,11 +106,7 @@ describe("AiCalibrationButton", () => {
     await waitFor(() => expect(btn).toBeDisabled());
     expect(screen.getByText("A calibrar…")).toBeInTheDocument();
 
-    resolve({
-      sector_id: "s1", observed_fc: 0.46, observed_refill: 0.3, method: "envelope",
-      num_cycles: 0, consistency: 0.5, window_days: 60,
-      computed_at: "2026-06-26T00:00:00Z", max_age_days: 90,
-    });
+    resolve(result());
     await waitFor(() => expect(btn).not.toBeDisabled());
   });
 

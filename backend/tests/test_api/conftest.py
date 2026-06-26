@@ -15,7 +15,7 @@ the real token flow (see test_auth_permissions.py).
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -24,6 +24,33 @@ from app.config import get_settings
 from app.database import get_db
 from app.main import app
 from app.models.user import User
+
+# FK-safe teardown for fixtures that commit a farm subtree. The FKs are not
+# ON DELETE CASCADE, so children must go first. Keeps API tests (which must
+# commit so the client connection sees the data) from accumulating junk farms.
+_FARM_SUBTREE_DELETES = (
+    "DELETE FROM probe_reading WHERE probe_depth_id IN (SELECT pd.id FROM probe_depth pd "
+    "JOIN probe p ON pd.probe_id=p.id JOIN sector s ON p.sector_id=s.id "
+    "JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",
+    "DELETE FROM probe_calibration WHERE sector_id IN (SELECT s.id FROM sector s "
+    "JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",
+    "DELETE FROM sector_crop_profile WHERE sector_id IN (SELECT s.id FROM sector s "
+    "JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",
+    "DELETE FROM probe_depth WHERE probe_id IN (SELECT p.id FROM probe p "
+    "JOIN sector s ON p.sector_id=s.id JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",
+    "DELETE FROM probe WHERE sector_id IN (SELECT s.id FROM sector s "
+    "JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",
+    "DELETE FROM sector WHERE plot_id IN (SELECT id FROM plot WHERE farm_id=:fid)",
+    "DELETE FROM plot WHERE farm_id=:fid",
+    "DELETE FROM farm WHERE id=:fid",
+)
+
+
+async def delete_farm_subtree(db: AsyncSession, farm_id: str) -> None:
+    """Delete a farm and everything under it, children-first. Idempotent."""
+    for stmt in _FARM_SUBTREE_DELETES:
+        await db.execute(text(stmt), {"fid": farm_id})
+    await db.commit()
 
 # Seeded demo farms are owned by this user. Data-focused API tests should access
 # those resources as the owning tenant, not as a cross-tenant fixture user.

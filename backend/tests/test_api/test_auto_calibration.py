@@ -21,11 +21,12 @@ from app.models import (
     Sector,
     User,
 )
+from tests.test_api.conftest import delete_farm_subtree
 
 _OWNER_EMAIL = "you@irrigai.dev"  # matches the authenticated client fixture in conftest
 
 
-async def _owned_chain(db: AsyncSession, *, name: str) -> tuple[str, ProbeDepth]:
+async def _owned_chain(db: AsyncSession, *, name: str) -> tuple[str, str, ProbeDepth]:
     owner = (
         await db.execute(select(User).where(User.email == _OWNER_EMAIL))
     ).scalar_one_or_none()
@@ -48,13 +49,13 @@ async def _owned_chain(db: AsyncSession, *, name: str) -> tuple[str, ProbeDepth]
     depth = ProbeDepth(probe_id=probe.id, depth_cm=20, sensor_type="soil_moisture")
     db.add(depth)
     await db.flush()
-    return sector.id, depth
+    return farm.id, sector.id, depth
 
 
 @pytest.fixture
 async def calibratable_sector(db: AsyncSession):
     """Owned sector with 60 gentle VWC readings → envelope calibration succeeds."""
-    sector_id, depth = await _owned_chain(db, name="Calibratable")
+    farm_id, sector_id, depth = await _owned_chain(db, name="Calibratable")
     base = datetime.now(UTC) - timedelta(hours=59)
     lo, hi = 0.41, 0.455
     span = hi - lo
@@ -70,13 +71,14 @@ async def calibratable_sector(db: AsyncSession):
             unit="vwc_m3m3", quality_flag="ok",
         ))
     await db.commit()
-    return sector_id
+    yield sector_id
+    await delete_farm_subtree(db, farm_id)
 
 
 @pytest.fixture
 async def insufficient_sector(db: AsyncSession):
     """Owned sector with a probe but too few readings to calibrate."""
-    sector_id, depth = await _owned_chain(db, name="Insufficient")
+    farm_id, sector_id, depth = await _owned_chain(db, name="Insufficient")
     base = datetime.now(UTC) - timedelta(hours=5)
     for i in range(5):     # < CALIB_MIN_READINGS
         db.add(ProbeReading(
@@ -86,7 +88,8 @@ async def insufficient_sector(db: AsyncSession):
             unit="vwc_m3m3", quality_flag="ok",
         ))
     await db.commit()
-    return sector_id
+    yield sector_id
+    await delete_farm_subtree(db, farm_id)
 
 
 @pytest.mark.asyncio
@@ -103,6 +106,10 @@ async def test_run_calibration_success(
     assert 0.10 <= body["observed_fc"] <= 0.60
     assert body["observed_fc"] > body["observed_refill"]
     assert body["max_age_days"] == 90
+    # First-ever calibration for this sector → no previous row, reported as changed.
+    assert body["previous_fc"] is None
+    assert body["previous_refill"] is None
+    assert body["changed"] is True
 
     # Persisted exactly one row that recommendations will pick up.
     rows = (await db.execute(
@@ -126,6 +133,12 @@ async def test_run_calibration_is_idempotent_upsert(
         select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
     )).scalars().all()
     assert len(rows) == 1     # upsert, not duplicate
+
+    # First run is a fresh calibration; re-running on the same data reports no change.
+    assert r1.json()["changed"] is True
+    b2 = r2.json()
+    assert b2["changed"] is False
+    assert b2["previous_fc"] == pytest.approx(r1.json()["observed_fc"])
 
 
 @pytest.mark.asyncio

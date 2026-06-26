@@ -19,7 +19,7 @@ from app.engine.auto_calibration import (
     AutoCalibrationResult,
     AutoCalibrationService,
 )
-from app.models import Plot, SectorCropProfile, SoilPreset
+from app.models import Plot, ProbeCalibration, SectorCropProfile, SoilPreset
 from app.services.audit_service import audit
 from app.services.probe_calibration_service import ProbeCalibrationService
 
@@ -27,6 +27,10 @@ router = APIRouter(tags=["auto-calibration"])
 
 _service = AutoCalibrationService()
 _calib_service = ProbeCalibrationService()
+
+# Below this much movement (m³/m³) a recompute is reported as "no change" so the
+# user gets honest feedback instead of an identical-looking "updated" toast.
+_CHANGE_EPS_M3M3 = 0.005
 
 
 # ── Response schemas ──────────────────────────────────────────────────────────
@@ -80,6 +84,11 @@ class ProbeCalibrationOut(BaseModel):
     window_days: int
     computed_at: datetime
     max_age_days: int = CALIB_MAX_AGE_DAYS
+    # Delta vs the calibration that existed before this run, so the UI can give
+    # honest feedback ("updated CC 41→49" vs "no change — already calibrated").
+    previous_fc: float | None = None        # None on first-ever calibration
+    previous_refill: float | None = None
+    changed: bool = True                     # values meaningfully moved (or first run)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -124,6 +133,14 @@ async def run_probe_calibration(
     """
     await access.sector(sector_id)
 
+    # Snapshot the previous bounds (by value) BEFORE compute_and_save mutates the row,
+    # so we can report whether the recompute actually moved anything.
+    existing = (await db.execute(
+        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
+    )).scalar_one_or_none()
+    prev_fc = existing.observed_fc if existing else None
+    prev_refill = existing.observed_refill if existing else None
+
     saved = await _calib_service.compute_and_save(sector_id, db)
     if saved is None:
         raise HTTPException(
@@ -135,11 +152,23 @@ async def run_probe_calibration(
             ),
         )
 
+    if prev_fc is None or prev_refill is None:
+        changed = True                        # first-ever calibration for this sector
+    else:
+        changed = (
+            abs(prev_fc - saved.observed_fc) >= _CHANGE_EPS_M3M3
+            or abs(prev_refill - saved.observed_refill) >= _CHANGE_EPS_M3M3
+        )
+
     await audit.log(
         "probe_calibration_computed",
         "sector",
         sector_id,
         db,
+        before_data=(
+            {"observed_fc": prev_fc, "observed_refill": prev_refill}
+            if existing else None
+        ),
         after_data={
             "observed_fc": saved.observed_fc,
             "observed_refill": saved.observed_refill,
@@ -147,6 +176,7 @@ async def run_probe_calibration(
             "num_cycles": saved.num_cycles,
             "consistency": saved.consistency,
             "window_days": saved.window_days,
+            "changed": changed,
         },
     )
     await db.commit()
@@ -160,6 +190,9 @@ async def run_probe_calibration(
         consistency=saved.consistency,
         window_days=saved.window_days,
         computed_at=saved.computed_at,
+        previous_fc=prev_fc,
+        previous_refill=prev_refill,
+        changed=changed,
     )
 
 

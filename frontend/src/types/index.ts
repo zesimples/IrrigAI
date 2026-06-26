@@ -699,6 +699,9 @@ export interface ProbeCalibrationRun {
   window_days: number;
   computed_at: string;
   max_age_days: number;
+  previous_fc: number | null;
+  previous_refill: number | null;
+  changed: boolean;
 }
 
 // ── Flowmeter ─────────────────────────────────────────────────────────────────

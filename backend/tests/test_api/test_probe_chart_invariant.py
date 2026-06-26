@@ -24,6 +24,7 @@ from app.models import (
     Sector,
     User,
 )
+from tests.test_api.conftest import delete_farm_subtree
 
 _OWNER_EMAIL = "you@irrigai.dev"  # matches the authenticated client fixture in conftest
 
@@ -72,7 +73,8 @@ async def calibrated_probe(db: AsyncSession):
         computed_at=now,
     ))
     await db.commit()
-    return sector.id, probe.id
+    yield sector.id, probe.id
+    await delete_farm_subtree(db, farm.id)
 
 
 @pytest.mark.asyncio
