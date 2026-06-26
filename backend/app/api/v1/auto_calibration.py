@@ -89,6 +89,14 @@ class ProbeCalibrationOut(BaseModel):
     previous_fc: float | None = None        # None on first-ever calibration
     previous_refill: float | None = None
     changed: bool = True                     # values meaningfully moved (or first run)
+    # What the engine will ACTUALLY use after this run. The saved calibration is
+    # not always in effect: a customized soil setting (scp_override) outranks it.
+    # `applied` is False when something overrides the calibration, so the UI can
+    # say "calculated but not applied" instead of implying the calibration is live.
+    applied: bool = True
+    effective_source: str = "probe_calibrated"  # resolve_sector_soil_bounds source
+    effective_fc: float | None = None            # m³/m³ actually used by the engine
+    effective_pwp: float | None = None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -177,6 +185,13 @@ async def run_probe_calibration(
     )
     await db.commit()
 
+    # What the engine will actually use now. If a customized soil setting outranks
+    # the calibration (scp_override), the saved calibration is NOT in effect — the
+    # UI must say so rather than implying the calibration is live.
+    from app.engine.pipeline import resolve_sector_soil_bounds
+
+    effective = await resolve_sector_soil_bounds(sector_id, db)
+
     return ProbeCalibrationOut(
         sector_id=sector_id,
         observed_fc=saved.observed_fc,
@@ -189,6 +204,10 @@ async def run_probe_calibration(
         previous_fc=prev_fc,
         previous_refill=prev_refill,
         changed=changed,
+        applied=effective.source == "probe_calibrated",
+        effective_source=effective.source,
+        effective_fc=effective.fc,
+        effective_pwp=effective.pwp,
     )
 
 

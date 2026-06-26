@@ -55,6 +55,10 @@ describe("AiCalibrationButton", () => {
     previous_fc: null,
     previous_refill: null,
     changed: true,
+    applied: true,
+    effective_source: "probe_calibrated",
+    effective_fc: 0.46,
+    effective_pwp: 0.3,
     ...over,
   });
 
@@ -89,7 +93,7 @@ describe("AiCalibrationButton", () => {
     expect(onCalibrated).toHaveBeenCalled();
   });
 
-  it("shows a no-change toast and does NOT refresh when nothing moved", async () => {
+  it("shows a no-change toast and refreshes the chart but not the recommendation", async () => {
     mockRun.mockResolvedValue(result({ previous_fc: 0.46, previous_refill: 0.3, changed: false }));
     const onCalibrated = vi.fn();
     render(<AiCalibrationButton sectorId="s1" onCalibrated={onCalibrated} />);
@@ -102,7 +106,37 @@ describe("AiCalibrationButton", () => {
         expect.objectContaining({ variant: "info" }),
       ),
     );
-    expect(onCalibrated).not.toHaveBeenCalled();
+    // Chart still refreshes, but regenerate=false (nothing moved).
+    await waitFor(() => expect(onCalibrated).toHaveBeenCalledWith(false));
+  });
+
+  it("warns when calibration is overridden by a customized soil setting", async () => {
+    mockRun.mockResolvedValue(
+      result({
+        changed: true,
+        previous_fc: 0.41,
+        applied: false,
+        effective_source: "scp_override",
+        effective_fc: 0.171,
+        effective_pwp: 0.089,
+      }),
+    );
+    const onCalibrated = vi.fn();
+    render(<AiCalibrationButton sectorId="s1" onCalibrated={onCalibrated} />);
+
+    fireEvent.click(screen.getByRole("button"));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        "Calibração não aplicada",
+        expect.objectContaining({
+          variant: "info",
+          description: expect.stringContaining("prioridade"),
+        }),
+      ),
+    );
+    // Not applied → no recommendation regeneration, but the chart still refreshes.
+    await waitFor(() => expect(onCalibrated).toHaveBeenCalledWith(false));
   });
 
   it("shows loading state and disables while running", async () => {

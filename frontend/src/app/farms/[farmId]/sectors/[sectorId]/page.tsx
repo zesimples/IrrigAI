@@ -243,10 +243,11 @@ export default function SectorDetailPage({ params }: Props) {
             <AiCalibrationButton
               sectorId={sectorId}
               available={status.calibration_available ?? true}
-              onCalibrated={async () => {
-                await generate();
-                // Refresh the probe chart so its CC/refill reference lines pick
-                // up the newly saved calibration bounds.
+              onCalibrated={async (regenerate) => {
+                // Always refresh the probe chart so its CC/refill reference lines
+                // reflect the current resolved bounds; only re-run the engine when
+                // the calibration actually changed and is in effect.
+                if (regenerate) await generate();
                 setProbeRefreshTrigger((n) => n + 1);
               }}
             />

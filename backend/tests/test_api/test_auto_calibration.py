@@ -19,6 +19,7 @@ from app.models import (
     ProbeDepth,
     ProbeReading,
     Sector,
+    SectorCropProfile,
     User,
 )
 from tests.test_api.conftest import delete_farm_subtree
@@ -110,6 +111,10 @@ async def test_run_calibration_success(
     assert body["previous_fc"] is None
     assert body["previous_refill"] is None
     assert body["changed"] is True
+    # No override → the calibration is what the engine will use.
+    assert body["applied"] is True
+    assert body["effective_source"] == "probe_calibrated"
+    assert body["effective_fc"] == pytest.approx(body["observed_fc"])
 
     # Persisted exactly one row that recommendations will pick up.
     rows = (await db.execute(
@@ -139,6 +144,32 @@ async def test_run_calibration_is_idempotent_upsert(
     b2 = r2.json()
     assert b2["changed"] is False
     assert b2["previous_fc"] == pytest.approx(r1.json()["observed_fc"])
+
+
+@pytest.mark.asyncio
+async def test_run_calibration_reports_override_not_applied(
+    client: AsyncClient, db: AsyncSession, calibratable_sector
+):
+    """A customized soil setting outranks calibration: /run still saves the
+    calibration but reports applied=False + the effective (override) bounds, so
+    the UI can say it was calculated but not applied."""
+    sector_id = calibratable_sector
+    db.add(SectorCropProfile(
+        sector_id=sector_id, crop_type="almond", mad=0.5,
+        root_depth_mature_m=0.6, root_depth_young_m=0.3,
+        field_capacity=0.171, wilting_point=0.089, stages=[], is_customized=True,
+    ))
+    await db.commit()
+
+    resp = await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["applied"] is False
+    assert body["effective_source"] == "scp_override"
+    assert body["effective_fc"] == pytest.approx(0.171)
+    assert body["effective_pwp"] == pytest.approx(0.089)
+    # The calibration is still saved (just not in effect).
+    assert body["observed_fc"] > body["effective_fc"]
 
 
 @pytest.mark.asyncio

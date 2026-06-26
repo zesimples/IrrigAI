@@ -703,6 +703,12 @@ export interface ProbeCalibrationRun {
   previous_fc: number | null;
   previous_refill: number | null;
   changed: boolean;
+  // What the engine will actually use. applied=false when a customized soil
+  // setting (effective_source="scp_override") overrides the saved calibration.
+  applied: boolean;
+  effective_source: string;
+  effective_fc: number | null;
+  effective_pwp: number | null;
 }
 
 // ── Flowmeter ─────────────────────────────────────────────────────────────────

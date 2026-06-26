@@ -9,9 +9,10 @@ const UNAVAILABLE_TOOLTIP = "Calibração disponível apenas para sondas de humi
 
 interface Props {
   sectorId: string;
-  /** Called after a successful calibration so the caller can refresh the
-   *  recommendation/depletion using the freshly saved bounds. */
-  onCalibrated?: () => void | Promise<void>;
+  /** Called after every successful calibration run. `regenerate` is true only
+   *  when the bounds actually moved AND are in effect, so the caller can skip a
+   *  pointless recommendation re-run while still refreshing the chart. */
+  onCalibrated?: (regenerate: boolean) => void | Promise<void>;
   /** False for tension/Watermark-only sectors (no VWC sensor) — the button is
    *  disabled with an explanatory tooltip rather than failing on click. */
   available?: boolean;
@@ -39,16 +40,26 @@ export function AiCalibrationButton({
       const r = await calibrationApi.run(sectorId);
       const cc = (r.observed_fc * 100).toFixed(0);
       const refill = (r.observed_refill * 100).toFixed(0);
-      if (!r.changed) {
+      const effCc = r.effective_fc != null ? (r.effective_fc * 100).toFixed(0) : null;
+
+      if (!r.applied) {
+        // Calibration was saved but a customized soil setting overrides it, so it
+        // is NOT what the engine uses. Be honest instead of implying it's live.
+        toast("Calibração não aplicada", {
+          variant: "info",
+          description:
+            `Calculada (CC ${cc} vol%), mas as definições de solo personalizadas` +
+            (effCc != null ? ` (CC ${effCc} vol%)` : "") +
+            ` têm prioridade.`,
+        });
+      } else if (!r.changed) {
         // Already calibrated and the recompute matched — say so honestly instead
         // of showing an "updated" toast with identical numbers.
         toast("Sem alterações", {
           variant: "info",
           description: `Já calibrado — CC ${cc} vol% · linha de recarga efetiva ${refill} vol%`,
         });
-        return;
-      }
-      if (r.previous_fc != null) {
+      } else if (r.previous_fc != null) {
         toast("Calibração atualizada", {
           variant: "success",
           description:
@@ -61,8 +72,9 @@ export function AiCalibrationButton({
           description: `CC calibrada ${cc} vol% · linha de recarga efetiva ${refill} vol%`,
         });
       }
-      // Only refresh the recommendation when the bounds actually moved.
-      await onCalibrated?.();
+      // Always let the parent refresh the chart; only regenerate the
+      // recommendation when the bounds actually moved and are in effect.
+      await onCalibrated?.(r.applied && r.changed);
     } catch (e) {
       // 422 carries a specific, user-readable reason from the backend (tension-only
       // probe, too few VWC readings, implausible envelope) — surface it verbatim.
