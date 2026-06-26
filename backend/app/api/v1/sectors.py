@@ -13,6 +13,7 @@ from app.models import (
     IrrigationSystem,
     Plot,
     Probe,
+    ProbeDepth,
     Recommendation,
     Sector,
     SectorCropProfile,
@@ -152,6 +153,23 @@ async def get_sector_status(sector_id: str, access: Access, db: AsyncSession = D
         for p in probes
     ]
 
+    # Probe calibration only applies to VWC moisture sensors. Tension/Watermark
+    # sectors (e.g. the Olival at Herdade do Esporão) have no VWC depth, so the
+    # "Calibração AI" button is disabled for them in the UI.
+    calibration_available = False
+    if probes:
+        vwc_depth = (
+            await db.execute(
+                select(ProbeDepth.id)
+                .where(
+                    ProbeDepth.probe_id.in_([p.id for p in probes]),
+                    ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
+                )
+                .limit(1)
+            )
+        ).first()
+        calibration_available = vwc_depth is not None
+
     # Data freshness
     freshness_hours = None
     if probes:
@@ -202,6 +220,7 @@ async def get_sector_status(sector_id: str, access: Access, db: AsyncSession = D
         last_irrigated_at=last_event.start_time if last_event else None,
         last_applied_mm=last_event.applied_mm if last_event else None,
         probes=probe_summaries,
+        calibration_available=calibration_available,
         data_freshness_hours=freshness_hours,
         stress_projection=stress_proj_out,
     )

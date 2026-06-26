@@ -239,7 +239,11 @@ export default function SectorDetailPage({ params }: Props) {
         ]}
         right={
           <div className="flex items-center gap-2">
-            <AiCalibrationButton sectorId={sectorId} onCalibrated={generate} />
+            <AiCalibrationButton
+              sectorId={sectorId}
+              available={status.calibration_available ?? true}
+              onCalibrated={generate}
+            />
             <button
               onClick={generate}
               disabled={generating}

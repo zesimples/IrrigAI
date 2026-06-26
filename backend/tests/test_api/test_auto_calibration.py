@@ -198,6 +198,24 @@ async def test_run_calibration_tension_only_explains_sensor_type(
 
 
 @pytest.mark.asyncio
+async def test_status_calibration_available_true_for_vwc(
+    client: AsyncClient, calibratable_sector
+):
+    resp = await client.get(f"/api/v1/sectors/{calibratable_sector}/status")
+    assert resp.status_code == 200
+    assert resp.json()["calibration_available"] is True
+
+
+@pytest.mark.asyncio
+async def test_status_calibration_available_false_for_tension(
+    client: AsyncClient, tension_sector
+):
+    resp = await client.get(f"/api/v1/sectors/{tension_sector}/status")
+    assert resp.status_code == 200
+    assert resp.json()["calibration_available"] is False
+
+
+@pytest.mark.asyncio
 async def test_run_calibration_unknown_sector_404(client: AsyncClient):
     resp = await client.post(
         "/api/v1/sectors/00000000-0000-0000-0000-000000000000/auto-calibration/run"

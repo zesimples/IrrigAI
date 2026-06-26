@@ -146,6 +146,7 @@ export interface SectorStatus {
   last_irrigated_at: string | null;
   last_applied_mm: number | null;
   probes: ProbeHealthSummary[];
+  calibration_available?: boolean;
   data_freshness_hours: number | null;
   stress_projection: StressProjection | null;
 }

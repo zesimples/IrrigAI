@@ -122,5 +122,9 @@ class SectorStatus(BaseModel):
     probes: list[ProbeHealthSummary] = []
     data_freshness_hours: float | None = None
 
+    # Whether probe calibration ("Calibração AI") can apply: true only when the
+    # sector has a VWC moisture sensor. False for tension/Watermark-only sectors.
+    calibration_available: bool = False
+
     # 48-72h stress projection (from latest recommendation inputs_snapshot)
     stress_projection: StressProjectionOut | None = None

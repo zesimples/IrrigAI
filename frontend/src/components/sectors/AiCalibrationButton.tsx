@@ -5,11 +5,16 @@ import { SlidersHorizontal } from "lucide-react";
 import { ApiError, calibrationApi } from "@/lib/api";
 import { useToast } from "@/hooks/useToast";
 
+const UNAVAILABLE_TOOLTIP = "Calibração disponível apenas para sondas de humidade (VWC)";
+
 interface Props {
   sectorId: string;
   /** Called after a successful calibration so the caller can refresh the
    *  recommendation/depletion using the freshly saved bounds. */
   onCalibrated?: () => void | Promise<void>;
+  /** False for tension/Watermark-only sectors (no VWC sensor) — the button is
+   *  disabled with an explanatory tooltip rather than failing on click. */
+  available?: boolean;
   className?: string;
 }
 
@@ -19,7 +24,12 @@ interface Props {
  * backend (no LLM decides soil parameters). On success it refreshes the
  * recommendation so the recalculated depletion reflects the new bounds.
  */
-export function AiCalibrationButton({ sectorId, onCalibrated, className }: Props) {
+export function AiCalibrationButton({
+  sectorId,
+  onCalibrated,
+  available = true,
+  className,
+}: Props) {
   const { toast } = useToast();
   const [running, setRunning] = useState(false);
 
@@ -70,11 +80,12 @@ export function AiCalibrationButton({ sectorId, onCalibrated, className }: Props
     <button
       type="button"
       onClick={handleClick}
-      disabled={running}
+      disabled={running || !available}
       aria-busy={running}
+      title={available ? undefined : UNAVAILABLE_TOOLTIP}
       className={
         className ??
-        "inline-flex items-center gap-2 rounded-full border border-rule bg-paper px-4 py-2 text-[13px] font-medium text-ink hover:bg-paper-in disabled:opacity-50 transition-colors"
+        "inline-flex items-center gap-2 rounded-full border border-rule bg-paper px-4 py-2 text-[13px] font-medium text-ink hover:bg-paper-in disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       }
     >
       <SlidersHorizontal className="h-3.5 w-3.5" />

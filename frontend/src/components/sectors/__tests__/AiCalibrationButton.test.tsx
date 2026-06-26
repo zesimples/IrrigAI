@@ -32,6 +32,16 @@ describe("AiCalibrationButton", () => {
     expect(screen.getByRole("button", { name: /Calibração AI/i })).toBeInTheDocument();
   });
 
+  it("is disabled with a tooltip and does not call the API when unavailable", () => {
+    render(<AiCalibrationButton sectorId="s1" available={false} />);
+    const btn = screen.getByRole("button");
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", expect.stringContaining("VWC"));
+
+    fireEvent.click(btn);
+    expect(mockRun).not.toHaveBeenCalled();
+  });
+
   const result = (over: Record<string, unknown> = {}) => ({
     sector_id: "s1",
     observed_fc: 0.46,
