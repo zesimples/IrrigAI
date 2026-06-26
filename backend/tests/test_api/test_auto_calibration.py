@@ -107,10 +107,10 @@ async def test_run_calibration_success(
     assert 0.10 <= body["observed_fc"] <= 0.60
     assert body["observed_fc"] > body["observed_refill"]
     assert body["max_age_days"] == 90
-    # First-ever calibration for this sector → no previous row, reported as changed.
-    assert body["previous_fc"] is None
-    assert body["previous_refill"] is None
+    # Before this run the sector used the plot preset (0.16); after, the calibration.
+    assert body["previous_fc"] == pytest.approx(0.16)
     assert body["changed"] is True
+    assert body["cleared_customization"] is False     # nothing was customized
     # No override → the calibration is what the engine will use.
     assert body["applied"] is True
     assert body["effective_source"] == "probe_calibrated"
@@ -147,12 +147,11 @@ async def test_run_calibration_is_idempotent_upsert(
 
 
 @pytest.mark.asyncio
-async def test_run_calibration_reports_override_not_applied(
+async def test_run_calibration_overrides_customization(
     client: AsyncClient, db: AsyncSession, calibratable_sector
 ):
-    """A customized soil setting outranks calibration: /run still saves the
-    calibration but reports applied=False + the effective (override) bounds, so
-    the UI can say it was calculated but not applied."""
+    """Recency rule: pressing the button overrides a prior manual soil
+    customization — it clears is_customized so the calibration takes effect."""
     sector_id = calibratable_sector
     db.add(SectorCropProfile(
         sector_id=sector_id, crop_type="almond", mad=0.5,
@@ -164,12 +163,54 @@ async def test_run_calibration_reports_override_not_applied(
     resp = await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["applied"] is False
-    assert body["effective_source"] == "scp_override"
-    assert body["effective_fc"] == pytest.approx(0.171)
-    assert body["effective_pwp"] == pytest.approx(0.089)
-    # The calibration is still saved (just not in effect).
-    assert body["observed_fc"] > body["effective_fc"]
+    # The customization was cleared and the calibration is now authoritative.
+    assert body["cleared_customization"] is True
+    assert body["applied"] is True
+    assert body["effective_source"] == "probe_calibrated"
+    assert body["effective_fc"] == pytest.approx(body["observed_fc"])
+    assert body["previous_fc"] == pytest.approx(0.171)   # what it used before
+    assert body["changed"] is True
+
+    # And the SCP customization flag is actually off now, so the engine uses calib.
+    scp = (await db.execute(
+        select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
+    )).scalar_one()
+    assert scp.is_customized is False
+
+
+@pytest.mark.asyncio
+async def test_manual_edit_overrides_calibration_after(
+    client: AsyncClient, db: AsyncSession, calibratable_sector
+):
+    """The other half of the recency rule: a manual CC/PMP edit AFTER calibration
+    re-customizes the sector and overrides the calibration again."""
+    sector_id = calibratable_sector
+    # Sectors normally have an (auto-created) crop profile; the fixture doesn't, so
+    # add a non-customized one for the manual-edit endpoint to update.
+    db.add(SectorCropProfile(
+        sector_id=sector_id, crop_type="almond", mad=0.5,
+        root_depth_mature_m=0.6, root_depth_young_m=0.3,
+        field_capacity=0.16, wilting_point=0.07, stages=[], is_customized=False,
+    ))
+    await db.commit()
+
+    await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
+
+    # Manual edit via the crop-profile endpoint re-customizes the sector.
+    resp = await client.put(
+        f"/api/v1/sectors/{sector_id}/crop-profile",
+        json={"field_capacity": 0.20, "wilting_point": 0.10},
+    )
+    assert resp.status_code == 200
+
+    scp = (await db.execute(
+        select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
+    )).scalar_one()
+    assert scp.is_customized is True          # manual edit overrides calibration again
+
+    # Confirming the recency loop: a fresh calibration run would again clear it.
+    rerun = await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
+    assert rerun.json()["cleared_customization"] is True
 
 
 @pytest.mark.asyncio

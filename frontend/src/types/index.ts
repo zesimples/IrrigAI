@@ -700,15 +700,15 @@ export interface ProbeCalibrationRun {
   window_days: number;
   computed_at: string;
   max_age_days: number;
+  // Effective bounds the engine used before vs. now (the CC/refill the chart shows).
   previous_fc: number | null;
   previous_refill: number | null;
-  changed: boolean;
-  // What the engine will actually use. applied=false when a customized soil
-  // setting (effective_source="scp_override") overrides the saved calibration.
-  applied: boolean;
-  effective_source: string;
   effective_fc: number | null;
   effective_pwp: number | null;
+  effective_source: string;
+  changed: boolean;        // effective bounds moved before→after
+  applied: boolean;        // calibration is what the engine now uses
+  cleared_customization: boolean; // the run overrode a prior manual soil setting
 }
 
 // ── Flowmeter ─────────────────────────────────────────────────────────────────

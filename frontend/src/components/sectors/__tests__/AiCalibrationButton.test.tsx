@@ -52,17 +52,18 @@ describe("AiCalibrationButton", () => {
     window_days: 60,
     computed_at: "2026-06-26T00:00:00Z",
     max_age_days: 90,
-    previous_fc: null,
-    previous_refill: null,
-    changed: true,
-    applied: true,
-    effective_source: "probe_calibrated",
+    previous_fc: 0.16,
+    previous_refill: 0.07,
     effective_fc: 0.46,
     effective_pwp: 0.3,
+    effective_source: "probe_calibrated",
+    changed: true,
+    applied: true,
+    cleared_customization: false,
     ...over,
   });
 
-  it("calls the run API and refreshes on first calibration", async () => {
+  it("applies the calibration and refreshes, showing the CC transition", async () => {
     mockRun.mockResolvedValue(result());
     const onCalibrated = vi.fn();
     render(<AiCalibrationButton sectorId="s1" onCalibrated={onCalibrated} />);
@@ -70,15 +71,17 @@ describe("AiCalibrationButton", () => {
     fireEvent.click(screen.getByRole("button"));
 
     await waitFor(() => expect(mockRun).toHaveBeenCalledWith("s1"));
-    await waitFor(() => expect(onCalibrated).toHaveBeenCalled());
+    await waitFor(() => expect(onCalibrated).toHaveBeenCalledWith(true));
     expect(toast).toHaveBeenCalledWith(
-      "Calibração concluída",
-      expect.objectContaining({ variant: "success" }),
+      "Calibração aplicada",
+      expect.objectContaining({ variant: "success", description: expect.stringContaining("16→46") }),
     );
   });
 
-  it("shows an updated toast with the delta when bounds moved", async () => {
-    mockRun.mockResolvedValue(result({ previous_fc: 0.41, previous_refill: 0.28, changed: true }));
+  it("notes when the run overrides a manual soil setting", async () => {
+    mockRun.mockResolvedValue(
+      result({ previous_fc: 0.171, effective_fc: 0.46, changed: true, cleared_customization: true }),
+    );
     const onCalibrated = vi.fn();
     render(<AiCalibrationButton sectorId="s1" onCalibrated={onCalibrated} />);
 
@@ -86,15 +89,18 @@ describe("AiCalibrationButton", () => {
 
     await waitFor(() =>
       expect(toast).toHaveBeenCalledWith(
-        "Calibração atualizada",
-        expect.objectContaining({ variant: "success", description: expect.stringContaining("41→46") }),
+        "Calibração aplicada",
+        expect.objectContaining({
+          variant: "success",
+          description: expect.stringContaining("substituiu definição manual"),
+        }),
       ),
     );
-    expect(onCalibrated).toHaveBeenCalled();
+    await waitFor(() => expect(onCalibrated).toHaveBeenCalledWith(true));
   });
 
   it("shows a no-change toast and refreshes the chart but not the recommendation", async () => {
-    mockRun.mockResolvedValue(result({ previous_fc: 0.46, previous_refill: 0.3, changed: false }));
+    mockRun.mockResolvedValue(result({ changed: false }));
     const onCalibrated = vi.fn();
     render(<AiCalibrationButton sectorId="s1" onCalibrated={onCalibrated} />);
 
@@ -107,35 +113,6 @@ describe("AiCalibrationButton", () => {
       ),
     );
     // Chart still refreshes, but regenerate=false (nothing moved).
-    await waitFor(() => expect(onCalibrated).toHaveBeenCalledWith(false));
-  });
-
-  it("warns when calibration is overridden by a customized soil setting", async () => {
-    mockRun.mockResolvedValue(
-      result({
-        changed: true,
-        previous_fc: 0.41,
-        applied: false,
-        effective_source: "scp_override",
-        effective_fc: 0.171,
-        effective_pwp: 0.089,
-      }),
-    );
-    const onCalibrated = vi.fn();
-    render(<AiCalibrationButton sectorId="s1" onCalibrated={onCalibrated} />);
-
-    fireEvent.click(screen.getByRole("button"));
-
-    await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith(
-        "Calibração não aplicada",
-        expect.objectContaining({
-          variant: "info",
-          description: expect.stringContaining("prioridade"),
-        }),
-      ),
-    );
-    // Not applied → no recommendation regeneration, but the chart still refreshes.
     await waitFor(() => expect(onCalibrated).toHaveBeenCalledWith(false));
   });
 

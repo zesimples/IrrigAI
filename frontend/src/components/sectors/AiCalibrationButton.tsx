@@ -38,43 +38,30 @@ export function AiCalibrationButton({
     setRunning(true);
     try {
       const r = await calibrationApi.run(sectorId);
-      const cc = (r.observed_fc * 100).toFixed(0);
-      const refill = (r.observed_refill * 100).toFixed(0);
-      const effCc = r.effective_fc != null ? (r.effective_fc * 100).toFixed(0) : null;
+      const cc = (r.effective_fc != null ? r.effective_fc * 100 : r.observed_fc * 100).toFixed(0);
+      const refill = (r.effective_pwp != null ? r.effective_pwp * 100 : r.observed_refill * 100).toFixed(0);
+      const prevCc = r.previous_fc != null ? (r.previous_fc * 100).toFixed(0) : null;
 
-      if (!r.applied) {
-        // Calibration was saved but a customized soil setting overrides it, so it
-        // is NOT what the engine uses. Be honest instead of implying it's live.
-        toast("Calibração não aplicada", {
-          variant: "info",
-          description:
-            `Calculada (CC ${cc} vol%), mas as definições de solo personalizadas` +
-            (effCc != null ? ` (CC ${effCc} vol%)` : "") +
-            ` têm prioridade.`,
-        });
-      } else if (!r.changed) {
-        // Already calibrated and the recompute matched — say so honestly instead
-        // of showing an "updated" toast with identical numbers.
+      if (!r.changed) {
+        // Re-running produced the same effective bounds the chart already shows.
         toast("Sem alterações", {
           variant: "info",
           description: `Já calibrado — CC ${cc} vol% · linha de recarga efetiva ${refill} vol%`,
         });
-      } else if (r.previous_fc != null) {
-        toast("Calibração atualizada", {
+      } else {
+        // Effective CC/refill moved (often because the run overrode a manual soil
+        // setting). Show the transition the user will see on the chart.
+        toast("Calibração aplicada", {
           variant: "success",
           description:
-            `CC ${(r.previous_fc * 100).toFixed(0)}→${cc} vol% · ` +
-            `linha de recarga efetiva ${refill} vol%`,
-        });
-      } else {
-        toast("Calibração concluída", {
-          variant: "success",
-          description: `CC calibrada ${cc} vol% · linha de recarga efetiva ${refill} vol%`,
+            (prevCc != null ? `CC ${prevCc}→${cc} vol%` : `CC ${cc} vol%`) +
+            ` · linha de recarga efetiva ${refill} vol%` +
+            (r.cleared_customization ? " · substituiu definição manual de solo" : ""),
         });
       }
-      // Always let the parent refresh the chart; only regenerate the
-      // recommendation when the bounds actually moved and are in effect.
-      await onCalibrated?.(r.applied && r.changed);
+      // Always refresh the chart; regenerate the recommendation only when the
+      // effective bounds actually moved.
+      await onCalibrated?.(r.changed);
     } catch (e) {
       // 422 carries a specific, user-readable reason from the backend (tension-only
       // probe, too few VWC readings, implausible envelope) — surface it verbatim.

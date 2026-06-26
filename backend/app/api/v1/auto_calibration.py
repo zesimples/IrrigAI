@@ -84,19 +84,20 @@ class ProbeCalibrationOut(BaseModel):
     window_days: int
     computed_at: datetime
     max_age_days: int = CALIB_MAX_AGE_DAYS
-    # Delta vs the calibration that existed before this run, so the UI can give
-    # honest feedback ("updated CC 41→49" vs "no change — already calibrated").
-    previous_fc: float | None = None        # None on first-ever calibration
+    # The bounds the engine actually USED before this run vs. what it uses now.
+    # Pressing the button makes the calibration authoritative (it clears any soil
+    # customization), so this reports the real CC/refill transition the user sees
+    # on the chart — e.g. "CC 17→24" — not just the calibration-row delta.
+    previous_fc: float | None = None
     previous_refill: float | None = None
-    changed: bool = True                     # values meaningfully moved (or first run)
-    # What the engine will ACTUALLY use after this run. The saved calibration is
-    # not always in effect: a customized soil setting (scp_override) outranks it.
-    # `applied` is False when something overrides the calibration, so the UI can
-    # say "calculated but not applied" instead of implying the calibration is live.
-    applied: bool = True
-    effective_source: str = "probe_calibrated"  # resolve_sector_soil_bounds source
-    effective_fc: float | None = None            # m³/m³ actually used by the engine
+    effective_fc: float | None = None            # m³/m³ now used by the engine
     effective_pwp: float | None = None
+    effective_source: str = "probe_calibrated"   # resolve_sector_soil_bounds source
+    changed: bool = True                          # effective bounds moved before→after
+    applied: bool = True                          # calibration is what the engine uses
+    # True when this run turned off a soil customization so the calibration could
+    # take precedence (the recency rule: pressing the button overrides a manual edit).
+    cleared_customization: bool = False
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -135,19 +136,19 @@ async def run_probe_calibration(
     """Manually trigger deterministic probe calibration for one sector.
 
     Computes calibrated CC / effective refill line from the sector's own VWC
-    envelope (NOT an LLM) and saves it. Future recommendations pick it up through
-    the shared soil-bound resolution path. Does not touch customized human soil
-    settings — those still override calibration in the resolver.
+    envelope (NOT an LLM) and saves it. Recency rule: pressing the button makes
+    the calibration authoritative — it clears any soil customization
+    (is_customized) so the calibration drives CC/refill, depletion and the
+    recommendation. A later manual soil/CC-PMP edit re-sets is_customized and
+    overrides the calibration again.
     """
+    from app.engine.pipeline import resolve_sector_soil_bounds
+
     await access.sector(sector_id)
 
-    # Snapshot the previous bounds (by value) BEFORE compute_and_save mutates the row,
-    # so we can report whether the recompute actually moved anything.
-    existing = (await db.execute(
-        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
-    )).scalar_one_or_none()
-    prev_fc = existing.observed_fc if existing else None
-    prev_refill = existing.observed_refill if existing else None
+    # The bounds the engine used BEFORE this run (what the user currently sees) —
+    # resolved before compute_and_save mutates the calibration row.
+    before = await resolve_sector_soil_bounds(sector_id, db)
 
     saved = await _calib_service.compute_and_save(sector_id, db)
     if saved is None:
@@ -156,41 +157,42 @@ async def run_probe_calibration(
         reason = await _service.diagnose_unavailable(sector_id, db)
         raise HTTPException(422, detail=reason)
 
-    if prev_fc is None or prev_refill is None:
-        changed = True                        # first-ever calibration for this sector
-    else:
-        changed = (
-            abs(prev_fc - saved.observed_fc) >= _CHANGE_EPS_M3M3
-            or abs(prev_refill - saved.observed_refill) >= _CHANGE_EPS_M3M3
-        )
+    # Recency rule: the button overrides a prior manual customization so the fresh
+    # calibration takes precedence in the resolver.
+    scp = (await db.execute(
+        select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
+    )).scalar_one_or_none()
+    cleared_customization = bool(scp and scp.is_customized)
+    if cleared_customization:
+        scp.is_customized = False
+    await db.flush()
+
+    # autoflush makes resolve see the new calibration row + cleared customization.
+    after = await resolve_sector_soil_bounds(sector_id, db)
+    changed = (
+        before.fc is None
+        or abs(before.fc - after.fc) >= _CHANGE_EPS_M3M3
+        or abs(before.pwp - after.pwp) >= _CHANGE_EPS_M3M3
+    )
 
     await audit.log(
         "probe_calibration_computed",
         "sector",
         sector_id,
         db,
-        before_data=(
-            {"observed_fc": prev_fc, "observed_refill": prev_refill}
-            if existing else None
-        ),
+        before_data={"source": before.source, "fc": before.fc, "pwp": before.pwp},
         after_data={
             "observed_fc": saved.observed_fc,
             "observed_refill": saved.observed_refill,
             "method": saved.method,
-            "num_cycles": saved.num_cycles,
-            "consistency": saved.consistency,
-            "window_days": saved.window_days,
+            "effective_source": after.source,
+            "effective_fc": after.fc,
+            "effective_pwp": after.pwp,
+            "cleared_customization": cleared_customization,
             "changed": changed,
         },
     )
     await db.commit()
-
-    # What the engine will actually use now. If a customized soil setting outranks
-    # the calibration (scp_override), the saved calibration is NOT in effect — the
-    # UI must say so rather than implying the calibration is live.
-    from app.engine.pipeline import resolve_sector_soil_bounds
-
-    effective = await resolve_sector_soil_bounds(sector_id, db)
 
     return ProbeCalibrationOut(
         sector_id=sector_id,
@@ -201,13 +203,14 @@ async def run_probe_calibration(
         consistency=saved.consistency,
         window_days=saved.window_days,
         computed_at=saved.computed_at,
-        previous_fc=prev_fc,
-        previous_refill=prev_refill,
+        previous_fc=before.fc,
+        previous_refill=before.pwp,
+        effective_fc=after.fc,
+        effective_pwp=after.pwp,
+        effective_source=after.source,
         changed=changed,
-        applied=effective.source == "probe_calibrated",
-        effective_source=effective.source,
-        effective_fc=effective.fc,
-        effective_pwp=effective.pwp,
+        applied=after.source == "probe_calibrated",
+        cleared_customization=cleared_customization,
     )
 
 

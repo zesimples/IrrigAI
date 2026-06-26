@@ -9,6 +9,11 @@ agronomist's explicit choice and wins over everything. Otherwise probe calibrati
 preset values (those generic soil-texture defaults are what caused the "always
 100%" pin, not deliberate overrides). Kept pure and separate from
 build_sector_context so the precedence is unit-testable without a DB session.
+
+Recency note: this resolver always lets `is_customized` win; the "last action
+wins" behaviour lives at the API layer — the manual /run calibration endpoint
+clears `is_customized` so a freshly computed calibration takes precedence, and a
+later manual soil/CC-PMP edit re-sets it (see api/v1/auto_calibration.run).
 """
 from __future__ import annotations
 
