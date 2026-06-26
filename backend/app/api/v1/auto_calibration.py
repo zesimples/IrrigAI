@@ -14,13 +14,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access import Access
 from app.database import get_db
-from app.engine.auto_calibration import AutoCalibrationResult, AutoCalibrationService
+from app.engine.auto_calibration import (
+    CALIB_MAX_AGE_DAYS,
+    AutoCalibrationResult,
+    AutoCalibrationService,
+)
 from app.models import Plot, SectorCropProfile, SoilPreset
 from app.services.audit_service import audit
+from app.services.probe_calibration_service import ProbeCalibrationService
 
 router = APIRouter(tags=["auto-calibration"])
 
 _service = AutoCalibrationService()
+_calib_service = ProbeCalibrationService()
 
 
 # ── Response schemas ──────────────────────────────────────────────────────────
@@ -60,6 +66,22 @@ class AutoCalibrationOut(BaseModel):
     dismissed: bool = False
 
 
+class ProbeCalibrationOut(BaseModel):
+    """Deterministically computed soil reference points from the probe's own VWC
+    envelope. Field names are kept honest: this is a *calibrated CC* and an
+    *effective refill line* (operational lower bound), not a measured true PMP."""
+
+    sector_id: str
+    observed_fc: float          # m³/m³ — calibrated CC (drained upper limit)
+    observed_refill: float      # m³/m³ — effective refill / operational lower bound
+    method: str                 # "cycles" | "envelope"
+    num_cycles: int
+    consistency: float
+    window_days: int
+    computed_at: datetime
+    max_age_days: int = CALIB_MAX_AGE_DAYS
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/sectors/{sector_id}/auto-calibration", response_model=AutoCalibrationOut)
@@ -85,6 +107,60 @@ async def get_auto_calibration(sector_id: str, access: Access, db: AsyncSession 
         )
 
     return _to_out(result)
+
+
+@router.post("/sectors/{sector_id}/auto-calibration/run", response_model=ProbeCalibrationOut)
+async def run_probe_calibration(
+    sector_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually trigger deterministic probe calibration for one sector.
+
+    Computes calibrated CC / effective refill line from the sector's own VWC
+    envelope (NOT an LLM) and saves it. Future recommendations pick it up through
+    the shared soil-bound resolution path. Does not touch customized human soil
+    settings — those still override calibration in the resolver.
+    """
+    await access.sector(sector_id)
+
+    saved = await _calib_service.compute_and_save(sector_id, db)
+    if saved is None:
+        raise HTTPException(
+            422,
+            detail=(
+                "Insufficient or implausible probe data to calibrate this sector "
+                "(need enough good-quality VWC readings with a plausible FC and a "
+                "refill line clearly below it)."
+            ),
+        )
+
+    await audit.log(
+        "probe_calibration_computed",
+        "sector",
+        sector_id,
+        db,
+        after_data={
+            "observed_fc": saved.observed_fc,
+            "observed_refill": saved.observed_refill,
+            "method": saved.method,
+            "num_cycles": saved.num_cycles,
+            "consistency": saved.consistency,
+            "window_days": saved.window_days,
+        },
+    )
+    await db.commit()
+
+    return ProbeCalibrationOut(
+        sector_id=sector_id,
+        observed_fc=saved.observed_fc,
+        observed_refill=saved.observed_refill,
+        method=saved.method,
+        num_cycles=saved.num_cycles,
+        consistency=saved.consistency,
+        window_days=saved.window_days,
+        computed_at=saved.computed_at,
+    )
 
 
 @router.post("/sectors/{sector_id}/auto-calibration/accept", response_model=dict)

@@ -6,6 +6,7 @@ import { AutoCalibrationCard } from "../AutoCalibrationCard";
 vi.mock("@/lib/api", () => ({
   calibrationApi: {
     get: vi.fn(),
+    run: vi.fn(),
     accept: vi.fn(),
     dismiss: vi.fn(),
   },
@@ -18,8 +19,9 @@ vi.mock("@/lib/api", () => ({
 
 import { calibrationApi } from "@/lib/api";
 
-const mockCalibrationApi = calibrationApi as {
+const mockCalibrationApi = calibrationApi as unknown as {
   get: ReturnType<typeof vi.fn>;
+  run: ReturnType<typeof vi.fn>;
   accept: ReturnType<typeof vi.fn>;
   dismiss: ReturnType<typeof vi.fn>;
 };

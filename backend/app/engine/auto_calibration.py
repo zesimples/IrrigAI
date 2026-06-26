@@ -27,6 +27,10 @@ SHALLOW_MAX_DEPTH_CM = 30               # prefer depths ≤30cm; fall back to �
 
 # --- Probe-calibrated field-capacity (m³/m³) ---
 CALIB_WINDOW_DAYS = 60
+# A saved calibration is not trusted forever: once computed_at is older than this,
+# soil-bound resolution ignores it and falls back to the next source. Manual re-run
+# (or the next scheduled run) refreshes it.
+CALIB_MAX_AGE_DAYS = 90
 CALIB_MIN_READINGS = 48
 CALIB_MIN_CYCLES = 3
 CALIB_FC_MIN_M3M3 = 0.10
@@ -549,6 +553,25 @@ def compute_envelope_points(vwc_values: list[float]) -> tuple[float, float]:
     fc = percentile(vwc_values, ENVELOPE_FC_PCTL)
     refill = percentile(vwc_values, ENVELOPE_REFILL_PCTL)
     return round(fc, 4), round(refill, 4)
+
+
+def is_calibration_stale(
+    computed_at: datetime | None,
+    now: datetime | None = None,
+    max_age_days: int = CALIB_MAX_AGE_DAYS,
+) -> bool:
+    """A saved calibration is stale once it is older than `max_age_days`.
+
+    Stale calibrations are ignored by soil-bound resolution (the caller falls back
+    to the next source). A missing `computed_at` is treated as stale. Naive
+    datetimes are assumed UTC so old rows never crash the comparison.
+    """
+    if computed_at is None:
+        return True
+    if computed_at.tzinfo is None:
+        computed_at = computed_at.replace(tzinfo=UTC)
+    now = now or datetime.now(UTC)
+    return (now - computed_at) > timedelta(days=max_age_days)
 
 
 def is_plausible_calibration(observed_fc: float, observed_refill: float) -> bool:

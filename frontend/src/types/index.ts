@@ -687,6 +687,20 @@ export interface AutoCalibrationResult {
   dismissed: boolean;
 }
 
+// Result of the manual deterministic calibration run (POST .../auto-calibration/run).
+// observed_fc = calibrated CC; observed_refill = effective refill / operational lower bound.
+export interface ProbeCalibrationRun {
+  sector_id: string;
+  observed_fc: number;
+  observed_refill: number;
+  method: string;
+  num_cycles: number;
+  consistency: number;
+  window_days: number;
+  computed_at: string;
+  max_age_days: number;
+}
+
 // ── Flowmeter ─────────────────────────────────────────────────────────────────
 
 export interface FlowmeterOut {

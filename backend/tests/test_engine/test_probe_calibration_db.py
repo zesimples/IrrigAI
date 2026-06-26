@@ -216,6 +216,130 @@ async def test_customized_scp_overrides_calibration_db(db: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_stale_calibration_ignored_by_resolution(db: AsyncSession):
+    """A calibration older than CALIB_MAX_AGE_DAYS must NOT drive the bounds —
+    resolution falls back to the plot preset, but the stale meta is surfaced."""
+    from app.engine.auto_calibration import CALIB_MAX_AGE_DAYS
+    from app.engine.pipeline import resolve_sector_soil_bounds
+
+    sector_id = await _make_pinned_sector(db, vwc=0.44)   # plot preset FC=0.16
+    stale_at = datetime.now(UTC) - timedelta(days=CALIB_MAX_AGE_DAYS + 5)
+    db.add(ProbeCalibration(
+        sector_id=sector_id, observed_fc=0.46, observed_refill=0.30,
+        method="envelope", num_cycles=0, consistency=0.5, window_days=60,
+        computed_at=stale_at,
+    ))
+    await db.flush()
+
+    bounds = await resolve_sector_soil_bounds(sector_id, db)
+    assert bounds.source == "plot_preset"     # NOT probe_calibrated
+    assert bounds.fc == 0.16                   # plot preset, not stale calibrated 0.46
+    assert bounds.pwp == 0.07
+    # Provenance: the stale calibration is surfaced as ignored.
+    assert bounds.calibration is not None
+    assert bounds.calibration["stale"] is True
+    assert bounds.calibration["used"] is False
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_fresh_calibration_marked_used(db: AsyncSession):
+    """A fresh calibration drives the bounds and is flagged used=True / stale=False."""
+    from app.engine.pipeline import resolve_sector_soil_bounds
+
+    sector_id = await _make_pinned_sector(db, vwc=0.44)
+    db.add(ProbeCalibration(
+        sector_id=sector_id, observed_fc=0.46, observed_refill=0.30,
+        method="envelope", num_cycles=0, consistency=0.5, window_days=60,
+        computed_at=datetime.now(UTC),
+    ))
+    await db.flush()
+
+    bounds = await resolve_sector_soil_bounds(sector_id, db)
+    assert bounds.source == "probe_calibrated"
+    assert bounds.calibration["used"] is True
+    assert bounds.calibration["stale"] is False
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_invalid_readings_produce_no_calibration(db: AsyncSession):
+    """Readings that are not good-quality vwc_m3m3 are unusable → no calibration."""
+    stamp = datetime.now(UTC).timestamp()
+    user = User(email=f"inv-{stamp}@t.dev", name="Inv", hashed_password="x", role="admin")
+    db.add(user)
+    await db.flush()
+    farm = Farm(name="Inv", owner_id=user.id)
+    db.add(farm)
+    await db.flush()
+    plot = Plot(farm_id=farm.id, name="P")
+    db.add(plot)
+    await db.flush()
+    sector = Sector(plot_id=plot.id, name="Invalid readings", crop_type="almond")
+    db.add(sector)
+    await db.flush()
+    probe = Probe(sector_id=sector.id, external_id="inv-probe")
+    db.add(probe)
+    await db.flush()
+    depth = ProbeDepth(probe_id=probe.id, depth_cm=20, sensor_type="soil_moisture")
+    db.add(depth)
+    await db.flush()
+    base = datetime.now(UTC) - timedelta(hours=59)
+    # 60 readings, but either wrong unit (tension/watermark) or bad quality flag —
+    # none should be consumed as VWC.
+    for i in range(60):
+        db.add(ProbeReading(
+            probe_depth_id=depth.id,
+            timestamp=base + timedelta(hours=i),
+            raw_value=0.44, calibrated_value=0.44,
+            unit="kpa" if i % 2 == 0 else "vwc_m3m3",
+            quality_flag="ok" if i % 2 == 0 else "suspect",
+        ))
+    await db.flush()
+
+    result = await AutoCalibrationService().compute_sector_calibration(sector.id, db)
+    assert result is None
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_insufficient_readings_produce_no_calibration(db: AsyncSession):
+    """Fewer than CALIB_MIN_READINGS good readings → no calibration."""
+    stamp = datetime.now(UTC).timestamp()
+    user = User(email=f"few-{stamp}@t.dev", name="Few", hashed_password="x", role="admin")
+    db.add(user)
+    await db.flush()
+    farm = Farm(name="Few", owner_id=user.id)
+    db.add(farm)
+    await db.flush()
+    plot = Plot(farm_id=farm.id, name="P")
+    db.add(plot)
+    await db.flush()
+    sector = Sector(plot_id=plot.id, name="Few readings", crop_type="almond")
+    db.add(sector)
+    await db.flush()
+    probe = Probe(sector_id=sector.id, external_id="few-probe")
+    db.add(probe)
+    await db.flush()
+    depth = ProbeDepth(probe_id=probe.id, depth_cm=20, sensor_type="soil_moisture")
+    db.add(depth)
+    await db.flush()
+    base = datetime.now(UTC) - timedelta(hours=10)
+    for i in range(6):     # < CALIB_MIN_READINGS (48)
+        db.add(ProbeReading(
+            probe_depth_id=depth.id,
+            timestamp=base + timedelta(hours=i),
+            raw_value=0.44, calibrated_value=0.44,
+            unit="vwc_m3m3", quality_flag="ok",
+        ))
+    await db.flush()
+
+    result = await AutoCalibrationService().compute_sector_calibration(sector.id, db)
+    assert result is None
+    await db.rollback()
+
+
+@pytest.mark.asyncio
 async def test_pipeline_labels_probe_calibrated_source(db: AsyncSession):
     from datetime import date
 

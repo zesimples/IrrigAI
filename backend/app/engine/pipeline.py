@@ -21,6 +21,7 @@ from app.engine import (
     trigger,
     water_balance,
 )
+from app.engine.auto_calibration import CALIB_MAX_AGE_DAYS, is_calibration_stale
 from app.engine.rainfall_effectiveness import compute_effective_rainfall
 from app.engine.soil_bounds import resolve_soil_bounds
 from app.engine.stress_projection import StressProjector
@@ -78,6 +79,8 @@ async def resolve_sector_soil_bounds(sector_id: str, db: AsyncSession, plot=None
     calib = (await db.execute(
         select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
     )).scalar_one_or_none()
+
+    calib_stale = is_calibration_stale(calib.computed_at) if calib is not None else False
     calib_meta = (
         {
             "observed_fc": calib.observed_fc,
@@ -87,6 +90,9 @@ async def resolve_sector_soil_bounds(sector_id: str, db: AsyncSession, plot=None
             "consistency": calib.consistency,
             "window_days": calib.window_days,
             "computed_at": calib.computed_at.isoformat() if calib.computed_at else None,
+            "max_age_days": CALIB_MAX_AGE_DAYS,
+            "stale": calib_stale,
+            "used": not calib_stale,
         }
         if calib is not None else None
     )
@@ -97,6 +103,7 @@ async def resolve_sector_soil_bounds(sector_id: str, db: AsyncSession, plot=None
         calib_fc=calib.observed_fc if calib else None,
         calib_refill=calib.observed_refill if calib else None,
         calib_meta=calib_meta,
+        calib_stale=calib_stale,
         plot_fc=plot.field_capacity if plot and plot.field_capacity is not None else None,
         plot_pwp=plot.wilting_point if plot and plot.wilting_point is not None else None,
     )

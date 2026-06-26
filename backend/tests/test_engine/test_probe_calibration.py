@@ -50,6 +50,22 @@ def test_plausible_calibration_rejects_tiny_spread():
     assert is_plausible_calibration(observed_fc=0.40, observed_refill=0.39) is False
 
 
+def test_is_calibration_stale_thresholds():
+    from datetime import UTC, datetime, timedelta
+
+    from app.engine.auto_calibration import CALIB_MAX_AGE_DAYS, is_calibration_stale
+
+    now = datetime(2026, 6, 26, tzinfo=UTC)
+    fresh = now - timedelta(days=CALIB_MAX_AGE_DAYS - 1)
+    stale = now - timedelta(days=CALIB_MAX_AGE_DAYS + 1)
+    assert is_calibration_stale(fresh, now=now) is False
+    assert is_calibration_stale(stale, now=now) is True
+    # Missing computed_at is treated as stale.
+    assert is_calibration_stale(None, now=now) is True
+    # Naive datetime assumed UTC — no crash, correct verdict.
+    assert is_calibration_stale(stale.replace(tzinfo=None), now=now) is True
+
+
 def test_calibration_outranks_preset_scp():
     # An auto-populated (non-customized) SCP FC must NOT beat calibration.
     from app.engine.soil_bounds import resolve_soil_bounds
@@ -73,6 +89,57 @@ def test_customized_scp_overrides_calibration():
         plot_fc=0.16, plot_pwp=0.07,
     )
     assert (b.fc, b.pwp, b.source) == (0.30, 0.15, "scp_override")
+    assert b.calibration is None
+
+
+def test_stale_calibration_is_ignored_and_falls_through():
+    # A stale calibration must NOT set the bounds; resolution falls to the next
+    # source (SCP here), but the stale meta is surfaced for provenance (used=False).
+    from app.engine.soil_bounds import resolve_soil_bounds
+
+    meta = {"method": "envelope", "used": False, "stale": True}
+    b = resolve_soil_bounds(
+        scp_fc=0.30, scp_pwp=0.15, scp_customized=False,
+        calib_fc=0.45, calib_refill=0.30, calib_meta=meta, calib_stale=True,
+        plot_fc=0.16, plot_pwp=0.07,
+    )
+    assert (b.fc, b.pwp, b.source) == (0.30, 0.15, "scp")
+    # Provenance preserved so the API/UI can explain the calibration was ignored.
+    assert b.calibration == meta
+
+
+def test_stale_calibration_falls_through_to_plot_then_default():
+    from app.engine.soil_bounds import DEFAULT_FC, DEFAULT_PWP, resolve_soil_bounds
+
+    meta = {"method": "cycles", "used": False, "stale": True}
+    b = resolve_soil_bounds(
+        scp_fc=None, scp_pwp=None,
+        calib_fc=0.45, calib_refill=0.30, calib_meta=meta, calib_stale=True,
+        plot_fc=0.16, plot_pwp=0.07,
+    )
+    assert (b.fc, b.pwp, b.source) == (0.16, 0.07, "plot_preset")
+    assert b.calibration == meta
+
+    b2 = resolve_soil_bounds(
+        scp_fc=None, scp_pwp=None,
+        calib_fc=0.45, calib_refill=0.30, calib_meta=meta, calib_stale=True,
+        plot_fc=None, plot_pwp=None,
+    )
+    assert (b2.fc, b2.pwp, b2.source) == (DEFAULT_FC, DEFAULT_PWP, "default")
+    assert b2.calibration == meta
+
+
+def test_customized_scp_ignores_stale_calibration_meta():
+    # Deliberate user override wins and does not surface calibration provenance.
+    from app.engine.soil_bounds import resolve_soil_bounds
+
+    b = resolve_soil_bounds(
+        scp_fc=0.32, scp_pwp=0.14, scp_customized=True,
+        calib_fc=0.45, calib_refill=0.30,
+        calib_meta={"method": "cycles", "used": False, "stale": True}, calib_stale=True,
+        plot_fc=0.16, plot_pwp=0.07,
+    )
+    assert (b.fc, b.pwp, b.source) == (0.32, 0.14, "scp_override")
     assert b.calibration is None
 
 

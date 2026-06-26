@@ -3,6 +3,7 @@ import type {
   AITextResponse,
   AuditLog,
   AutoCalibrationResult,
+  ProbeCalibrationRun,
   CropProfileTemplate,
   DashboardResponse,
   DetectedWaterEventOut,
@@ -361,6 +362,7 @@ export const chatApi = {
 
 export const calibrationApi = {
   get: (sectorId: string) => get<AutoCalibrationResult>(`/sectors/${sectorId}/auto-calibration`),
+  run: (sectorId: string) => post<ProbeCalibrationRun>(`/sectors/${sectorId}/auto-calibration/run`),
   accept: (sectorId: string) => post<{ accepted: boolean; preset_name_pt: string; preset_name_en: string }>(`/sectors/${sectorId}/auto-calibration/accept`),
   dismiss: (sectorId: string) => post<{ dismissed: boolean; dismissed_until: string }>(`/sectors/${sectorId}/auto-calibration/dismiss`),
 };

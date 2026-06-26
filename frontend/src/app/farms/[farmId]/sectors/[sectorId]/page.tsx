@@ -23,6 +23,7 @@ import { SidebarCard } from "@/components/dashboard/editorial/SidebarCard";
 import { ImproveReliabilityCard } from "@/components/dashboard/editorial/ImproveReliabilityCard";
 import { recommendationsApi, sectorsApi } from "@/lib/api";
 import { FlowmeterInfoCard } from "@/components/flowmeter/FlowmeterInfoCard";
+import { AiCalibrationButton } from "@/components/sectors/AiCalibrationButton";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Zap } from "lucide-react";
 import Link from "next/link";
@@ -237,15 +238,18 @@ export default function SectorDetailPage({ params }: Props) {
           { label: status.sector_name },
         ]}
         right={
-          <button
-            onClick={generate}
-            disabled={generating}
-            aria-busy={generating}
-            className="inline-flex items-center gap-2 rounded-full border border-rule bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:opacity-85 disabled:opacity-50 transition-opacity"
-          >
-            <Zap className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{generating ? "A gerar…" : "Gerar recomendação"}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <AiCalibrationButton sectorId={sectorId} onCalibrated={generate} />
+            <button
+              onClick={generate}
+              disabled={generating}
+              aria-busy={generating}
+              className="inline-flex items-center gap-2 rounded-full border border-rule bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:opacity-85 disabled:opacity-50 transition-opacity"
+            >
+              <Zap className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{generating ? "A gerar…" : "Gerar recomendação"}</span>
+            </button>
+          </div>
         }
       />
 
