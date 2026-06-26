@@ -238,10 +238,12 @@ async def test_interpret_probe_structured_uses_advisory_prompt(assistant):
         result = await assistant.interpret_probe_patterns_structured("probe-001", db)
 
     assert len(captured) == 1
-    # Advisory prompt is present
-    assert "Descreve o PERFIL de profundidade" in captured[0]
+    # Advisory prompt is present and probe-focused.
+    assert "leitura agronómica da sonda" in captured[0]
+    assert "perfil de humidade por profundidade" in captured[0]
     # Old pattern enumeration heading is absent
     assert "PADRÕES A VERIFICAR" not in captured[0]
+    assert "flatline" in captured[0]
     # Returns a valid AgronomicInterpretation
     assert isinstance(result, AgronomicInterpretation)
     assert result.irrigation_advice != ""
@@ -322,10 +324,10 @@ def test_render_probe_interpretation_includes_summary_advice_evidence_and_action
 
     rendered = assistant.render_probe_interpretation(interpretation)
 
-    assert rendered.splitlines()[0] == "• Resumo: Sonda mostra humidade estável e adequada."
+    assert rendered.splitlines()[0] == "• Perfil da sonda: Sonda mostra humidade estável e adequada."
     assert "• Conselho: Não há necessidade de regar agora." in rendered
-    assert "• Evidência: humidade adequada; estável" in rendered
-    assert "• Próxima ação: Monitorizar a tendência nas próximas 24h." in rendered
+    assert "• Sinais observados: humidade adequada; estável" in rendered
+    assert "• Próxima verificação: Monitorizar a tendência nas próximas 24h." in rendered
 
 
 @pytest.mark.parametrize("language", ["pt", "en"])

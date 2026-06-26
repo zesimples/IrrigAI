@@ -365,14 +365,14 @@ export function ProbeReadingsInline({
             </div>
           )}
 
-          {/* AI Pattern Interpretation */}
+          {/* Probe diagnosis */}
           {data && data.depths.length > 0 && (
             <div className="rounded-md border border-rule-soft overflow-hidden">
               <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-card border-b border-rule-soft">
                 <div className="flex items-center gap-2">
                   <ScanLine className="h-3.5 w-3.5 text-ink-3" />
                   <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
-                    Interpretação de padrões
+                    Diagnóstico da sonda
                   </span>
                 </div>
                 <button
@@ -409,7 +409,7 @@ export function ProbeReadingsInline({
 
               {!interpretation && !interpreting && !interpretError && (
                 <p className="px-4 py-3 text-[12px] text-ink-3">
-                  A IA identifica padrões no sinal: flatline, resposta fraca, drenagem rápida, profundidade não atingida.
+                  Analisa o perfil de humidade por profundidade, a tendência recente e a resposta a regas.
                 </p>
               )}
             </div>

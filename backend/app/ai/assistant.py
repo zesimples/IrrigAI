@@ -10,13 +10,13 @@ import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai import prompt_templates
 from app.ai.context_builder import (
     AssistantContextBuilder,
     build_sector_change_context,
     build_structured_agronomic_context,
 )
 from app.ai.openai_client import MockChatClient, OpenAIChatClient
-from app.ai import prompt_templates
 from app.ai.probe_signal import compute_probe_signal_stats
 from app.schemas.ai import AgronomicEvidence, AgronomicInterpretation
 
@@ -612,7 +612,7 @@ class IrrigationAssistant:
         return "\n".join(lines)
 
     def render_probe_interpretation(self, interpretation: AgronomicInterpretation) -> str:
-        """Render probe pattern interpretation for the existing probe card UI.
+        """Render probe diagnosis for the existing probe card UI.
 
         The probe card expects compact bullet lines with a stable "Label: value"
         shape. Keep this separate from render_structured(), which is evidence-led
@@ -623,7 +623,7 @@ class IrrigationAssistant:
         summary = interpretation.summary.strip()
         advice = interpretation.irrigation_advice.strip()
         if summary:
-            lines.append(f"• Resumo: {summary}")
+            lines.append(f"• Perfil da sonda: {summary}")
         if advice and advice != summary:
             lines.append(f"• Conselho: {advice}")
 
@@ -637,11 +637,11 @@ class IrrigationAssistant:
             if len(evidence_values) >= 3:
                 break
         if evidence_values:
-            lines.append(f"• Evidência: {'; '.join(evidence_values)}")
+            lines.append(f"• Sinais observados: {'; '.join(evidence_values)}")
 
         actions = [a.strip() for a in interpretation.recommended_actions if a.strip()]
         if actions:
-            lines.append(f"• Próxima ação: {'; '.join(actions[:2])}")
+            lines.append(f"• Próxima verificação: {'; '.join(actions[:2])}")
 
         if interpretation.missing_data:
             missing = "; ".join(m.strip() for m in interpretation.missing_data[:2] if m.strip())
@@ -652,7 +652,7 @@ class IrrigationAssistant:
             pct = round(interpretation.confidence_score * 100)
             lines.append(f"• Confiança: {pct}% — {interpretation.confidence_explanation}")
 
-        return "\n".join(lines) if lines else "• Resumo: Sem análise disponível."
+        return "\n".join(lines) if lines else "• Perfil da sonda: Sem análise disponível."
 
     def _default_evidence(self, context: dict | list | None) -> list[AgronomicEvidence]:
         if not isinstance(context, dict):
