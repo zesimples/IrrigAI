@@ -143,14 +143,10 @@ async def run_probe_calibration(
 
     saved = await _calib_service.compute_and_save(sector_id, db)
     if saved is None:
-        raise HTTPException(
-            422,
-            detail=(
-                "Insufficient or implausible probe data to calibrate this sector "
-                "(need enough good-quality VWC readings with a plausible FC and a "
-                "refill line clearly below it)."
-            ),
-        )
+        # Report the actual blocker (tension-only probe, too few VWC readings,
+        # implausible envelope) rather than a generic "insufficient data".
+        reason = await _service.diagnose_unavailable(sector_id, db)
+        raise HTTPException(422, detail=reason)
 
     if prev_fc is None or prev_refill is None:
         changed = True                        # first-ever calibration for this sector

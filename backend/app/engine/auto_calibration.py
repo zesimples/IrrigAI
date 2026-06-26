@@ -10,7 +10,7 @@ import statistics
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -476,6 +476,71 @@ class AutoCalibrationService:
         if not is_plausible_calibration(result.observed_fc, result.observed_refill):
             return None
         return result
+
+    async def diagnose_unavailable(self, sector_id: str, db: AsyncSession) -> str:
+        """Human-readable (pt) reason why compute_sector_calibration returned None.
+
+        Mirrors the gates in compute_sector_calibration so the manual /run endpoint
+        can tell the user the *actual* blocker (tension-only probe, too few VWC
+        readings, implausible envelope) instead of a generic "insufficient data".
+        """
+        from app.models import Probe, ProbeDepth, ProbeReading
+
+        since = datetime.now(UTC) - timedelta(days=CALIB_WINDOW_DAYS)
+        probes = (await db.execute(
+            select(Probe).where(Probe.sector_id == sector_id)
+        )).scalars().all()
+        if not probes:
+            return (
+                "Este sector não tem sonda associada, por isso não é possível "
+                "calibrar a partir de dados de sonda."
+            )
+
+        moisture_depths: dict[int, str] = {}
+        has_tension = False
+        for probe in probes:
+            depths = (await db.execute(
+                select(ProbeDepth).where(ProbeDepth.probe_id == probe.id)
+            )).scalars().all()
+            for d in depths:
+                if d.sensor_type in ("soil_moisture", "moisture"):
+                    moisture_depths.setdefault(d.depth_cm, d.id)
+                elif d.sensor_type and "tension" in d.sensor_type:
+                    has_tension = True
+
+        shallow = {dc: did for dc, did in moisture_depths.items() if dc <= SHALLOW_MAX_DEPTH_CM} or {
+            dc: did for dc, did in moisture_depths.items() if dc <= 60
+        }
+        if not shallow:
+            if has_tension:
+                return (
+                    "Este sector usa sensores de tensão (tipo Watermark). A calibração "
+                    "precisa de sensores de humidade volumétrica (VWC) e não está "
+                    "disponível para sensores de tensão."
+                )
+            return (
+                "Este sector não tem sensores de humidade volumétrica (VWC) até 60 cm "
+                "de profundidade para calibrar."
+            )
+
+        n = (await db.execute(
+            select(func.count(ProbeReading.id)).where(
+                ProbeReading.probe_depth_id.in_(list(shallow.values())),
+                ProbeReading.timestamp >= since,
+                ProbeReading.unit == "vwc_m3m3",
+                ProbeReading.quality_flag == "ok",
+            )
+        )).scalar() or 0
+        if n < CALIB_MIN_READINGS:
+            return (
+                f"Ainda não há leituras VWC suficientes para calibrar: {n} de "
+                f"{CALIB_MIN_READINGS} necessárias nos últimos {CALIB_WINDOW_DAYS} dias."
+            )
+
+        return (
+            "As leituras VWC disponíveis são demasiado planas ou fora do intervalo "
+            "plausível para uma calibração fiável."
+        )
 
 
 def _build_calibration_suggestion(

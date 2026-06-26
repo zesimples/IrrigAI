@@ -149,7 +149,47 @@ async def test_run_calibration_insufficient_data_returns_422(
 
     resp = await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
     assert resp.status_code == 422
-    assert "nsufficient" in resp.json()["detail"]
+    # Honest, specific reason: not enough VWC readings (names the 48 threshold).
+    detail = resp.json()["detail"]
+    assert "48" in detail and "VWC" in detail
+
+    rows = (await db.execute(
+        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
+    )).scalars().all()
+    assert len(rows) == 0
+
+
+@pytest.fixture
+async def tension_sector(db: AsyncSession):
+    """Owned sector whose only probe is a tension (Watermark) sensor — no VWC."""
+    farm_id, sector_id, depth = await _owned_chain(db, name="Tension")
+    # _owned_chain made a soil_moisture depth; convert this one to tension instead
+    # so the sector has no VWC depth at all.
+    depth.sensor_type = "soil_tension"
+    base = datetime.now(UTC) - timedelta(hours=59)
+    for i in range(60):
+        db.add(ProbeReading(
+            probe_depth_id=depth.id,
+            timestamp=base + timedelta(hours=i),
+            raw_value=35.0, calibrated_value=35.0,
+            unit="soil_tension_cbar", quality_flag="ok",
+        ))
+    await db.commit()
+    yield sector_id
+    await delete_farm_subtree(db, farm_id)
+
+
+@pytest.mark.asyncio
+async def test_run_calibration_tension_only_explains_sensor_type(
+    client: AsyncClient, db: AsyncSession, tension_sector
+):
+    sector_id = tension_sector
+
+    resp = await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
+    assert resp.status_code == 422
+    # The user must learn it's a sensor-type issue, not a data-volume issue.
+    detail = resp.json()["detail"].lower()
+    assert "tensão" in detail or "watermark" in detail
 
     rows = (await db.execute(
         select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)

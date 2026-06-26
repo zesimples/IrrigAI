@@ -110,16 +110,21 @@ describe("AiCalibrationButton", () => {
     await waitFor(() => expect(btn).not.toBeDisabled());
   });
 
-  it("shows an error toast on insufficient data (422)", async () => {
-    mockRun.mockRejectedValue(new ApiError(422, "Insufficient probe data"));
+  it("surfaces the backend's specific reason on a 422", async () => {
+    mockRun.mockRejectedValue(
+      new ApiError(422, "Este sector usa sensores de tensão (tipo Watermark)."),
+    );
     render(<AiCalibrationButton sectorId="s1" />);
 
     fireEvent.click(screen.getByRole("button"));
 
     await waitFor(() =>
       expect(toast).toHaveBeenCalledWith(
-        "Dados insuficientes",
-        expect.objectContaining({ variant: "error" }),
+        "Calibração indisponível",
+        expect.objectContaining({
+          variant: "error",
+          description: expect.stringContaining("Watermark"),
+        }),
       ),
     );
   });

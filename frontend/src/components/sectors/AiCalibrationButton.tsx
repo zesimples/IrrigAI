@@ -54,14 +54,12 @@ export function AiCalibrationButton({ sectorId, onCalibrated, className }: Props
       // Only refresh the recommendation when the bounds actually moved.
       await onCalibrated?.();
     } catch (e) {
-      const insufficient = e instanceof ApiError && e.status === 422;
-      toast(insufficient ? "Dados insuficientes" : "Calibração falhou", {
+      // 422 carries a specific, user-readable reason from the backend (tension-only
+      // probe, too few VWC readings, implausible envelope) — surface it verbatim.
+      const is422 = e instanceof ApiError && e.status === 422;
+      toast(is422 ? "Calibração indisponível" : "Calibração falhou", {
         variant: "error",
-        description: insufficient
-          ? "Não há dados de sonda suficientes para calibrar este sector."
-          : e instanceof ApiError
-            ? e.detail
-            : "Ocorreu um erro inesperado.",
+        description: e instanceof ApiError ? e.detail : "Ocorreu um erro inesperado.",
       });
     } finally {
       setRunning(false);
