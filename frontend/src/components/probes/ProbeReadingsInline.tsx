@@ -21,6 +21,9 @@ interface ProbeReadingsInlineProps {
   onSaved?: () => void | Promise<void>;
   /** Increment this value to force the card open from outside. */
   openTrigger?: number;
+  /** Increment this value to re-fetch readings + reference lines from outside
+   *  (e.g. after a calibration run changes the sector's CC/refill bounds). */
+  refreshTrigger?: number;
 }
 
 export function ProbeReadingsInline({
@@ -32,6 +35,7 @@ export function ProbeReadingsInline({
   sectorId,
   onSaved,
   openTrigger,
+  refreshTrigger,
 }: ProbeReadingsInlineProps) {
   const [collapsed, setCollapsed] = useState(true);
 
@@ -63,6 +67,13 @@ export function ProbeReadingsInline({
     interval: interval || undefined,
   });
   const visibleEvents = (data?.events ?? []).filter((event) => event.status !== "rejected");
+
+  // Re-fetch when the parent signals the bounds may have changed (e.g. after a
+  // calibration run). Skips the initial mount (trigger starts at 0/undefined).
+  useEffect(() => {
+    if (refreshTrigger && refreshTrigger > 0) refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTrigger]);
 
   const activeRefLines = refLines ?? data?.reference_lines ?? { field_capacity: null, wilting_point: null };
 

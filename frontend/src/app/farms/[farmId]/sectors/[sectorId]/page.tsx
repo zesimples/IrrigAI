@@ -109,6 +109,7 @@ export default function SectorDetailPage({ params }: Props) {
   const [showOverrideModal, setShowOverrideModal] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [probeOpenTrigger, setProbeOpenTrigger] = useState(0);
+  const [probeRefreshTrigger, setProbeRefreshTrigger] = useState(0);
   const [improveCardDismissed, setImproveCardDismissed] = useState(false);
   const probeRef = useRef<HTMLDivElement>(null);
 
@@ -242,7 +243,12 @@ export default function SectorDetailPage({ params }: Props) {
             <AiCalibrationButton
               sectorId={sectorId}
               available={status.calibration_available ?? true}
-              onCalibrated={generate}
+              onCalibrated={async () => {
+                await generate();
+                // Refresh the probe chart so its CC/refill reference lines pick
+                // up the newly saved calibration bounds.
+                setProbeRefreshTrigger((n) => n + 1);
+              }}
             />
             <button
               onClick={generate}
@@ -443,6 +449,7 @@ export default function SectorDetailPage({ params }: Props) {
                       href={`/farms/${farmId}/sectors/${sectorId}/probes/${p.probe_id}`}
                       sectorId={sectorId}
                       openTrigger={probeOpenTrigger}
+                      refreshTrigger={probeRefreshTrigger}
                       onSaved={async () => {
                         await Promise.all([
                           refetch(),
