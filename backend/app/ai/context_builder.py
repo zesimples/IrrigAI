@@ -8,13 +8,17 @@ so the LLM can explain what was inferred vs. user-configured.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.engine.pipeline import build_sector_context, build_weather_context, build_irrigation_context
+from app.engine.pipeline import (
+    build_irrigation_context,
+    build_sector_context,
+    build_weather_context,
+)
 from app.engine.probe_interpreter import interpret_probes
 from app.models import (
     Alert,
@@ -33,7 +37,6 @@ from app.models import (
     WeatherForecast,
     WeatherObservation,
 )
-
 
 # ---------------------------------------------------------------------------
 # Context dataclasses
@@ -210,7 +213,6 @@ class AssistantContextBuilder:
 
             # Extract inputs from computation_log / inputs_snapshot
             snap = rec.inputs_snapshot or {}
-            log = rec.computation_log or {}
             depletion_mm = snap.get("depletion_mm")
             taw_mm = snap.get("taw_mm")
             raw_mm = snap.get("raw_mm")

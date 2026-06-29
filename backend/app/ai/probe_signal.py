@@ -131,10 +131,7 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         vwc_series: list[tuple[datetime, float]] = []
         for r in readings:
             v = r.calibrated_value if r.calibrated_value is not None else r.raw_value
-            if r.unit == "vwc_m3m3" and _VWC_MIN <= v <= _VWC_MAX:
-                ts = r.timestamp.replace(tzinfo=UTC) if r.timestamp.tzinfo is None else r.timestamp
-                vwc_series.append((ts, v))
-            elif r.calibrated_value is not None and _VWC_MIN < r.calibrated_value <= _VWC_MAX:
+            if r.unit == "vwc_m3m3" and _VWC_MIN <= v <= _VWC_MAX or r.calibrated_value is not None and _VWC_MIN < r.calibrated_value <= _VWC_MAX:
                 ts = r.timestamp.replace(tzinfo=UTC) if r.timestamp.tzinfo is None else r.timestamp
                 vwc_series.append((ts, v))
 
