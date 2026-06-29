@@ -8,11 +8,17 @@ import json
 import logging
 
 import openai
+from pydantic import BaseModel
 
 from app.config import Settings
 from app.metrics import ai_requests_total, ai_tokens_input_total, ai_tokens_output_total
+from app.schemas.ai import AgronomicEvidence, AgronomicInterpretation
 
 logger = logging.getLogger(__name__)
+
+
+class LLMRefusalError(Exception):
+    """Raised when the model refuses to produce structured output."""
 
 
 class OpenAIChatClient:
@@ -48,6 +54,45 @@ class OpenAIChatClient:
                 )
             ai_requests_total.labels("openai", self.model, "success").inc()
             return response.choices[0].message.content or ""
+        except Exception:
+            ai_requests_total.labels("openai", self.model, "failure").inc()
+            raise
+
+    async def complete_structured(
+        self,
+        system_prompt: str,
+        user_message: str,
+        schema_model: type[BaseModel],
+        *,
+        max_tokens: int = 900,
+        temperature: float = 0.1,
+    ) -> BaseModel:
+        try:
+            response = await self.client.beta.chat.completions.parse(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                response_format=schema_model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            usage = response.usage
+            if usage:
+                ai_tokens_input_total.labels("openai", self.model).inc(usage.prompt_tokens)
+                ai_tokens_output_total.labels("openai", self.model).inc(usage.completion_tokens)
+            message = response.choices[0].message
+            if getattr(message, "refusal", None):
+                ai_requests_total.labels("openai", self.model, "refusal").inc()
+                raise LLMRefusalError(message.refusal)
+            if message.parsed is None:
+                ai_requests_total.labels("openai", self.model, "failure").inc()
+                raise LLMRefusalError("empty parsed structured output")
+            ai_requests_total.labels("openai", self.model, "success").inc()
+            return message.parsed
+        except LLMRefusalError:
+            raise
         except Exception:
             ai_requests_total.labels("openai", self.model, "failure").inc()
             raise
@@ -140,6 +185,33 @@ class MockChatClient:
         return (
             "Não tenho contexto suficiente para responder a essa pergunta. "
             "Por favor, forneça mais detalhes sobre o sector ou a questão."
+        )
+
+    async def complete_structured(
+        self,
+        system_prompt: str,
+        user_message: str,
+        schema_model: type[BaseModel],
+        *,
+        max_tokens: int = 900,
+        temperature: float = 0.1,
+    ) -> BaseModel:
+        prompt_lower = system_prompt.lower()
+        if "irrigar" in prompt_lower or "irrigate" in prompt_lower:
+            risk, advice = "high", "Regar este setor — depleção acima do limiar."
+        elif "skip" in prompt_lower or "defer" in prompt_lower or "não regar" in prompt_lower:
+            risk, advice = "low", "Não regar — o balanço hídrico tem reserva suficiente."
+        else:
+            risk, advice = "medium", "Monitorizar a evolução do solo antes de alterar a rega."
+        return AgronomicInterpretation(
+            summary="Análise simulada do estado hídrico do setor.",
+            risk_level=risk,  # type: ignore[arg-type]
+            irrigation_advice=advice,
+            evidence=[AgronomicEvidence(source="water_balance", value="depleção dentro do esperado")],
+            missing_data=[],
+            confidence_score=0.7,
+            confidence_explanation="Resposta simulada para testes.",
+            recommended_actions=["Validar com observação de campo."],
         )
 
 

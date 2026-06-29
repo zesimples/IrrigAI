@@ -4,6 +4,7 @@ import pytest
 
 from app.ai.openai_client import MockChatClient, get_chat_client
 from app.config import Settings
+from app.schemas.ai import AgronomicInterpretation
 
 
 @pytest.mark.asyncio
@@ -66,3 +67,17 @@ def test_get_chat_client_raises_for_unknown_provider():
     settings = Settings.model_construct(LLM_PROVIDER="unknown")
     with pytest.raises(ValueError, match="Unknown LLM provider"):
         get_chat_client(settings)
+
+
+@pytest.mark.asyncio
+async def test_mock_complete_structured_returns_valid_interpretation():
+    client = MockChatClient()
+    result = await client.complete_structured(
+        system_prompt="Interpreta a recomendação de irrigar o setor",
+        user_message="Explica",
+        schema_model=AgronomicInterpretation,
+    )
+    assert isinstance(result, AgronomicInterpretation)
+    assert result.summary
+    assert result.risk_level in ("low", "medium", "high")
+    assert 0.0 <= result.confidence_score <= 1.0
