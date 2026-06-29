@@ -922,3 +922,30 @@ export interface FlowmeterFlowRateAlert {
     zero_count?: number;
   } | null;
 }
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export type ProposedActionType =
+  | "override_recommendation"
+  | "accept_recommendation"
+  | "reject_recommendation"
+  | "regenerate_recommendation"
+  | "run_calibration";
+
+export interface ProposedAction {
+  type: ProposedActionType;
+  summary: string;
+  sector_id?: string | null;
+  recommendation_id?: string | null;
+  params: Record<string, unknown>;
+}
+
+export interface ChatResult {
+  reply: string;
+  proposed_action: ProposedAction | null;
+}

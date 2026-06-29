@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { chatApi } from "@/lib/api";
+import { chatApi, recommendationsApi, sectorsApi, calibrationApi } from "@/lib/api";
+import type { ProposedAction } from "@/types";
 
 interface Message {
   role: "user" | "assistant";
   text: string;
+  proposedAction?: ProposedAction | null;
+  actionResolved?: boolean;
 }
 
 interface QuickAction {
@@ -90,14 +93,69 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
     pushUser(text);
     setLoading(true);
     try {
-      const r = await chatApi.chat(farmId, text, sectorId);
-      pushAssistant(r.reply);
+      const history = messages.map((m) => ({ role: m.role, content: m.text }));
+      const r = await chatApi.chat(farmId, text, sectorId, history);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: r.reply, proposedAction: r.proposed_action },
+      ]);
     } catch (e) {
       const detail = e instanceof Error ? e.message : "Erro desconhecido";
       pushAssistant(`Erro ao contactar o assistente: ${detail}. Tente novamente.`);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function dispatchAction(action: ProposedAction): Promise<string> {
+    const p = action.params as Record<string, unknown>;
+    switch (action.type) {
+      case "override_recommendation":
+        await recommendationsApi.override(action.recommendation_id as string, {
+          custom_depth_mm: p.custom_depth_mm != null ? Number(p.custom_depth_mm) : undefined,
+          override_reason: (p.override_reason as string) ?? "Ajuste via assistente",
+        });
+        return "Feito — recomendação substituída.";
+      case "accept_recommendation":
+        await recommendationsApi.accept(action.recommendation_id as string);
+        return "Feito — recomendação aceite.";
+      case "reject_recommendation":
+        await recommendationsApi.reject(action.recommendation_id as string, p.notes as string | undefined);
+        return "Feito — recomendação rejeitada.";
+      case "regenerate_recommendation":
+        await sectorsApi.generateRecommendation(action.sector_id as string);
+        return "Feito — nova recomendação gerada.";
+      case "run_calibration":
+        await calibrationApi.run(action.sector_id as string);
+        return "Feito — calibração iniciada.";
+      default:
+        return "Acção não suportada.";
+    }
+  }
+
+  function resolveAction(index: number) {
+    setMessages((prev) =>
+      prev.map((m, i) => (i === index ? { ...m, actionResolved: true } : m)),
+    );
+  }
+
+  async function confirmAction(index: number, action: ProposedAction) {
+    resolveAction(index);
+    setLoading(true);
+    try {
+      const msg = await dispatchAction(action);
+      pushAssistant(msg);
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : "Erro desconhecido";
+      pushAssistant(`Não foi possível executar a acção: ${detail}.`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function cancelAction(index: number) {
+    resolveAction(index);
+    pushAssistant("Acção cancelada.");
   }
 
   return (
@@ -144,19 +202,35 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
           </p>
         )}
         {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
+          <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
             <div
               className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${
-                msg.role === "user"
-                  ? "bg-emerald-700 text-white"
-                  : "bg-slate-100 text-slate-800"
+                msg.role === "user" ? "bg-emerald-700 text-white" : "bg-slate-100 text-slate-800"
               }`}
             >
               {msg.text}
             </div>
+            {msg.proposedAction && !msg.actionResolved && (
+              <div className="mt-2 max-w-[85%] rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
+                <p className="mb-2 font-medium text-amber-900">{msg.proposedAction.summary}</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => confirmAction(i, msg.proposedAction!)}
+                    disabled={loading}
+                    className="rounded-full bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
+                  >
+                    Confirmar
+                  </button>
+                  <button
+                    onClick={() => cancelAction(i)}
+                    disabled={loading}
+                    className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
         {loading && (

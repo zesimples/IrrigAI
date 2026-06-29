@@ -4,6 +4,44 @@ import pytest
 
 from app.ai.openai_client import MockChatClient, get_chat_client
 from app.config import Settings
+from app.schemas.ai import AgronomicInterpretation
+
+
+@pytest.mark.asyncio
+async def test_mock_run_tool_loop_prose_by_default():
+    client = MockChatClient()
+    resp = await client.run_tool_loop(
+        messages=[{"role": "user", "content": "Quanto choveu esta semana?"}],
+        tools=[],
+    )
+    assert resp.tool_calls == []
+    assert resp.content
+
+
+@pytest.mark.asyncio
+async def test_mock_run_tool_loop_proposes_calibration_on_keyword():
+    client = MockChatClient()
+    resp = await client.run_tool_loop(
+        messages=[{"role": "user", "content": "Podes recalibrar este setor?"}],
+        tools=[],
+    )
+    assert len(resp.tool_calls) == 1
+    assert resp.tool_calls[0].name == "propose_run_calibration"
+
+
+@pytest.mark.asyncio
+async def test_mock_run_tool_loop_terminates_after_tool_result():
+    client = MockChatClient()
+    resp = await client.run_tool_loop(
+        messages=[
+            {"role": "user", "content": "recalibrar"},
+            {"role": "assistant", "content": None},
+            {"role": "tool", "tool_call_id": "t1", "content": "{}"},
+        ],
+        tools=[],
+    )
+    assert resp.tool_calls == []
+    assert resp.content
 
 
 @pytest.mark.asyncio
@@ -66,3 +104,17 @@ def test_get_chat_client_raises_for_unknown_provider():
     settings = Settings.model_construct(LLM_PROVIDER="unknown")
     with pytest.raises(ValueError, match="Unknown LLM provider"):
         get_chat_client(settings)
+
+
+@pytest.mark.asyncio
+async def test_mock_complete_structured_returns_valid_interpretation():
+    client = MockChatClient()
+    result = await client.complete_structured(
+        system_prompt="Interpreta a recomendação de irrigar o setor",
+        user_message="Explica",
+        schema_model=AgronomicInterpretation,
+    )
+    assert isinstance(result, AgronomicInterpretation)
+    assert result.summary
+    assert result.risk_level in ("low", "medium", "high")
+    assert 0.0 <= result.confidence_score <= 1.0

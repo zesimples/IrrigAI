@@ -495,19 +495,20 @@ class IrrigationAssistant:
         fallback_risk: str = "medium",
         max_tokens: int = 900,
     ) -> AgronomicInterpretation:
-        structured_prompt = system_prompt + "\n\n" + prompt_templates.STRUCTURED_OUTPUT_PT
-        raw = await self.client.complete(
-            structured_prompt,
-            user_message,
-            max_tokens=max_tokens,
-            temperature=0.1,
-        )
-        parsed = self._parse_structured_output(raw)
-        if parsed is None:
+        try:
+            parsed = await self.client.complete_structured(
+                system_prompt,
+                user_message,
+                AgronomicInterpretation,
+                max_tokens=max_tokens,
+                temperature=0.1,
+            )
+        except Exception:
             parsed = self._fallback_structured(
-                raw,
+                "",
                 context=context,
                 risk_level=fallback_risk,
+                confidence_score=0.3,
             )
 
         if not parsed.evidence:
@@ -515,24 +516,6 @@ class IrrigationAssistant:
         if not parsed.missing_data:
             parsed.missing_data = self._known_limitations(context)
         return parsed
-
-    def _parse_structured_output(self, raw: str) -> AgronomicInterpretation | None:
-        text = raw.strip()
-        if text.startswith("```"):
-            text = text.strip("`")
-            if text.lower().startswith("json"):
-                text = text[4:].strip()
-        try:
-            return AgronomicInterpretation.model_validate(json.loads(text))
-        except Exception:
-            start = text.find("{")
-            end = text.rfind("}")
-            if start == -1 or end == -1 or end <= start:
-                return None
-            try:
-                return AgronomicInterpretation.model_validate(json.loads(text[start:end + 1]))
-            except Exception:
-                return None
 
     def _fallback_structured(
         self,

@@ -3,6 +3,8 @@ import type {
   AITextResponse,
   AuditLog,
   AutoCalibrationResult,
+  ChatResult,
+  ChatTurn,
   ProbeCalibrationRun,
   CropProfileTemplate,
   DashboardResponse,
@@ -335,10 +337,11 @@ export const auditApi = {
 // ── AI Chat ───────────────────────────────────────────────────────────────────
 
 export const chatApi = {
-  chat: (farmId: string, message: string, sectorId?: string) =>
-    post<AITextResponse & { reply: string }>(`/farms/${farmId}/chat`, {
+  chat: (farmId: string, message: string, sectorId?: string, history: ChatTurn[] = []) =>
+    post<ChatResult>(`/farms/${farmId}/chat`, {
       message,
       sector_id: sectorId ?? null,
+      history,
     }),
   explainSector: (sectorId: string, userNotes?: string) =>
     post<AITextResponse & { explanation: string }>(`/sectors/${sectorId}/explain`, {

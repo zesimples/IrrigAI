@@ -6,11 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access import Access
 from app.ai.assistant import IrrigationAssistant
+from app.ai.chat_agent import ChatAgent
 from app.ai.context_builder import AssistantContextBuilder
 from app.ai.openai_client import get_chat_client
 from app.config import get_settings
 from app.database import get_db
-from app.schemas.ai import AgronomicInterpretation
+from app.schemas.ai import AgronomicInterpretation, ChatTurn, ProposedAction
 
 router = APIRouter(tags=["chat"])
 
@@ -30,18 +31,26 @@ def get_assistant() -> IrrigationAssistant:
     )
 
 
+def get_chat_agent() -> ChatAgent:
+    settings = get_settings()
+    client = get_chat_client(settings)
+    builder = AssistantContextBuilder()
+    return ChatAgent(client=client, context_builder=builder, language=settings.DEFAULT_LANGUAGE)
+
+
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
 
 class ChatRequest(BaseModel):
     message: str
+    history: list[ChatTurn] = []
     sector_id: str | None = None
 
 
 class ChatResponse(BaseModel):
     reply: str
-    structured: AgronomicInterpretation | None = None
+    proposed_action: ProposedAction | None = None
 
 
 class ExplainRequest(BaseModel):
@@ -91,23 +100,24 @@ async def farm_chat(
     body: ChatRequest,
     access: Access,
     db: AsyncSession = Depends(get_db),
-    assistant: IrrigationAssistant = Depends(get_assistant),
+    agent: ChatAgent = Depends(get_chat_agent),
 ):
-    """Free-form conversational chat about the farm or a specific sector."""
+    """Conversational chat with memory + tools about the farm or a specific sector."""
     await access.farm(farm_id)
     if body.sector_id:
         await access.sector(body.sector_id)
     try:
-        structured = await assistant.chat_structured(
+        result = await agent.run(
             farm_id=farm_id,
-            user_message=body.message,
-            db=db,
             sector_id=body.sector_id,
+            message=body.message,
+            history=body.history,
+            access=access,
+            db=db,
         )
-        reply = assistant.render_structured(structured)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return ChatResponse(reply=reply, structured=structured)
+        raise HTTPException(status_code=500, detail="Erro ao processar o pedido de chat.") from exc
+    return ChatResponse(reply=result.reply, proposed_action=result.proposed_action)
 
 
 @router.post("/sectors/{sector_id}/explain", response_model=ExplainResponse)

@@ -36,3 +36,25 @@ class StructuredAIResponse(BaseModel):
 
     text: str
     structured: AgronomicInterpretation
+
+
+ProposedActionType = Literal[
+    "override_recommendation",
+    "accept_recommendation",
+    "reject_recommendation",
+    "regenerate_recommendation",
+    "run_calibration",
+]
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ProposedAction(BaseModel):
+    type: ProposedActionType
+    summary: str
+    sector_id: str | None = None
+    recommendation_id: str | None = None
+    params: dict = Field(default_factory=dict)
