@@ -215,26 +215,26 @@ async def test_interpret_probe_structured_uses_advisory_prompt(assistant):
     """interpret_probe_patterns_structured must use PROBE_ADVISORY_PT, not PROBE_INTERPRETATION_PT."""
     captured: list[str] = []
 
-    async def _capture(system_prompt, user_message, **kwargs):
+    async def _capture(system_prompt, user_message, schema_model, **kwargs):
         captured.append(system_prompt)
-        # Return valid AgronomicInterpretation JSON so _parse_structured_output succeeds
-        return json.dumps({
-            "summary": "Sonda mostra humidade estável e adequada.",
-            "risk_level": "low",
-            "irrigation_advice": "Não há necessidade de regar nos próximos 1-2 dias. Monitoriza a tendência.",
-            "evidence": [
+        # Return a valid AgronomicInterpretation directly (native structured path)
+        return AgronomicInterpretation(
+            summary="Sonda mostra humidade estável e adequada.",
+            risk_level="low",
+            irrigation_advice="Não há necessidade de regar nos próximos 1-2 dias. Monitoriza a tendência.",
+            evidence=[
                 {"source": "depths[0].humidade_actual", "value": "humidade adequada"},
                 {"source": "depths[0].tendencia", "value": "estável"},
             ],
-            "missing_data": [],
-            "confidence_score": 0.8,
-            "confidence_explanation": "Sinal estável com leituras suficientes.",
-            "recommended_actions": ["Monitorizar humidade nas próximas 24h"],
-        })
+            missing_data=[],
+            confidence_score=0.8,
+            confidence_explanation="Sinal estável com leituras suficientes.",
+            recommended_actions=["Monitorizar humidade nas próximas 24h"],
+        )
 
     db = AsyncMock()
     with patch("app.ai.assistant.compute_probe_signal_stats", return_value=_MINIMAL_PROBE_STATS):
-        assistant.client.complete = _capture
+        assistant.client.complete_structured = _capture
         result = await assistant.interpret_probe_patterns_structured("probe-001", db)
 
     assert len(captured) == 1
@@ -275,24 +275,24 @@ async def test_interpret_probe_no_deficit_overrides_urgent_irrigation_advice(ass
 
     depth_summary = "Humidade elevada à superfície mas crítica a 50 cm, com consumo nas camadas fundas."
 
-    async def _bad_model_output(system_prompt, user_message, **kwargs):
-        return json.dumps({
-            "summary": depth_summary,
-            "risk_level": "high",
-            "irrigation_advice": "Rega urgente para evitar stress hídrico nas raízes.",
-            "evidence": [
+    async def _bad_model_output(system_prompt, user_message, schema_model, **kwargs):
+        return AgronomicInterpretation(
+            summary=depth_summary,
+            risk_level="high",
+            irrigation_advice="Rega urgente para evitar stress hídrico nas raízes.",
+            evidence=[
                 {"source": "depths[1].humidade_actual", "value": "humidade crítica a 50 cm"},
                 {"source": "depths[0].humidade_actual", "value": "humidade elevada a 5 cm"},
             ],
-            "missing_data": [],
-            "confidence_score": 0.7,
-            "confidence_explanation": "Leituras recentes disponíveis.",
-            "recommended_actions": ["Aplicar rega imediatamente."],
-        })
+            missing_data=[],
+            confidence_score=0.7,
+            confidence_explanation="Leituras recentes disponíveis.",
+            recommended_actions=["Aplicar rega imediatamente."],
+        )
 
     db = AsyncMock()
     with patch("app.ai.assistant.compute_probe_signal_stats", return_value=_NO_DEFICIT_PROBE_STATS):
-        assistant.client.complete = _bad_model_output
+        assistant.client.complete_structured = _bad_model_output
         result = await assistant.interpret_probe_patterns_structured("probe-001", db)
 
     # Advice/risk/actions neutralised to align with the engine decision.
@@ -328,6 +328,50 @@ def test_render_probe_interpretation_includes_summary_advice_evidence_and_action
     assert "• Conselho: Não há necessidade de regar agora." in rendered
     assert "• Sinais observados: humidade adequada; estável" in rendered
     assert "• Próxima verificação: Monitorizar a tendência nas próximas 24h." in rendered
+
+
+@pytest.mark.asyncio
+async def test_complete_structured_uses_native_parse(monkeypatch):
+    """The structured path must call client.complete_structured, not parse JSON text."""
+    from app.schemas.ai import AgronomicInterpretation
+
+    client = MockChatClient()
+    called = {}
+
+    async def spy_complete_structured(system, user, schema, **kw):
+        called["hit"] = True
+        return AgronomicInterpretation(
+            summary="ok", risk_level="low", irrigation_advice="monitorizar",
+            evidence=[], missing_data=[], confidence_score=0.8,
+            confidence_explanation="teste", recommended_actions=[],
+        )
+
+    monkeypatch.setattr(client, "complete_structured", spy_complete_structured)
+    assistant = IrrigationAssistant(
+        context_builder=AssistantContextBuilder(), client=client, language="pt"
+    )
+    result = await assistant._complete_structured(
+        system_prompt="x", user_message="y", context={"known_limitations": []},
+    )
+    assert called.get("hit") is True
+    assert result.summary == "ok"
+
+
+@pytest.mark.asyncio
+async def test_complete_structured_fallback_low_confidence_on_error(monkeypatch):
+    client = MockChatClient()
+
+    async def boom(*a, **k):
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr(client, "complete_structured", boom)
+    assistant = IrrigationAssistant(
+        context_builder=AssistantContextBuilder(), client=client, language="pt"
+    )
+    result = await assistant._complete_structured(
+        system_prompt="x", user_message="y", context={"known_limitations": ["sem sondas"]},
+    )
+    assert result.confidence_score <= 0.3
 
 
 @pytest.mark.parametrize("language", ["pt", "en"])
