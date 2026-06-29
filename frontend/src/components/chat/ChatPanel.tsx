@@ -112,7 +112,7 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
     switch (action.type) {
       case "override_recommendation":
         await recommendationsApi.override(action.recommendation_id as string, {
-          custom_depth_mm: p.custom_depth_mm as number | undefined,
+          custom_depth_mm: p.custom_depth_mm != null ? Number(p.custom_depth_mm) : undefined,
           override_reason: (p.override_reason as string) ?? "Ajuste via assistente",
         });
         return "Feito — recomendação substituída.";

@@ -7,11 +7,12 @@ window.HTMLElement.prototype.scrollIntoView = vi.fn() as typeof window.HTMLEleme
 
 vi.mock("@/lib/api", () => ({
   chatApi: { chat: vi.fn() },
-  recommendationsApi: { override: vi.fn(), accept: vi.fn(), reject: vi.fn(), generateRecommendation: vi.fn() },
+  recommendationsApi: { override: vi.fn(), accept: vi.fn(), reject: vi.fn() },
+  sectorsApi: { generateRecommendation: vi.fn() },
   calibrationApi: { run: vi.fn() },
 }));
 
-import { chatApi, calibrationApi } from "@/lib/api";
+import { chatApi, calibrationApi, sectorsApi } from "@/lib/api";
 
 describe("ChatPanel", () => {
   beforeEach(() => { vi.clearAllMocks(); });
@@ -36,5 +37,19 @@ describe("ChatPanel", () => {
     await screen.findByText("Correr a Calibração AI.");
     fireEvent.click(screen.getByText("Confirmar"));
     await waitFor(() => expect(calibrationApi.run).toHaveBeenCalledWith("sec-9"));
+  });
+
+  it("dispatches regenerate_recommendation via sectorsApi", async () => {
+    (chatApi.chat as any).mockResolvedValue({
+      reply: "Vou gerar uma nova recomendação.",
+      proposed_action: { type: "regenerate_recommendation", summary: "Gerar nova recomendação.", sector_id: "sec-9", params: {} },
+    });
+    (sectorsApi.generateRecommendation as any).mockResolvedValue({});
+    render(<ChatPanel farmId="f1" sectorId="sec-9" onClose={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "nova recomendação" } });
+    fireEvent.click(screen.getByLabelText("Enviar"));
+    await screen.findByText("Gerar nova recomendação.");
+    fireEvent.click(screen.getByText("Confirmar"));
+    await waitFor(() => expect(sectorsApi.generateRecommendation).toHaveBeenCalledWith("sec-9"));
   });
 });
