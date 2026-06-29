@@ -4,8 +4,10 @@ Provides OpenAIChatClient (real API) and MockChatClient (testing without key).
 Use get_chat_client(settings) to obtain the right instance.
 """
 
-import json
+import json as _json
 import logging
+import re as _re
+from dataclasses import dataclass, field
 
 import openai
 from pydantic import BaseModel
@@ -15,6 +17,19 @@ from app.metrics import ai_requests_total, ai_tokens_input_total, ai_tokens_outp
 from app.schemas.ai import AgronomicEvidence, AgronomicInterpretation
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LLMToolCall:
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass
+class LLMToolResponse:
+    content: str | None
+    tool_calls: list[LLMToolCall] = field(default_factory=list)
 
 
 class LLMRefusalError(Exception):
@@ -97,6 +112,41 @@ class OpenAIChatClient:
             ai_requests_total.labels("openai", self.model, "failure").inc()
             raise
 
+    async def run_tool_loop(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        max_tokens: int = 700,
+        temperature: float = 0.2,
+    ) -> LLMToolResponse:
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools or None,
+                tool_choice="auto" if tools else None,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            usage = response.usage
+            if usage:
+                ai_tokens_input_total.labels("openai", self.model).inc(usage.prompt_tokens)
+                ai_tokens_output_total.labels("openai", self.model).inc(usage.completion_tokens)
+            ai_requests_total.labels("openai", self.model, "success").inc()
+            msg = response.choices[0].message
+            calls: list[LLMToolCall] = []
+            for tc in msg.tool_calls or []:
+                try:
+                    parsed_args = _json.loads(tc.function.arguments or "{}")
+                except _json.JSONDecodeError:
+                    parsed_args = {}
+                calls.append(LLMToolCall(id=tc.id, name=tc.function.name, arguments=parsed_args))
+            return LLMToolResponse(content=msg.content, tool_calls=calls)
+        except Exception:
+            ai_requests_total.labels("openai", self.model, "failure").inc()
+            raise
+
 
 class MockChatClient:
     """Returns plausible responses for testing without an OpenAI API key."""
@@ -142,7 +192,7 @@ class MockChatClient:
             )
 
         if "não enumeres padrões por profundidade" in prompt_lower:
-            return json.dumps({
+            return _json.dumps({
                 "summary": "Sonda mostra humidade estável e adequada.",
                 "risk_level": "low",
                 "irrigation_advice": (
@@ -212,6 +262,52 @@ class MockChatClient:
             confidence_score=0.7,
             confidence_explanation="Resposta simulada para testes.",
             recommended_actions=["Validar com observação de campo."],
+        )
+
+    async def run_tool_loop(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        max_tokens: int = 700,
+        temperature: float = 0.2,
+    ) -> LLMToolResponse:
+        # If a tool result is already present, produce the final prose answer.
+        if any(m.get("role") == "tool" for m in messages):
+            return LLMToolResponse(
+                content="Registei a proposta. Confirma na aplicação para a aplicar.",
+                tool_calls=[],
+            )
+        last_user = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                last_user = (m.get("content") or "").lower()
+                break
+        if "recalibr" in last_user or "calibra" in last_user:
+            return LLMToolResponse(content=None, tool_calls=[
+                LLMToolCall(id="mock-1", name="propose_run_calibration", arguments={})
+            ])
+        if "gerar" in last_user or "nova recomenda" in last_user or "regenera" in last_user:
+            return LLMToolResponse(content=None, tool_calls=[
+                LLMToolCall(id="mock-1", name="propose_regenerate_recommendation", arguments={})
+            ])
+        if "aceitar" in last_user:
+            return LLMToolResponse(content=None, tool_calls=[
+                LLMToolCall(id="mock-1", name="propose_accept_recommendation",
+                            arguments={"recommendation_id": "rec-mock"})
+            ])
+        if "substitu" in last_user or "override" in last_user or "regar" in last_user:
+            m = _re.search(r"(\d+(?:\.\d+)?)\s*mm", last_user)
+            depth = float(m.group(1)) if m else 10.0
+            return LLMToolResponse(content=None, tool_calls=[
+                LLMToolCall(id="mock-1", name="propose_override",
+                            arguments={"recommendation_id": "rec-mock", "depth_mm": depth,
+                                       "reason": "pedido do utilizador"})
+            ])
+        return LLMToolResponse(
+            content=("Com base nos dados disponíveis, o setor está estável e não "
+                     "requer rega imediata. Vigia a evolução nas próximas 24-48h."),
+            tool_calls=[],
         )
 
 

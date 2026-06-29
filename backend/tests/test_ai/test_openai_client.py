@@ -8,6 +8,43 @@ from app.schemas.ai import AgronomicInterpretation
 
 
 @pytest.mark.asyncio
+async def test_mock_run_tool_loop_prose_by_default():
+    client = MockChatClient()
+    resp = await client.run_tool_loop(
+        messages=[{"role": "user", "content": "Quanto choveu esta semana?"}],
+        tools=[],
+    )
+    assert resp.tool_calls == []
+    assert resp.content
+
+
+@pytest.mark.asyncio
+async def test_mock_run_tool_loop_proposes_calibration_on_keyword():
+    client = MockChatClient()
+    resp = await client.run_tool_loop(
+        messages=[{"role": "user", "content": "Podes recalibrar este setor?"}],
+        tools=[],
+    )
+    assert len(resp.tool_calls) == 1
+    assert resp.tool_calls[0].name == "propose_run_calibration"
+
+
+@pytest.mark.asyncio
+async def test_mock_run_tool_loop_terminates_after_tool_result():
+    client = MockChatClient()
+    resp = await client.run_tool_loop(
+        messages=[
+            {"role": "user", "content": "recalibrar"},
+            {"role": "assistant", "content": None},
+            {"role": "tool", "tool_call_id": "t1", "content": "{}"},
+        ],
+        tools=[],
+    )
+    assert resp.tool_calls == []
+    assert resp.content
+
+
+@pytest.mark.asyncio
 async def test_mock_client_returns_nonempty_string():
     client = MockChatClient()
     result = await client.complete(
