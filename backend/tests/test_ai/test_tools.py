@@ -50,6 +50,20 @@ async def test_propose_override_no_mutation_and_validates_access():
 
 
 @pytest.mark.asyncio
+async def test_propose_override_access_denied_returns_error():
+    access = AsyncMock()
+    access.recommendation.side_effect = HTTPException(status_code=404)
+    db = AsyncMock()
+    out = await execute_tool(
+        "propose_override",
+        {"recommendation_id": "foreign", "depth_mm": 15, "reason": "x"},
+        access=access, db=db, scope=ToolScope(farm_id="f1", sector_id="sec-1"),
+    )
+    assert out == {"error": "not_found_or_forbidden"}
+    db.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_propose_run_calibration_uses_scope_sector():
     access = AsyncMock()
     access.sector.return_value = object()

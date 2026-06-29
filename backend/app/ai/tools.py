@@ -198,7 +198,7 @@ async def execute_tool(
             return await _propose(name, args, access, db, scope)
         return {"error": f"unknown_tool:{name}"}
     except HTTPException:
-        return _ACCESS_DENIED
+        return dict(_ACCESS_DENIED)
 
 
 async def _get_farm_overview(farm_id, access, db) -> dict:
@@ -271,10 +271,7 @@ async def _propose(name, args, access, db, scope) -> dict:
         rec_id = args.get("recommendation_id")
         if not rec_id:
             return {"error": "missing_recommendation_id"}
-        try:
-            await access.recommendation(rec_id)
-        except HTTPException:
-            return _ACCESS_DENIED
+        await access.recommendation(rec_id)
         if name == "propose_override":
             depth = args.get("depth_mm")
             reason = args.get("reason", "")
@@ -305,10 +302,7 @@ async def _propose(name, args, access, db, scope) -> dict:
         sector_id = args.get("sector_id") or scope.sector_id
         if not sector_id:
             return {"error": "missing_sector_id"}
-        try:
-            await access.sector(sector_id)
-        except HTTPException:
-            return _ACCESS_DENIED
+        await access.sector(sector_id)
         if name == "propose_regenerate_recommendation":
             action = ProposedAction(
                 type="regenerate_recommendation",
