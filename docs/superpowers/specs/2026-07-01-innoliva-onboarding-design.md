@@ -44,9 +44,20 @@ User: Innoliva (role=grower, non-admin)   email=innoliva@irrigai.pt
 
 Per sector: `crop_type="olive"`; `variety` set when the name implies it
 (Arbequina / Cobrançosa / Picoal); one `SectorCropProfile` copied from the
-`olive` template; one `Probe` with `external_id` from the CSV, `unit=vwc_m3m3`,
-`provider="myirrigation"`. `ProbeDepth` rows are created by ingestion from the
-first readings (sensor depths vary 5–60 cm per device — not hardcoded).
+`olive` template; one `Probe` with `external_id` from the CSV (Probe has no unit
+field — unit lives on readings/`ProbeDepth`), `manufacturer="Pessl Instruments"`,
+`model="TDT Soil Moisture"`.
+
+**`ProbeDepth` rows must be pre-created — ingestion does NOT create them.**
+`ingestion._store_readings` *skips* any reading whose `depth_cm` has no
+`ProbeDepth` row ("No ProbeDepth record for depth=…cm — skipping"). Sensor depths
+vary per device (e.g. 5/15/25/35/45/55 vs 10/20/30/40/50/60 cm). So the
+onboarding script, for each probe, fetches the device's sensor list from the API
+(POST `/data/devices/{device_id}/data` over a short window), extracts the
+`Soil Moisture` sensor depths, and creates one `ProbeDepth` per depth
+(`sensor_type="soil_moisture"`, `calibration_offset=0.0`, `calibration_factor=1.0`
+— the adapter already normalises vol% → m³/m³ at ingest). This also validates
+each device responds.
 
 Polo → project_id / iMetos device:
 
@@ -84,28 +95,29 @@ Today `adapters/factory` caches a `MyIrrigationAdapter` **instance per credentia
 authenticating independently against the same `client_id` — recreating exactly
 the token-poisoning condition.
 
-**Mitigation (in scope):** cache the adapter/token per `(base_url, username,
-password, client_id, client_secret)` only, and carry `project_id` /
-`weather_device_id` per **request** rather than baking them into instance state,
-so all 6 farms reuse a single shared token. Concretely:
+**Empirical finding (2026-07-01, tested against the live API):** two logins with
+the same `client_id` DO invalidate each other's tokens — the older token
+immediately returns 406 "client signature invalid". **However**, the adapter's
+existing `_is_client_signature_invalid` → re-auth path (fix `e107777`)
+transparently recovers: the poisoned call re-authenticates and succeeds. So 6
+farms sharing one login will self-heal but produce **re-auth churn** (each polo's
+ingestion poisons the others' tokens). The outage root-cause (adapter *not*
+re-authing on 406) is already fixed.
 
-- `fetch_readings` already needs only `device_id` (parsed from `external_id`) —
-  no change needed there.
-- Weather calls (`fetch_forecast`, `fetch_observations`, `fetch_et0`,
-  `_get_weather_project_id`) currently read `self._project_id` /
-  `self._weather_device_id`. Add optional `project_id` / `weather_device_id`
-  parameters to these methods (falling back to instance state for the existing
-  single-project Esporão/Conqueiros callers), and have the farm-aware ingestion
-  path pass the polo's values per call.
-- Factory: key `_myirrigation_cache` on the credential tuple only; do not include
-  project/device in the key.
+**Decision — ship simple + monitor.** Keep per-farm adapter instances (current
+architecture); rely on the confirmed 406→re-auth self-healing. Add `project_id`
+to `FarmCredentials` and pass it through the factory so weather resolves
+per-polo. After onboarding, watch the 406 rate over a scheduler cycle; only if
+churn is genuinely problematic, do the shared-token refactor below.
 
-This preserves existing single-account behaviour (Esporão/Conqueiros unchanged —
-they keep passing project/device at construction and have their own client_ids)
-while making the shared-account case safe. If per-call threading proves too
-invasive, the fallback is to first validate — against the live API — whether
-MyIrrigation permits concurrent tokens per `client_id`; but the shared-token
-design is the safe default and is what we build.
+**Contingency (NOT built now) — shared-token refactor:** cache the adapter/token
+per `(base_url, username, password, client_id, client_secret)` only, and carry
+`project_id`/`weather_device_id` per **request** (optional params on
+`fetch_forecast`/`fetch_observations`/`fetch_et0`/`_get_weather_project_id`,
+falling back to instance state) so all 6 farms reuse one token. Factory would key
+`_myirrigation_cache` on the credential tuple only. This touches the
+`WeatherDataProvider` call path and must be regression-tested against Esporão/
+Conqueiros. Deferred unless monitoring shows churn is a real problem.
 
 ## Creation mechanism
 
