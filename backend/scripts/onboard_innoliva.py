@@ -214,18 +214,27 @@ async def main() -> None:
                 )
                 session.add(probe)
                 await session.flush()
-                # ProbeDepths from live sensor discovery (short real window so
-                # the device returns its sensor list).
+            # ProbeDepths from live sensor discovery — runs for any probe that
+            # has no depth rows yet (whether just created or from a prior partial
+            # run).  On API error: skip this probe so a re-run retries discovery.
+            existing = (
+                await session.execute(select(ProbeDepth).where(ProbeDepth.probe_id == probe.id))
+            ).scalars().first()
+            if existing is None:
                 until = datetime.now(UTC)
                 since = until - timedelta(hours=12)
-                raw = await adapter._post_form_json(
-                    f"/data/devices/{r['device_id']}/data",
-                    form_data={
-                        "start_date": since.strftime("%Y-%m-%d %H:%M:%S"),
-                        "end_date": until.strftime("%Y-%m-%d %H:%M:%S"),
-                    },
-                    params={"use_key_index": ""},
-                )
+                try:
+                    raw = await adapter._post_form_json(
+                        f"/data/devices/{r['device_id']}/data",
+                        form_data={
+                            "start_date": since.strftime("%Y-%m-%d %H:%M:%S"),
+                            "end_date": until.strftime("%Y-%m-%d %H:%M:%S"),
+                        },
+                        params={"use_key_index": ""},
+                    )
+                except Exception as exc:
+                    print(f"[WARN] depth discovery failed for device {r['device_id']}: {exc}")
+                    continue
                 for depth_cm in extract_soil_moisture_depths(raw) or [30]:
                     session.add(
                         ProbeDepth(
