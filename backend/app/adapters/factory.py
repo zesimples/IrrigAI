@@ -105,6 +105,7 @@ def get_probe_provider(config: Settings, farm=None) -> ProbeDataProvider:
                 password=creds.password if creds else None,
                 client_id=creds.client_id if creds else None,
                 client_secret=creds.client_secret if creds else None,
+                project_id=creds.project_id if creds else None,
             )
         case _:
             raise ValueError(
@@ -131,6 +132,7 @@ def get_weather_provider(config: Settings, farm=None) -> WeatherDataProvider:
                 password=creds.password if creds else None,
                 client_id=creds.client_id if creds else None,
                 client_secret=creds.client_secret if creds else None,
+                project_id=creds.project_id if creds else None,
                 weather_device_id=creds.weather_device_id if creds else None,
             )
         case _:
