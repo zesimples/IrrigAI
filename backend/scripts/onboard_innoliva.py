@@ -1,6 +1,7 @@
 """Idempotent onboarding of the Innoliva client (6 polos, 77 olive sectors).
 
-Reads docs/innoliva_device_mapping.csv and creates the entity tree, encrypted
+Reads /app/innoliva_device_mapping.csv (copied in at run time via the
+INNOLIVA_CSV env var or the run steps) and creates the entity tree, encrypted
 per-farm credentials, and ProbeDepth rows (from each device's live sensor list).
 Re-runnable: get-or-create by natural key. See
 docs/superpowers/specs/2026-07-01-innoliva-onboarding-design.md.
@@ -125,7 +126,9 @@ async def main() -> None:
         for polo, (project_id, weather_device_id) in POLO_META.items():
             farm_name = f"Polo de {polo}" if polo != "Carmo" else "Polo do Carmo"
             farm = (
-                await session.execute(select(Farm).where(Farm.name == farm_name))
+                await session.execute(
+                    select(Farm).where(Farm.name == farm_name, Farm.owner_id == owner.id)
+                )
             ).scalar_one_or_none()
             if farm is None:
                 farm = Farm(
