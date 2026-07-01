@@ -29,6 +29,8 @@ class FarmCredentials(Base, TimestampMixin):
     client_id: Mapped[str | None] = mapped_column("client_id_enc", EncryptedString, nullable=True)
     client_secret: Mapped[str | None] = mapped_column("client_secret_enc", EncryptedString, nullable=True)
     weather_device_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # MyIrrigation project this farm's weather belongs to (plaintext, not a secret).
+    project_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     farm: Mapped["Farm"] = relationship("Farm", back_populates="credentials")  # noqa: F821
 
