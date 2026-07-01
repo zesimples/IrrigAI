@@ -326,6 +326,43 @@ def get_missing_data_template(language: str = "pt") -> str:
     return MISSING_DATA_QUESTIONS_PT
 
 
+# Appended to every native-json_schema card prompt (farm summary, sector
+# explanation, diagnosis, anomaly, probe interpretation). Restores the
+# language + evidence-source guidance that STRUCTURED_OUTPUT_PT carried before
+# the native-parse migration (376467d) dropped it. Without this, the model
+# returns English fields and invents evidence.source paths that
+# render_structured's _SRC_LABEL cannot map, producing raw English bullets.
+STRUCTURED_OUTPUT_CONTRACT_PT = """
+
+FORMATO DA RESPOSTA ESTRUTURADA — obrigatório:
+- Preenche TODOS os campos (summary, irrigation_advice, evidence, missing_data,
+  confidence_explanation, recommended_actions) em português de Portugal. Se um
+  valor do contexto vier em inglês (p.ex. "No sector crop profile attached"),
+  traduz para português — nunca copies texto em inglês para a resposta.
+- Em "evidence", cada "source" tem de ser um caminho REAL do contexto fornecido.
+  Usa as chaves canónicas: water_balance, recommendation_history, weather.forecast,
+  probe_signal, probe_summary.latest_readings, water_events, alert, known_limitations.
+  NÃO inventes caminhos (não uses, p.ex., "sectors.recommendation_action").
+- NÃO calcules valores novos; interpreta apenas os dados já fornecidos.
+"""
+
+STRUCTURED_OUTPUT_CONTRACT_EN = """
+
+STRUCTURED RESPONSE FORMAT — mandatory:
+- Fill ALL fields (summary, irrigation_advice, evidence, missing_data,
+  confidence_explanation, recommended_actions) in English.
+- In "evidence", each "source" must be a REAL path from the provided context.
+  Use the canonical keys: water_balance, recommendation_history, weather.forecast,
+  probe_signal, probe_summary.latest_readings, water_events, alert, known_limitations.
+  Do NOT invent paths.
+- Do NOT compute new values; only interpret the data provided.
+"""
+
+
+def get_structured_output_contract(language: str = "pt") -> str:
+    return STRUCTURED_OUTPUT_CONTRACT_PT if language == "pt" else STRUCTURED_OUTPUT_CONTRACT_EN
+
+
 CHAT_AGENT_SYSTEM_PT = """
 És o assistente de rega da IrrigAI. Falas com o agricultor em português de Portugal, de forma directa e prática.
 

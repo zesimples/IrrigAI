@@ -495,6 +495,9 @@ class IrrigationAssistant:
         fallback_risk: str = "medium",
         max_tokens: int = 900,
     ) -> AgronomicInterpretation:
+        system_prompt = system_prompt + prompt_templates.get_structured_output_contract(
+            self.language
+        )
         try:
             parsed = await self.client.complete_structured(
                 system_prompt,

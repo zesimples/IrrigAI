@@ -358,6 +358,48 @@ async def test_complete_structured_uses_native_parse(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_complete_structured_injects_pt_output_contract(monkeypatch):
+    """The native structured path must tell the model to fill ALL fields in
+    European Portuguese and to cite canonical context source paths.
+
+    This guidance lived in STRUCTURED_OUTPUT_PT, which the native-json_schema
+    migration (376467d) deleted without folding it into the card templates.
+    Without it the model returns English evidence values and invents source
+    keys (e.g. "sectors.recommendation_action") that render_structured cannot
+    map to a Portuguese _SRC_LABEL, producing raw bullets like
+    "Sectors Recommendation Action: irrigate"."""
+    client = MockChatClient()
+    captured: dict[str, str] = {}
+
+    async def spy(system, user, schema, **kw):
+        captured["system"] = system
+        return AgronomicInterpretation(
+            summary="ok", risk_level="low", irrigation_advice="monitorizar",
+            evidence=[], missing_data=[], confidence_score=0.8,
+            confidence_explanation="teste", recommended_actions=[],
+        )
+
+    monkeypatch.setattr(client, "complete_structured", spy)
+    assistant = IrrigationAssistant(
+        context_builder=AssistantContextBuilder(), client=client, language="pt"
+    )
+    await assistant._complete_structured(
+        system_prompt="RESUMO DA EXPLORAÇÃO base prompt.",
+        user_message="y",
+        context={"known_limitations": []},
+    )
+
+    system = captured["system"]
+    # Base prompt is preserved.
+    assert "RESUMO DA EXPLORAÇÃO base prompt." in system
+    # All structured fields must be in Portuguese (translate English context values).
+    assert "português" in system.lower()
+    # Canonical source-key guidance so evidence maps to render_structured's _SRC_LABEL.
+    assert "water_balance" in system
+    assert "recommendation_history" in system
+
+
+@pytest.mark.asyncio
 async def test_complete_structured_fallback_low_confidence_on_error(monkeypatch):
     client = MockChatClient()
 
