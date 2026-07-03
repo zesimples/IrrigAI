@@ -77,7 +77,14 @@ class MockWeatherProvider(WeatherDataProvider):
     async def health_check(self) -> bool:
         return True
 
-    async def fetch_et0(self, lat: float, lon: float, for_date: date) -> float | None:
+    async def fetch_et0(
+        self,
+        lat: float,
+        lon: float,
+        for_date: date,
+        project_id: str | None = None,
+        weather_device_id: str | None = None,
+    ) -> float | None:
         """Return a pre-computed mock ET0 for the date."""
         doy = for_date.timetuple().tm_yday
         ra = _extraterrestrial_radiation(lat, doy)
@@ -92,6 +99,8 @@ class MockWeatherProvider(WeatherDataProvider):
         lon: float,
         since: datetime,
         until: datetime,
+        project_id: str | None = None,
+        weather_device_id: str | None = None,
     ) -> list[WeatherObservationDTO]:
         observations = []
         p = self._params
@@ -136,6 +145,8 @@ class MockWeatherProvider(WeatherDataProvider):
         lat: float,
         lon: float,
         days: int = 5,
+        project_id: str | None = None,
+        weather_device_id: str | None = None,
     ) -> list[WeatherForecastDTO]:
         forecasts = []
         p = self._params

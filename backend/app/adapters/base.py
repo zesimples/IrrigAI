@@ -84,6 +84,8 @@ class WeatherDataProvider(ABC):
         lon: float,
         since: datetime,
         until: datetime,
+        project_id: str | None = None,
+        weather_device_id: str | None = None,
     ) -> list[WeatherObservationDTO]:
         """Fetch historical weather observations for a location and time range."""
 
@@ -93,6 +95,8 @@ class WeatherDataProvider(ABC):
         lat: float,
         lon: float,
         days: int = 5,
+        project_id: str | None = None,
+        weather_device_id: str | None = None,
     ) -> list[WeatherForecastDTO]:
         """Fetch N-day forecast for a location."""
 
@@ -102,6 +106,8 @@ class WeatherDataProvider(ABC):
         lat: float,
         lon: float,
         for_date: date,
+        project_id: str | None = None,
+        weather_device_id: str | None = None,
     ) -> float | None:
         """Fetch pre-computed ET0 for a location and date, or None if unavailable.
 

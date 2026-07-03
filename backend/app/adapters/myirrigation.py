@@ -400,7 +400,9 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
     # WeatherDataProvider
     # ------------------------------------------------------------------
 
-    async def _get_weather_project_id(self) -> str:
+    async def _get_weather_project_id(self, project_id: str | None = None) -> str:
+        if project_id:
+            return project_id
         if self._project_id:
             return self._project_id
         projects = await self.get_projects()
@@ -418,12 +420,14 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
         lat: float,
         lon: float,
         days: int = 5,
+        project_id: str | None = None,
+        weather_device_id: str | None = None,
     ) -> list[WeatherForecastDTO]:
         """Fetch weather forecast from /data/projects/{id}/weather_forecast/detailed."""
         try:
-            project_id = await self._get_weather_project_id()
+            pid = await self._get_weather_project_id(project_id)
             raw = await self._get_json(
-                f"/data/projects/{project_id}/weather_forecast/detailed"
+                f"/data/projects/{pid}/weather_forecast/detailed"
             )
         except Exception:
             logger.exception("MyIrrigation: fetch_forecast failed")
@@ -437,19 +441,22 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
         lon: float,
         since: datetime,
         until: datetime,
+        project_id: str | None = None,
+        weather_device_id: str | None = None,
     ) -> list[WeatherObservationDTO]:
         """Fetch historical weather from the iMetos station (weather device).
 
         Fetches hourly data from the configured weather device and aggregates
         to daily observations.
         """
-        if not self._weather_device_id:
+        device = weather_device_id or self._weather_device_id
+        if not device:
             logger.warning("MyIrrigation: MYIRRIGATION_WEATHER_DEVICE_ID not set — no observations")
             return []
 
         try:
             raw = await self._post_form_json(
-                f"/data/devices/{self._weather_device_id}/data",
+                f"/data/devices/{device}/data",
                 form_data={
                     "start_date": since.strftime(_DATE_FMT),
                     "end_date": until.strftime(_DATE_FMT),
@@ -467,9 +474,12 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
         lat: float,
         lon: float,
         for_date: date,
+        project_id: str | None = None,
+        weather_device_id: str | None = None,
     ) -> float | None:
         """Fetch pre-computed ET0 from the iMetos station for a specific date."""
-        if not self._weather_device_id:
+        device = weather_device_id or self._weather_device_id
+        if not device:
             return None
 
         day_start = datetime(for_date.year, for_date.month, for_date.day, 0, 0, 0, tzinfo=UTC)
@@ -477,7 +487,7 @@ class MyIrrigationAdapter(ProbeDataProvider, WeatherDataProvider):
 
         try:
             raw = await self._post_form_json(
-                f"/data/devices/{self._weather_device_id}/data",
+                f"/data/devices/{device}/data",
                 form_data={
                     "start_date": day_start.strftime(_DATE_FMT),
                     "end_date": day_end.strftime(_DATE_FMT),

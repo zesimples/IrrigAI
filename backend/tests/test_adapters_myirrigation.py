@@ -803,3 +803,29 @@ def test_get_float_none_when_absent():
 
 def test_get_float_handles_string_numbers():
     assert _get_float({"et0": "5.2"}, "et0") == pytest.approx(5.2)
+
+
+# ---------------------------------------------------------------------------
+# Per-call project_id / weather_device_id override tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_forecast_per_call_project_overrides_instance(monkeypatch):
+    a = MyIrrigationAdapter(base_url="http://x/api/v1", username="u", password="p",
+                            client_id="c", client_secret="s",
+                            project_id="1044", weather_device_id="1583")
+    captured = {}
+
+    async def fake_get_json(path, params=None):
+        captured["path"] = path
+        return {"values": {}}
+
+    monkeypatch.setattr(a, "_get_json", fake_get_json)
+    monkeypatch.setattr(a, "authenticate", lambda: _noop())
+    await a.fetch_forecast(lat=0, lon=0, days=3, project_id="167")
+    assert "/data/projects/167/weather_forecast/detailed" in captured["path"]
+
+
+async def _noop():
+    return None
