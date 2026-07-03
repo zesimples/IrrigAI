@@ -174,10 +174,24 @@ async def main() -> None:
                     select(Plot).where(Plot.farm_id == farm.id, Plot.name == plot_name)
                 )
             ).scalar_one_or_none()
+            proj_id, wx_device_id = POLO_META[polo]
             if plot is None:
-                plot = Plot(id=str(uuid.uuid4()), farm_id=farm.id, name=plot_name)
+                plot = Plot(
+                    id=str(uuid.uuid4()),
+                    farm_id=farm.id,
+                    name=plot_name,
+                    myirrigation_project_id=proj_id,
+                    weather_device_id=wx_device_id,
+                )
                 session.add(plot)
                 await session.flush()
+            else:
+                # Backfill weather config on re-run — only fill when unset so we
+                # don't clobber a value someone set manually.
+                if plot.myirrigation_project_id is None:
+                    plot.myirrigation_project_id = proj_id
+                if plot.weather_device_id is None:
+                    plot.weather_device_id = wx_device_id
             plots[polo] = plot
         await session.flush()
 
