@@ -453,17 +453,27 @@ async def ingest_weather_observations(
     since: datetime,
     until: datetime,
     source: str = "unknown",
+    plot_id: str | None = None,
+    project_id: str | None = None,
+    weather_device_id: str | None = None,
 ) -> int:
     """Fetch weather observations and persist new ones. Returns count inserted."""
     await provider.authenticate()
     obs_list: list[WeatherObservationDTO] = await provider.fetch_observations(
-        lat=lat, lon=lon, since=since, until=until
+        lat=lat, lon=lon, since=since, until=until,
+        project_id=project_id, weather_device_id=weather_device_id,
     )
 
-    # Load existing timestamps for dedup
+    # Load existing timestamps for dedup — scoped to the same plot (or NULL for farm-level)
+    plot_predicate = (
+        WeatherObservation.plot_id.is_(None)
+        if plot_id is None
+        else WeatherObservation.plot_id == plot_id
+    )
     existing_result = await session.execute(
         select(WeatherObservation.timestamp).where(
             WeatherObservation.farm_id == farm_id,
+            plot_predicate,
             WeatherObservation.timestamp >= since,
             WeatherObservation.timestamp <= until,
         )
@@ -479,6 +489,7 @@ async def ingest_weather_observations(
             WeatherObservation(
                 id=str(uuid.uuid4()),
                 farm_id=farm_id,
+                plot_id=plot_id,
                 timestamp=ts,
                 temperature_max_c=obs.temperature_max_c,
                 temperature_min_c=obs.temperature_min_c,
@@ -497,7 +508,7 @@ async def ingest_weather_observations(
     if inserted:
         await session.flush()
 
-    logger.info("Weather observations for farm %s: inserted=%d", farm_id, inserted)
+    logger.info("Weather observations for farm %s plot %s: inserted=%d", farm_id, plot_id, inserted)
     return inserted
 
 
@@ -509,25 +520,46 @@ async def ingest_weather_forecasts(
     lon: float,
     days: int = 5,
     source: str = "unknown",
+    plot_id: str | None = None,
+    project_id: str | None = None,
+    weather_device_id: str | None = None,
 ) -> int:
     """Fetch forecast and upsert (replace today's forecast with latest issued)."""
     await provider.authenticate()
     now = datetime.now(UTC)
-    forecasts: list[WeatherForecastDTO] = await provider.fetch_forecast(lat=lat, lon=lon, days=days)
+    forecasts: list[WeatherForecastDTO] = await provider.fetch_forecast(
+        lat=lat, lon=lon, days=days,
+        project_id=project_id, weather_device_id=weather_device_id,
+    )
 
-    # Delete existing forecasts for these dates (replaced by fresh run)
+    # Delete existing forecasts for these dates (replaced by fresh run) — scoped to same plot
     forecast_dates = [f.forecast_date for f in forecasts]
     if forecast_dates:
-        await session.execute(
-            text("DELETE FROM weather_forecast WHERE farm_id = :farm_id AND forecast_date = ANY(:dates)"),
-            {"farm_id": farm_id, "dates": forecast_dates},
-        )
+        if plot_id is None:
+            await session.execute(
+                text(
+                    "DELETE FROM weather_forecast"
+                    " WHERE farm_id = :farm_id AND plot_id IS NULL AND forecast_date = ANY(:dates)"
+                ),
+                {"farm_id": farm_id, "dates": forecast_dates},
+            )
+        else:
+            await session.execute(
+                text(
+                    "DELETE FROM weather_forecast"
+                    " WHERE farm_id = :farm_id"
+                    " AND plot_id = :plot_id"
+                    " AND forecast_date = ANY(:dates)"
+                ),
+                {"farm_id": farm_id, "plot_id": plot_id, "dates": forecast_dates},
+            )
 
     for fc in forecasts:
         session.add(
             WeatherForecast(
                 id=str(uuid.uuid4()),
                 farm_id=farm_id,
+                plot_id=plot_id,
                 forecast_date=fc.forecast_date,
                 issued_at=now,
                 temperature_max_c=fc.temperature_max_c,
@@ -544,7 +576,9 @@ async def ingest_weather_forecasts(
     if forecasts:
         await session.flush()
 
-    logger.info("Weather forecast for farm %s: upserted=%d days", farm_id, len(forecasts))
+    logger.info(
+        "Weather forecast for farm %s plot %s: upserted=%d days", farm_id, plot_id, len(forecasts)
+    )
     return len(forecasts)
 
 
@@ -681,22 +715,57 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
     weather_t0 = time.monotonic()
     if farm.location_lat and farm.location_lon:
         try:
-            latest_obs_result = await db.execute(
-                select(sql_func.max(WeatherObservation.timestamp)).where(
-                    WeatherObservation.farm_id == farm_id
+            # Determine whether any plots have per-plot weather config
+            all_plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+            all_plots = all_plots_result.scalars().all()
+            configured_plots = [
+                p for p in all_plots if p.weather_device_id or p.myirrigation_project_id
+            ]
+
+            if configured_plots:
+                # Per-plot fetch for each configured plot; plots without config are skipped.
+                for plot in configured_plots:
+                    latest_obs_result = await db.execute(
+                        select(sql_func.max(WeatherObservation.timestamp)).where(
+                            WeatherObservation.farm_id == farm_id,
+                            WeatherObservation.plot_id == plot.id,
+                        )
+                    )
+                    latest_obs_ts = latest_obs_result.scalar_one_or_none()
+                    weather_since = _adaptive_since(latest_obs_ts, 48, now)
+                    weather_total += await ingest_weather_observations(
+                        db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
+                        weather_since, now, source=settings.WEATHER_PROVIDER,
+                        plot_id=plot.id,
+                        project_id=plot.myirrigation_project_id,
+                        weather_device_id=plot.weather_device_id,
+                    )
+                    await ingest_weather_forecasts(
+                        db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
+                        days=7, source=settings.WEATHER_PROVIDER,
+                        plot_id=plot.id,
+                        project_id=plot.myirrigation_project_id,
+                        weather_device_id=plot.weather_device_id,
+                    )
+            else:
+                # Farm-level fallback: no plots have weather config (existing behaviour)
+                latest_obs_result = await db.execute(
+                    select(sql_func.max(WeatherObservation.timestamp)).where(
+                        WeatherObservation.farm_id == farm_id,
+                        WeatherObservation.plot_id.is_(None),
+                    )
                 )
-            )
-            latest_obs_ts = latest_obs_result.scalar_one_or_none()
-            # Weather is daily; default 48h window ensures the current day is always captured
-            weather_since = _adaptive_since(latest_obs_ts, 48, now)
-            weather_total = await ingest_weather_observations(
-                db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
-                weather_since, now, source=settings.WEATHER_PROVIDER,
-            )
-            await ingest_weather_forecasts(
-                db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
-                days=7, source=settings.WEATHER_PROVIDER,
-            )
+                latest_obs_ts = latest_obs_result.scalar_one_or_none()
+                # Weather is daily; default 48h window ensures the current day is always captured
+                weather_since = _adaptive_since(latest_obs_ts, 48, now)
+                weather_total = await ingest_weather_observations(
+                    db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
+                    weather_since, now, source=settings.WEATHER_PROVIDER,
+                )
+                await ingest_weather_forecasts(
+                    db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
+                    days=7, source=settings.WEATHER_PROVIDER,
+                )
         except Exception as exc:
             weather_error = str(exc)
             logger.exception("Weather ingestion failed for farm %s", farm_id)
