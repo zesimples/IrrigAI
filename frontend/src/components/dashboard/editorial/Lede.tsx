@@ -42,6 +42,7 @@ function buildHeadline(sectors: SectorSummary[]): { main: string; italic: string
     const main = `${toWord(count)} ${sWord(count)} ${deCrop(crop)} ${vWord(count)} de rega hoje;`;
     if (safeCropSet.size === 1) {
       const [safe] = safeCropSet;
+      if (safe === crop) return { main, italic: "os restantes sectores podem esperar." };
       return { main, italic: `${artCrop(safe)} pode esperar.` };
     }
     if (safeCropSet.size > 1) return { main, italic: "os outros podem esperar." };
@@ -57,20 +58,22 @@ function buildHeadline(sectors: SectorSummary[]): { main: string; italic: string
   return { main: main.replace(";", "."), italic: null };
 }
 
+function formatMm(value: number): string {
+  return value.toLocaleString("pt-PT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
 function buildSubtext(sectors: SectorSummary[], weather: WeatherToday): string {
-  const et0 = weather.et0_mm != null ? `ET₀ ${weather.et0_mm.toFixed(1)} mm` : null;
+  const et0 = weather.et0_mm != null ? `ET₀ hoje: ${formatMm(weather.et0_mm)} mm` : null;
   const rain48 = weather.forecast_rain_next_48h_mm > 0
-    ? `${weather.forecast_rain_next_48h_mm.toFixed(1)} mm previstos nas próximas 48h`
-    : "sem chuva prevista nas próximas 48 horas";
+    ? `${formatMm(weather.forecast_rain_next_48h_mm)} mm previstos nas próximas 48h`
+    : "Sem chuva prevista nas próximas 48 horas";
   const cropGroups = new Map<string, number>();
   for (const s of sectors.filter((x) => x.action === "irrigate")) {
     const label = CROP_LABELS[s.crop_type] ?? s.crop_type;
     cropGroups.set(label, (cropGroups.get(label) ?? 0) + 1);
   }
-  const urgentCrop = cropGroups.size > 0
-    ? `O ${[...cropGroups.keys()].map((l) => l.toLowerCase()).join(" e ")} em ${sectors.find((s) => s.action === "irrigate")?.current_stage ? "fase activa" : "défice"} pede prioridade.`
-    : "";
-  return [et0 ? `A evapotranspiração mantém-se ${et0}` : null, rain48, urgentCrop].filter(Boolean).join(". ").replace(/\.\./g, ".");
+  const urgentCrop = cropGroups.size > 0 ? "Prioridade aos sectores em défice." : "";
+  return [et0, rain48, urgentCrop].filter(Boolean).join(". ").replace(/\.\./g, ".");
 }
 
 export function Lede({ farmName, region, sectors, weather }: LedeProps) {
