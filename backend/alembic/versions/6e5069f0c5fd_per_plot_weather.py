@@ -23,12 +23,14 @@ def upgrade() -> None:
     op.add_column('plot', sa.Column('myirrigation_project_id', sa.String(length=50), nullable=True))
     op.add_column('plot', sa.Column('weather_device_id', sa.String(length=50), nullable=True))
     op.add_column('weather_forecast', sa.Column('plot_id', sa.UUID(as_uuid=False), nullable=True))
-    op.drop_index(op.f('ix_weather_forecast_farm_date'), table_name='weather_forecast')
+    # IF EXISTS: the old index is model-declared and may be absent on some
+    # environments (dev/prod index drift) — don't fail when it isn't there.
+    op.execute('DROP INDEX IF EXISTS ix_weather_forecast_farm_date')
     op.create_index('ix_weather_forecast_farm_plot_date', 'weather_forecast', ['farm_id', 'plot_id', 'forecast_date'], unique=False)
     op.create_index(op.f('ix_weather_forecast_plot_id'), 'weather_forecast', ['plot_id'], unique=False)
     op.create_foreign_key(None, 'weather_forecast', 'plot', ['plot_id'], ['id'])
     op.add_column('weather_observation', sa.Column('plot_id', sa.UUID(as_uuid=False), nullable=True))
-    op.drop_index(op.f('ix_weather_obs_farm_timestamp'), table_name='weather_observation')
+    op.execute('DROP INDEX IF EXISTS ix_weather_obs_farm_timestamp')
     op.create_index('ix_weather_obs_farm_plot_timestamp', 'weather_observation', ['farm_id', 'plot_id', 'timestamp'], unique=False)
     op.create_index(op.f('ix_weather_observation_plot_id'), 'weather_observation', ['plot_id'], unique=False)
     op.create_foreign_key(None, 'weather_observation', 'plot', ['plot_id'], ['id'])
