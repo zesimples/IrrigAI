@@ -277,8 +277,21 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
 # Weather context builder
 # ---------------------------------------------------------------------------
 
-async def build_weather_context(farm_id: str, db: AsyncSession) -> WeatherContext:
-    """Load recent weather observations and forecast from DB."""
+async def build_weather_context(
+    farm_id: str,
+    db: AsyncSession,
+    plot_id: str | None = None,
+) -> WeatherContext:
+    """Load recent weather observations and forecast from DB.
+
+    When *plot_id* is given, prefers rows scoped to that plot
+    (``WeatherObservation.plot_id == plot_id``).  If both the observation and
+    forecast queries return nothing for the plot, falls back to the farm-level
+    rows (``plot_id IS NULL``).  When *plot_id* is ``None``, queries farm-level
+    rows directly — identical to the previous behaviour.
+    """
+    from app.models import WeatherForecast
+
     now = datetime.now(UTC)
 
     farm = await db.get(Farm, farm_id)
@@ -286,15 +299,54 @@ async def build_weather_context(farm_id: str, db: AsyncSession) -> WeatherContex
     lon = farm.location_lon if farm else None
     elevation_m = (farm.elevation_m or 0.0) if farm else 0.0
 
-    # Latest observation
+    # Build the plot predicate: exact-match when plot_id given, IS NULL otherwise.
+    if plot_id:
+        obs_pred = WeatherObservation.plot_id == plot_id
+        fct_pred = WeatherForecast.plot_id == plot_id
+    else:
+        obs_pred = WeatherObservation.plot_id.is_(None)
+        fct_pred = WeatherForecast.plot_id.is_(None)
+
+    # --- Latest observation ---
     obs_result = await db.execute(
         select(WeatherObservation)
-        .where(WeatherObservation.farm_id == farm_id)
+        .where(WeatherObservation.farm_id == farm_id, obs_pred)
         .order_by(WeatherObservation.timestamp.desc())
         .limit(1)
     )
     latest_obs = obs_result.scalar_one_or_none()
 
+    # --- Forecast ---
+    forecast_result = await db.execute(
+        select(WeatherForecast)
+        .where(WeatherForecast.farm_id == farm_id, fct_pred)
+        .order_by(WeatherForecast.forecast_date)
+        .limit(7)
+    )
+    forecasts = forecast_result.scalars().all()
+
+    # Fallback to farm-level when plot-scoped queries returned nothing.
+    if plot_id and latest_obs is None and not forecasts:
+        farm_obs_pred = WeatherObservation.plot_id.is_(None)
+        farm_fct_pred = WeatherForecast.plot_id.is_(None)
+
+        obs_result = await db.execute(
+            select(WeatherObservation)
+            .where(WeatherObservation.farm_id == farm_id, farm_obs_pred)
+            .order_by(WeatherObservation.timestamp.desc())
+            .limit(1)
+        )
+        latest_obs = obs_result.scalar_one_or_none()
+
+        forecast_result = await db.execute(
+            select(WeatherForecast)
+            .where(WeatherForecast.farm_id == farm_id, farm_fct_pred)
+            .order_by(WeatherForecast.forecast_date)
+            .limit(7)
+        )
+        forecasts = forecast_result.scalars().all()
+
+    # Build typed weather objects from query results.
     hours_since_obs = None
     today_weather = DailyWeather(date=now.date())
 
@@ -315,15 +367,6 @@ async def build_weather_context(farm_id: str, db: AsyncSession) -> WeatherContex
             et0_mm=latest_obs.et0_mm,
         )
 
-    # Forecast
-    from app.models import WeatherForecast
-    forecast_result = await db.execute(
-        select(WeatherForecast)
-        .where(WeatherForecast.farm_id == farm_id)
-        .order_by(WeatherForecast.forecast_date)
-        .limit(7)
-    )
-    forecasts = forecast_result.scalars().all()
     forecast_days = [
         DailyWeather(
             date=f.forecast_date,
@@ -430,10 +473,11 @@ class RecommendationPipeline:
         if ctx.missing_config:
             log.append(f"Missing config: {'; '.join(ctx.missing_config)}")
 
-        # Step 2: Resolve farm_id (needed for weather)
+        # Step 2: Resolve farm_id (needed for weather) and sector plot_id.
+        # Always load the sector so we can pass its plot_id to build_weather_context.
+        sector = await db.get(Sector, sector_id)
         if farm_id is None:
-            sector = await db.get(Sector, sector_id)
-            plot = await db.get(Plot, sector.plot_id)
+            plot = await db.get(Plot, sector.plot_id) if sector else None
             farm_id = plot.farm_id if plot else None
 
         # Step 2.5: GDD-based Kc fallback (when phenological stage is not set)
@@ -455,10 +499,11 @@ class RecommendationPipeline:
             except Exception as exc:
                 logger.debug("GDD fallback skipped for sector %s: %s", sector_id, exc)
 
-        # Step 3: Load weather
+        # Step 3: Load weather (prefer plot-scoped rows, fall back to farm-level)
         weather: WeatherContext | None = None
         if farm_id:
-            weather = await build_weather_context(farm_id, db)
+            sector_plot_id = sector.plot_id if sector else None
+            weather = await build_weather_context(farm_id, db, plot_id=sector_plot_id)
             log.append(f"Weather: ET0={weather.today.et0_mm}, forecast days={len(weather.forecast)}")
         else:
             weather = WeatherContext(
