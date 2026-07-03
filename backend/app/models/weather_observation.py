@@ -11,11 +11,14 @@ from app.models.base import TimestampMixin, new_uuid
 class WeatherObservation(Base, TimestampMixin):
     __tablename__ = "weather_observation"
     __table_args__ = (
-        Index("ix_weather_obs_farm_timestamp", "farm_id", "timestamp"),
+        Index("ix_weather_obs_farm_plot_timestamp", "farm_id", "plot_id", "timestamp"),
     )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
     farm_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("farm.id"), nullable=False, index=True)
+    plot_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("plot.id"), nullable=True, index=True
+    )
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
     temperature_max_c: Mapped[float | None] = mapped_column(Float, nullable=True)

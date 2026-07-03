@@ -24,6 +24,9 @@ class Plot(Base, TimestampMixin):
     soil_preset_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("soil_preset.id"), nullable=True
     )
+    # Per-plot MyIrrigation weather source (null → use the farm's weather).
+    myirrigation_project_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    weather_device_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
