@@ -120,43 +120,62 @@ async def main() -> None:
             )
         ).scalar_one()
 
-        # 3. Per polo: Farm + FarmCredentials + Plot
-        farms: dict[str, Farm] = {}
-        plots: dict[str, Plot] = {}
-        for polo, (project_id, weather_device_id) in POLO_META.items():
-            farm_name = f"Polo de {polo}" if polo != "Carmo" else "Polo do Carmo"
-            farm = (
-                await session.execute(
-                    select(Farm).where(Farm.name == farm_name, Farm.owner_id == owner.id)
-                )
-            ).scalar_one_or_none()
-            if farm is None:
-                farm = Farm(
+        # 3. ONE Farm "Innoliva" (the client) + ONE FarmCredentials, then one
+        #    Plot per polo — mirrors the ADL model (Herdade das Amendoas do Lago
+        #    is one farm whose plots span several MyIrrigation projects). Probe
+        #    reads are project-agnostic (they use device_id from external_id);
+        #    the farm has a SINGLE weather source (project + iMetos device),
+        #    chosen via env, exactly like ADL's single weather_device_id.
+        weather_project_id = os.environ.get("INNOLIVA_WEATHER_PROJECT_ID") or None
+        weather_device_id = os.environ.get("INNOLIVA_WEATHER_DEVICE_ID") or None
+        if not weather_device_id:
+            print(
+                "[NOTICE] INNOLIVA_WEATHER_DEVICE_ID/PROJECT_ID not set — the Innoliva "
+                "farm will have no dedicated weather station (forecast falls back to "
+                "global/auto-detect). Set them to a representative polo's iMetos."
+            )
+
+        farm = (
+            await session.execute(
+                select(Farm).where(Farm.name == "Innoliva", Farm.owner_id == owner.id)
+            )
+        ).scalar_one_or_none()
+        if farm is None:
+            farm = Farm(
+                id=str(uuid.uuid4()),
+                name="Innoliva",
+                owner_id=owner.id,
+                region="Alentejo",
+                timezone="Europe/Lisbon",
+            )
+            session.add(farm)
+            await session.flush()
+            session.add(
+                FarmCredentials(
                     id=str(uuid.uuid4()),
-                    name=farm_name,
-                    owner_id=owner.id,
-                    region="Alentejo",
-                    timezone="Europe/Lisbon",
+                    farm_id=farm.id,
+                    project_id=weather_project_id,
+                    weather_device_id=weather_device_id,
+                    **creds_env,
                 )
-                session.add(farm)
-                await session.flush()
-                session.add(
-                    FarmCredentials(
-                        id=str(uuid.uuid4()),
-                        farm_id=farm.id,
-                        project_id=project_id,
-                        weather_device_id=weather_device_id,
-                        **creds_env,
-                    )
-                )
-            farms[polo] = farm
+            )
+            await session.flush()
+
+        # One Plot per polo (CSV order). Plot name = the MyIrrigation project
+        # name ("Polo de …" / "Polo do Carmo").
+        plots: dict[str, Plot] = {}
+        for r in rows:
+            polo = r["polo"]
+            if polo in plots:
+                continue
+            plot_name = f"Polo de {polo}" if polo != "Carmo" else "Polo do Carmo"
             plot = (
                 await session.execute(
-                    select(Plot).where(Plot.farm_id == farm.id, Plot.name == "Olival")
+                    select(Plot).where(Plot.farm_id == farm.id, Plot.name == plot_name)
                 )
             ).scalar_one_or_none()
             if plot is None:
-                plot = Plot(id=str(uuid.uuid4()), farm_id=farm.id, name="Olival")
+                plot = Plot(id=str(uuid.uuid4()), farm_id=farm.id, name=plot_name)
                 session.add(plot)
                 await session.flush()
             plots[polo] = plot
