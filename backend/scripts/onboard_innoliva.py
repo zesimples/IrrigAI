@@ -145,6 +145,12 @@ async def main() -> None:
                 id=str(uuid.uuid4()),
                 name="Innoliva",
                 owner_id=owner.id,
+                # Representative Alentejo coordinate (from an Innoliva device location).
+                # MyIrrigation weather is project-based so the exact value is not used for
+                # weather; a non-null location is required to enable weather ingestion
+                # (ingest_farm gates on farm.location_lat/lon) and for map display.
+                location_lat=38.552,
+                location_lon=-7.762,
                 region="Alentejo",
                 timezone="Europe/Lisbon",
             )

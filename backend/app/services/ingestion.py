@@ -725,21 +725,26 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
             if configured_plots:
                 # Per-plot fetch for each configured plot; plots without config are skipped.
                 for plot in configured_plots:
-                    latest_obs_result = await db.execute(
-                        select(sql_func.max(WeatherObservation.timestamp)).where(
-                            WeatherObservation.farm_id == farm_id,
-                            WeatherObservation.plot_id == plot.id,
+                    # Observations need a device. When a plot has none (forecast-only,
+                    # e.g. a polo with no iMetos), skip the observation fetch — do NOT
+                    # let it fall back to the adapter's global instance device, which
+                    # would fetch another farm's observations.
+                    if plot.weather_device_id:
+                        latest_obs_result = await db.execute(
+                            select(sql_func.max(WeatherObservation.timestamp)).where(
+                                WeatherObservation.farm_id == farm_id,
+                                WeatherObservation.plot_id == plot.id,
+                            )
                         )
-                    )
-                    latest_obs_ts = latest_obs_result.scalar_one_or_none()
-                    weather_since = _adaptive_since(latest_obs_ts, 48, now)
-                    weather_total += await ingest_weather_observations(
-                        db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
-                        weather_since, now, source=settings.WEATHER_PROVIDER,
-                        plot_id=plot.id,
-                        project_id=plot.myirrigation_project_id,
-                        weather_device_id=plot.weather_device_id,
-                    )
+                        latest_obs_ts = latest_obs_result.scalar_one_or_none()
+                        weather_since = _adaptive_since(latest_obs_ts, 48, now)
+                        weather_total += await ingest_weather_observations(
+                            db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
+                            weather_since, now, source=settings.WEATHER_PROVIDER,
+                            plot_id=plot.id,
+                            project_id=plot.myirrigation_project_id,
+                            weather_device_id=plot.weather_device_id,
+                        )
                     await ingest_weather_forecasts(
                         db, weather_provider, farm_id, farm.location_lat, farm.location_lon,
                         days=7, source=settings.WEATHER_PROVIDER,
