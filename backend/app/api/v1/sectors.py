@@ -312,7 +312,7 @@ async def get_live_stress_projection(
         raise HTTPException(404, detail="Plot not found")
 
     ctx = await build_sector_context(sector_id, db)
-    weather = await build_weather_context(plot.farm_id, db)
+    weather = await build_weather_context(plot.farm_id, db, plot_id=sector.plot_id)
 
     et0_val, _ = et0_mod.compute_et0(weather.today, weather.lat or 38.57, weather.elevation_m)
     probes = await probe_interpreter.interpret_probes(ctx, db)
