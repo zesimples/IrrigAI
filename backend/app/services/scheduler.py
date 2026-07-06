@@ -230,6 +230,26 @@ async def _run_recompute_probe_calibration() -> None:
     )
 
 
+async def _run_recompute_irrigation_fingerprint() -> None:
+    from app.services.irrigation_fingerprint_service import (
+        IrrigationFingerprintService,
+    )
+
+    svc = IrrigationFingerprintService()
+
+    async def handle(farm, db) -> None:
+        n = await svc.compute_all_for_farm(str(farm.id), db)
+        await db.commit()
+        logger.info("Irrigation fingerprint: farm=%s computed %d sectors", farm.id, n)
+
+    await _run_per_farm_job(
+        job_name="irrigation_fingerprint",
+        lock_name="irrigation_fingerprint",
+        ttl=3_600,
+        handle_farm=handle,
+    )
+
+
 def start_scheduler() -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is not None and _scheduler.running:
@@ -278,6 +298,13 @@ def start_scheduler() -> AsyncIOScheduler:
         id="probe_calibration",
         replace_existing=True,
         misfire_grace_time=3600,
+    )
+    _scheduler.add_job(
+        _run_recompute_irrigation_fingerprint,
+        trigger=CronTrigger(day_of_week="mon", hour=4, minute=30, timezone="UTC"),
+        id="irrigation_fingerprint",
+        replace_existing=True,
+        misfire_grace_time=300,
     )
 
     _scheduler.start()
