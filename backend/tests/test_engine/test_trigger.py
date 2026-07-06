@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from app.engine.trigger import should_irrigate
+from app.engine.trigger import effective_trigger_threshold, should_irrigate
 from app.engine.water_balance import WaterBalanceResult
 
 
@@ -110,3 +110,20 @@ class TestDeficitFactor:
         ctx = make_ctx(deficit_factor=1.0)
         do_it, _ = should_irrigate(wb, ctx)
         assert do_it is False
+
+
+class TestEffectiveTriggerThreshold:
+    def test_plain_raw(self):
+        ctx = make_ctx()  # default strategy, deficit_factor=1.0
+        wb = make_wb(dr=0.0, raw=30.0)
+        assert effective_trigger_threshold(wb, ctx) == 30.0
+
+    def test_deficit_factor_scales(self):
+        ctx = make_ctx(deficit_factor=0.8)
+        wb = make_wb(dr=0.0, raw=30.0)
+        assert effective_trigger_threshold(wb, ctx) == 24.0
+
+    def test_rdi_scales_when_eligible(self):
+        ctx = make_ctx(strategy="rdi", rdi_eligible=True, rdi_factor=0.5)
+        wb = make_wb(dr=0.0, raw=30.0)
+        assert effective_trigger_threshold(wb, ctx) == 15.0

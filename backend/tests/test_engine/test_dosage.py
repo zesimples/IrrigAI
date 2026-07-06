@@ -112,3 +112,12 @@ class TestCapping:
         ctx = make_ctx(app_rate=2.5, efficiency=0.9, min_irrig=5.0, max_irrig=40.0)
         result = compute_dosage(wb, ctx)
         assert result.capped is False
+
+    def test_requested_gross_preserved_when_capped_to_minimum(self):
+        """Pre-cap gross dose is preserved on DosageResult even after min-capping."""
+        wb = make_wb(1.0)  # tiny deficit → gross ≈ 1.23 mm, below min
+        ctx = make_ctx(min_irrig=5.0, efficiency=0.9, distribution_uniformity=0.9)
+        result = compute_dosage(wb, ctx)
+        assert result.capped is True
+        assert result.irrigation_gross_mm == 5.0
+        assert result.requested_gross_mm == round(1.0 / (0.9 * 0.9), 2)  # pre-cap

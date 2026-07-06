@@ -16,6 +16,16 @@ from app.engine.water_balance import WaterBalanceResult
 _MIN_EFFECTIVE_RAIN_TO_SKIP = 3.0
 
 
+def effective_trigger_threshold(wb: WaterBalanceResult, ctx: SectorContext) -> float:
+    """RAW adjusted for RDI / deficit strategy — the depletion level that triggers."""
+    raw = wb.raw_mm
+    if ctx.irrigation_strategy == "rdi" and ctx.rdi_eligible and ctx.rdi_factor is not None:
+        return raw * ctx.rdi_factor
+    if ctx.deficit_factor < 1.0:
+        return raw * ctx.deficit_factor
+    return raw
+
+
 def should_irrigate(
     wb: WaterBalanceResult,
     ctx: SectorContext,
@@ -32,15 +42,10 @@ def should_irrigate(
     - IRRIGATE if Dr >= threshold
     - SKIP otherwise
     """
-    raw = wb.raw_mm
     dr = wb.depletion_mm
 
     # Effective threshold — adjusted for RDI or deficit irrigation strategy
-    effective_threshold = raw
-    if ctx.irrigation_strategy == "rdi" and ctx.rdi_eligible and ctx.rdi_factor is not None:
-        effective_threshold = raw * ctx.rdi_factor
-    elif ctx.deficit_factor < 1.0:
-        effective_threshold = raw * ctx.deficit_factor
+    effective_threshold = effective_trigger_threshold(wb, ctx)
 
     # Physics-based rain skip
     if forecast_rain_next_48h > 0:

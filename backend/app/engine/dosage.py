@@ -19,6 +19,7 @@ class DosageResult:
     application_rate_mm_h: float | None
     capped: bool = False                # True if capped by min/max constraints
     cap_reason: str | None = None
+    requested_gross_mm: float = 0.0     # gross BEFORE min/max caps (band classifier input)
 
 
 def compute_dosage(wb: WaterBalanceResult, ctx: SectorContext) -> DosageResult:
@@ -32,6 +33,7 @@ def compute_dosage(wb: WaterBalanceResult, ctx: SectorContext) -> DosageResult:
     efficiency = ctx.irrigation_efficiency if ctx.irrigation_efficiency > 0 else 0.90
     du = ctx.distribution_uniformity if ctx.distribution_uniformity > 0 else 0.90
     gross_mm = net_mm / (efficiency * du)
+    requested_gross_mm = round(gross_mm, 2)
 
     capped = False
     cap_reason = None
@@ -83,4 +85,5 @@ def compute_dosage(wb: WaterBalanceResult, ctx: SectorContext) -> DosageResult:
         application_rate_mm_h=round(app_rate, 3) if app_rate is not None else None,
         capped=capped,
         cap_reason=cap_reason,
+        requested_gross_mm=requested_gross_mm,
     )
