@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from app.engine.trigger import effective_trigger_threshold, should_irrigate
+from app.engine.trigger import effective_trigger_threshold, rain_skip_applies, should_irrigate
 from app.engine.water_balance import WaterBalanceResult
 
 
@@ -127,3 +127,41 @@ class TestEffectiveTriggerThreshold:
         ctx = make_ctx(strategy="rdi", rdi_eligible=True, rdi_factor=0.5)
         wb = make_wb(dr=0.0, raw=30.0)
         assert effective_trigger_threshold(wb, ctx) == 15.0
+
+
+class TestRainSkipApplies:
+    def test_true_when_effective_rain_covers_full_deficit(self):
+        """Fully depleted sector (dr >= threshold) + enough rain still counts as
+        covering the remaining deficit (remaining_to_trigger clamped to 0)."""
+        wb = make_wb(dr=30.0, raw=20.0)
+        ctx = make_ctx(rainfall_effectiveness=1.0)
+        assert rain_skip_applies(wb, ctx, forecast_rain_next_48h=5.0) is True
+
+    def test_false_when_drizzle_below_min_effective_rain(self):
+        """Below the 3mm effective-rain floor even though it 'covers' a tiny deficit."""
+        wb = make_wb(dr=17.5, raw=18.0)
+        ctx = make_ctx(rainfall_effectiveness=0.5)
+        # remaining_to_trigger = 0.5mm; effective_rain = 4 * 0.5 = 2.0mm >= remaining
+        # but effective_rain (2.0) < _MIN_EFFECTIVE_RAIN_TO_SKIP (3.0) → False
+        assert rain_skip_applies(wb, ctx, forecast_rain_next_48h=4.0) is False
+
+    def test_false_when_no_rain_forecast(self):
+        wb = make_wb(dr=30.0, raw=20.0)
+        ctx = make_ctx()
+        assert rain_skip_applies(wb, ctx, forecast_rain_next_48h=0.0) is False
+
+    def test_false_when_rain_insufficient_for_remaining_deficit(self):
+        wb = make_wb(dr=5.0, raw=20.0)
+        ctx = make_ctx(rainfall_effectiveness=0.2)
+        # remaining_to_trigger = 15mm; effective_rain = 10 * 0.2 = 2mm < 15mm
+        assert rain_skip_applies(wb, ctx, forecast_rain_next_48h=10.0) is False
+
+    def test_matches_should_irrigate_skip_decision(self):
+        """Consistency check: when rain_skip_applies is True, should_irrigate skips
+        for the rain reason."""
+        wb = make_wb(dr=30.0, raw=20.0)
+        ctx = make_ctx()
+        assert rain_skip_applies(wb, ctx, forecast_rain_next_48h=20.0) is True
+        do_it, reason = should_irrigate(wb, ctx, forecast_rain_next_48h=20.0)
+        assert do_it is False
+        assert "chuva" in reason.lower()

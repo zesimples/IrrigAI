@@ -48,7 +48,10 @@ def classify_dose_band(
     r = depletion_mm / effective_threshold_mm if effective_threshold_mm > 0 else 0.0
     if r >= 1.0:
         return DOSE_BAND_REFORCADA
-    if requested_gross_mm < (min_irrigation_mm or _DEFAULT_MIN_DOSE_MM):
+    effective_min_dose_mm = (
+        _DEFAULT_MIN_DOSE_MM if min_irrigation_mm is None else min_irrigation_mm
+    )
+    if requested_gross_mm < effective_min_dose_mm:
         return DOSE_BAND_PODE_SALTAR
     if r >= _NORMAL_BAND_FLOOR:
         return DOSE_BAND_NORMAL

@@ -26,6 +26,25 @@ def effective_trigger_threshold(wb: WaterBalanceResult, ctx: SectorContext) -> f
     return raw
 
 
+def rain_skip_applies(
+    wb: WaterBalanceResult,
+    ctx: SectorContext,
+    forecast_rain_next_48h: float,
+) -> bool:
+    """True when expected effective rain covers the remaining deficit to the
+    trigger threshold — the same physics-based check used by should_irrigate's
+    rain-skip branch. Shared so presentation-layer classifiers (dose bands)
+    agree with the trigger instead of re-deriving a cruder heuristic.
+    """
+    if forecast_rain_next_48h <= 0:
+        return False
+    dr = wb.depletion_mm
+    effective_threshold = effective_trigger_threshold(wb, ctx)
+    effective_rain = forecast_rain_next_48h * ctx.rainfall_effectiveness
+    remaining_to_trigger = max(0.0, effective_threshold - dr)
+    return effective_rain >= remaining_to_trigger and effective_rain >= _MIN_EFFECTIVE_RAIN_TO_SKIP
+
+
 def should_irrigate(
     wb: WaterBalanceResult,
     ctx: SectorContext,
@@ -48,14 +67,12 @@ def should_irrigate(
     effective_threshold = effective_trigger_threshold(wb, ctx)
 
     # Physics-based rain skip
-    if forecast_rain_next_48h > 0:
+    if rain_skip_applies(wb, ctx, forecast_rain_next_48h):
         effective_rain = forecast_rain_next_48h * ctx.rainfall_effectiveness
-        remaining_to_trigger = max(0.0, effective_threshold - dr)
-        if effective_rain >= remaining_to_trigger and effective_rain >= _MIN_EFFECTIVE_RAIN_TO_SKIP:
-            return False, (
-                f"Chuva prevista de {forecast_rain_next_48h:.0f} mm nas próximas 48h "
-                f"({effective_rain:.1f} mm efetivos) cobre o défice atual — não vale a pena regar agora"
-            )
+        return False, (
+            f"Chuva prevista de {forecast_rain_next_48h:.0f} mm nas próximas 48h "
+            f"({effective_rain:.1f} mm efetivos) cobre o défice atual — não vale a pena regar agora"
+        )
 
     if dr >= effective_threshold:
         pct_depleted = dr / wb.taw_mm * 100 if wb.taw_mm > 0 else 0

@@ -712,7 +712,8 @@ class RecommendationPipeline:
             effective_threshold_mm=effective_trigger_threshold(wb, ctx),
             requested_gross_mm=dose.requested_gross_mm if dose else 0.0,
             min_irrigation_mm=ctx.min_irrigation_mm,
-            rain_skip=bool(fc_impact["rain_skip_recommended"]),
+            rain_skip=bool(fc_impact["rain_skip_recommended"])
+            or trigger.rain_skip_applies(wb, ctx, fc_impact["rain_next_48h_mm"]),
         )
         dose_pres = resolve_dose_presentation(dose, dose_band, fingerprint, now)
         log.append(f"Dose: band={dose_band}, source={dose_pres.dose_source}")
