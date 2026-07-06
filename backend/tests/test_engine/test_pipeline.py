@@ -9,7 +9,7 @@ Tests verify:
 """
 
 import pytest
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -17,7 +17,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import get_settings
 from app.engine.pipeline import RecommendationPipeline, build_sector_context
 from app.engine.types import EngineRecommendation
-from app.models import Farm, Plot, Sector
+from app.models import (
+    Farm,
+    IrrigationSystem,
+    Plot,
+    Probe,
+    ProbeDepth,
+    ProbeReading,
+    Sector,
+    SectorCropProfile,
+    User,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -198,3 +208,108 @@ async def test_build_sector_context_missing_config_without_irrig_system(db: Asyn
             return
 
     pytest.skip("All sectors have irrigation systems")
+
+
+# ---------------------------------------------------------------------------
+# Dose-do-dia — every recommendation carries a dose band + source
+# ---------------------------------------------------------------------------
+# These build self-contained Farm→Plot→Sector→SectorCropProfile(→Probe) trees
+# (same pattern as test_probe_calibration_db.py's _make_pinned_sector) instead
+# of relying on seed data, so the water-balance state (reserve vs. depleted) is
+# deterministic and doesn't depend on what `make seed` happens to load.
+
+_pipeline = RecommendationPipeline()
+
+
+async def _make_bare_sector(db: AsyncSession, *, name: str, min_irrigation_mm: float | None = 5.0) -> Sector:
+    """Farm→Plot→Sector→SectorCropProfile→IrrigationSystem, no probe (probe-less,
+    flowmeter-less → falls back to the static 70%-of-TAW seed in build_water_balance,
+    i.e. depletion_mm = 30% of TAW > 0 but usually below RAW → 'reserve' day)."""
+    stamp = datetime.now(UTC).timestamp()
+    user = User(email=f"dose-{name}-{stamp}@t.dev", name="Dose", hashed_password="x", role="admin")
+    db.add(user)
+    await db.flush()
+    farm = Farm(name=f"Dose Farm {name}", owner_id=user.id)
+    db.add(farm)
+    await db.flush()
+    plot = Plot(farm_id=farm.id, name="P", soil_texture="sandy_loam",
+                field_capacity=0.30, wilting_point=0.10)
+    db.add(plot)
+    await db.flush()
+    sector = Sector(plot_id=plot.id, name=name, crop_type="olive")
+    db.add(sector)
+    await db.flush()
+    db.add(SectorCropProfile(
+        sector_id=sector.id, crop_type="olive", mad=0.5,
+        root_depth_mature_m=0.6, root_depth_young_m=0.3, stages=[],
+    ))
+    db.add(IrrigationSystem(
+        sector_id=sector.id, system_type="drip",
+        application_rate_mm_h=2.0, efficiency=0.90, distribution_uniformity=0.90,
+        min_irrigation_mm=min_irrigation_mm,
+    ))
+    await db.flush()
+    return sector
+
+
+async def _make_depleted_sector(db: AsyncSession, *, name: str) -> Sector:
+    """Same as _make_bare_sector but with a probe pinned near wilting point,
+    forcing depletion_mm well above RAW → engine says 'irrigate', band 'reforcada'."""
+    sector = await _make_bare_sector(db, name=name)
+    probe = Probe(sector_id=sector.id, external_id=f"{name}-probe")
+    db.add(probe)
+    await db.flush()
+    depth = ProbeDepth(probe_id=probe.id, depth_cm=20, sensor_type="soil_moisture")
+    db.add(depth)
+    await db.flush()
+    # Plot FC=0.30 / PWP=0.10 → pin VWC near PWP so depletion ≈ TAW (fully depleted).
+    base = datetime.now(UTC) - timedelta(hours=2)
+    for i in range(3):
+        db.add(ProbeReading(
+            probe_depth_id=depth.id,
+            timestamp=base + timedelta(hours=i),
+            raw_value=0.11, calibrated_value=0.11,
+            unit="vwc_m3m3", quality_flag="ok",
+        ))
+    await db.flush()
+    return sector
+
+
+@pytest.fixture
+async def seeded_sector_with_reserve(db: AsyncSession) -> Sector:
+    return await _make_bare_sector(db, name="Reserve")
+
+
+@pytest.fixture
+async def seeded_sector_depleted(db: AsyncSession) -> Sector:
+    return await _make_depleted_sector(db, name="Depleted")
+
+
+@pytest.mark.asyncio
+async def test_skip_recommendation_still_carries_dose(seeded_sector_with_reserve: Sector, db: AsyncSession):
+    """Dose-do-dia: reserve days get a reduced dose, not a bare skip."""
+    rec = await _pipeline.run(seeded_sector_with_reserve.id, date.today(), db)
+    assert rec.action in ("skip", "defer")
+    assert rec.irrigation_depth_mm is not None          # dose always computed
+    assert rec.dose_band in ("normal", "curta", "pode_saltar")
+    assert rec.dose_source in ("configured", "probe_learned", "mm_only")
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_irrigate_recommendation_band_reforcada(seeded_sector_depleted: Sector, db: AsyncSession):
+    rec = await _pipeline.run(seeded_sector_depleted.id, date.today(), db)
+    assert rec.action == "irrigate"
+    assert rec.dose_band == "reforcada"
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_inputs_snapshot_carries_dose_fields(seeded_sector_depleted: Sector, db: AsyncSession):
+    from app.services.recommendation_service import generate_recommendation
+
+    rec, eng = await generate_recommendation(str(seeded_sector_depleted.id), db)
+    assert rec.inputs_snapshot["dose_band"] == eng.dose_band
+    assert rec.inputs_snapshot["dose_source"] == eng.dose_source
+    assert "dose_presentation" in rec.inputs_snapshot
+    await db.rollback()

@@ -642,9 +642,10 @@ class RecommendationPipeline:
         )
         log.append(f"Trigger: {'IRRIGATE' if do_irrigate else 'SKIP'} — {trigger_reason}")
 
-        # Step 10: Dosage (if irrigating)
+        # Step 10: Dosage — always computed (dose-do-dia: a reserve day gets a
+        # reduced dose, not a bare "skip"); None only when there is no deficit.
         dose: dosage.DosageResult | None = None
-        if do_irrigate:
+        if wb.depletion_mm > 0:
             dose = dosage.compute_dosage(wb, ctx)
             log.append(
                 f"Dosage: net={dose.irrigation_net_mm}mm, gross={dose.irrigation_gross_mm}mm, "
@@ -698,6 +699,24 @@ class RecommendationPipeline:
         except Exception as exc:
             logger.debug("Stress projection failed for sector %s: %s", sector_id, exc)
 
+        # Step 11.6: Dose-do-dia band + source precedence
+        from app.engine.dose_presentation import classify_dose_band, resolve_dose_presentation
+        from app.engine.trigger import effective_trigger_threshold
+        from app.models.irrigation_fingerprint import IrrigationFingerprint
+
+        fingerprint = (await db.execute(
+            select(IrrigationFingerprint).where(IrrigationFingerprint.sector_id == sector_id)
+        )).scalar_one_or_none()
+        dose_band = classify_dose_band(
+            depletion_mm=wb.depletion_mm,
+            effective_threshold_mm=effective_trigger_threshold(wb, ctx),
+            requested_gross_mm=dose.requested_gross_mm if dose else 0.0,
+            min_irrigation_mm=ctx.min_irrigation_mm,
+            rain_skip=bool(fc_impact["rain_skip_recommended"]),
+        )
+        dose_pres = resolve_dose_presentation(dose, dose_band, fingerprint, now)
+        log.append(f"Dose: band={dose_band}, source={dose_pres.dose_source}")
+
         # Step 12: Build reasons list
         reasons = _build_reasons(ctx, wb, et0_val, etc_val, trigger_reason, fc_impact, conf, dose)
 
@@ -735,6 +754,14 @@ class RecommendationPipeline:
                 if swc_model_result is not None else None
             ),
             fc_calibration=ctx.fc_calibration,
+            dose_band=dose_band,
+            dose_source=dose_pres.dose_source,
+            dose_presentation={
+                "habitual_factor": dose_pres.habitual_factor,
+                "estimated_runtime_min": dose_pres.estimated_runtime_min,
+                "fingerprint_n_events": dose_pres.fingerprint_n_events,
+                "typical_event_net_mm": dose_pres.typical_event_net_mm,
+            },
             depletion_mm=wb.depletion_mm,
             raw_mm=wb.raw_mm,
             taw_mm=wb.taw_mm,
@@ -760,6 +787,7 @@ class RecommendationPipeline:
                 eng_rec.action = "skip"
                 eng_rec.irrigation_depth_mm = None
                 eng_rec.irrigation_runtime_min = None
+                eng_rec.dose_band = "pode_saltar"
             elif active_override.override_type == "force_irrigate":
                 eng_rec.action = "irrigate"
             elif active_override.override_type == "fixed_depth" and active_override.value is not None:

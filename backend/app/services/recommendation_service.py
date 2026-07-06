@@ -38,6 +38,9 @@ def _make_inputs_snapshot(eng: EngineRecommendation, target_date: date) -> dict:
         "swc_source": eng.swc_source,
         "swc_model": eng.swc_model,
         "fc_calibration": eng.fc_calibration,
+        "dose_band": eng.dose_band,
+        "dose_source": eng.dose_source,
+        "dose_presentation": eng.dose_presentation,
     }
     if eng.stress_projection is not None:
         snap["stress_projection"] = eng.stress_projection

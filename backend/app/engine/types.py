@@ -208,3 +208,8 @@ class EngineRecommendation:
     swc_model: dict | None = None
     # Soil-bounds calibration metadata when FC came from the probe envelope
     fc_calibration: dict | None = None
+
+    # Dose-do-dia presentation (stored in inputs_snapshot)
+    dose_band: str | None = None          # "reforcada" | "normal" | "curta" | "pode_saltar"
+    dose_source: str | None = None        # "configured" | "probe_learned" | "mm_only"
+    dose_presentation: dict | None = None # habitual_factor, estimated_runtime_min, ...
