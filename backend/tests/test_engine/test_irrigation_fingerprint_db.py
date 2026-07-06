@@ -21,6 +21,7 @@ from app.models import (
     ProbeDepth,
     ProbeReading,
     Sector,
+    SectorCropProfile,
     User,
 )
 from app.services.irrigation_fingerprint_service import IrrigationFingerprintService
@@ -182,6 +183,38 @@ async def test_rejected_and_rain_events_excluded(db, sector_with_probe_and_rises
 
     svc = IrrigationFingerprintService()
     assert await svc.compute_and_save(str(sector.id), db) is None  # only 1 usable < 3
+    await db.rollback()
+
+
+async def test_compute_and_save_with_crop_profile_does_not_raise(db, sector_with_probe_and_rises):
+    """Regression: SectorCropProfile has root_depth_mature_m/root_depth_young_m,
+    not root_depth_m. compute_and_save must not raise AttributeError when a
+    sector has a crop profile row attached.
+
+    root_depth_mature_m=0.5 (50cm) is deeper than both fixture sensors
+    (10cm, 20cm), so it doesn't actually cap either layer — the assertion
+    here is simply that compute_and_save succeeds and returns a row.
+    """
+    sector, probe, farm, event_times = sector_with_probe_and_rises
+    for ts in event_times:
+        await _seed_event(db, probe.id, sector.id, farm.id, ts)
+
+    scp = SectorCropProfile(
+        sector_id=sector.id,
+        crop_type="olive",
+        mad=0.5,
+        root_depth_mature_m=0.5,
+        root_depth_young_m=0.3,
+        stages=[],
+    )
+    db.add(scp)
+    await db.flush()
+
+    svc = IrrigationFingerprintService()
+    row = await svc.compute_and_save(str(sector.id), db)
+
+    assert row is not None
+    assert row.n_events == 3
     await db.rollback()
 
 

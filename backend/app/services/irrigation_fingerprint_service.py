@@ -120,7 +120,11 @@ class IrrigationFingerprintService:
                 select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
             )
         ).scalar_one_or_none()
-        root_depth_cm = scp.root_depth_m * 100.0 if scp is not None and scp.root_depth_m else None
+        root_depth_cm = (
+            scp.root_depth_mature_m * 100.0
+            if scp is not None and scp.root_depth_mature_m
+            else None
+        )
         layers = layer_thicknesses_mm(sorted(series_by_depth.keys()), root_depth_cm)
 
         doses = []
