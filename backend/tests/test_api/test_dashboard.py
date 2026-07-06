@@ -109,3 +109,10 @@ class TestDashboardWithRecommendations:
             if s["action"] is not None:
                 assert s["confidence_score"] is not None
                 assert s["confidence_level"] in ("high", "medium", "low")
+
+    @pytest.mark.asyncio
+    async def test_sector_summary_exposes_dose_band(self, client: AsyncClient, seed_farm_id: str):
+        await client.post(f"/api/v1/farms/{seed_farm_id}/recommendations/generate")
+        resp = await client.get(f"/api/v1/farms/{seed_farm_id}/dashboard")
+        sectors = resp.json()["sectors_summary"]
+        assert all("dose_band" in s and "dose_source" in s for s in sectors)

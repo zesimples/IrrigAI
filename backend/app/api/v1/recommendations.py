@@ -97,12 +97,18 @@ async def get_recommendation(rec_id: str, access: Access, db: AsyncSession = Dep
         except Exception:
             pass
 
+    dose_pres = snap.get("dose_presentation") or {}
     return RecommendationDetail(
         **base,
         reasons=[ReasonOut.model_validate(r) for r in reasons],
         inputs_snapshot=snap,
         computation_log=rec.computation_log or {},
         stress_projection=stress_proj_out,
+        dose_band=snap.get("dose_band"),
+        dose_source=snap.get("dose_source"),
+        habitual_factor=dose_pres.get("habitual_factor"),
+        estimated_runtime_min=dose_pres.get("estimated_runtime_min"),
+        fingerprint_n_events=dose_pres.get("fingerprint_n_events"),
     )
 
 

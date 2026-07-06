@@ -59,6 +59,11 @@ class RecommendationDetail(RecommendationOut):
     inputs_snapshot: dict = {}
     computation_log: dict = {}
     stress_projection: StressProjectionOut | None = None
+    dose_band: str | None = None
+    dose_source: str | None = None
+    habitual_factor: float | None = None
+    estimated_runtime_min: float | None = None
+    fingerprint_n_events: int | None = None
 
 
 class AcceptRequest(BaseModel):

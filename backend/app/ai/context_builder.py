@@ -513,6 +513,9 @@ async def get_sector_water_balance(sector_id: str, db: AsyncSession) -> dict:
         "kc": snap.get("kc"),
         "rainfall_mm": snap.get("rainfall_mm"),
         "forecast_rain_next_48h": snap.get("forecast_rain_next_48h"),
+        "dose_band": snap.get("dose_band"),
+        "dose_source": snap.get("dose_source"),
+        "dose_presentation": snap.get("dose_presentation"),
     }
 
 

@@ -204,6 +204,9 @@ async def get_dashboard(farm_id: str, access: Access, db: AsyncSession = Depends
                 else:
                     rootzone_status = "critical"
 
+        rec_snap = (latest_rec.inputs_snapshot or {}) if latest_rec else {}
+        rec_dose_pres = rec_snap.get("dose_presentation") or {}
+
         sector_summaries.append(SectorSummary(
             sector_id=sid,
             sector_name=sector.name,
@@ -232,6 +235,10 @@ async def get_dashboard(farm_id: str, access: Access, db: AsyncSession = Depends
                 (latest_rec.inputs_snapshot or {}).get("source_confidence")
                 if latest_rec else None
             ),
+            dose_band=rec_snap.get("dose_band"),
+            dose_source=rec_snap.get("dose_source"),
+            habitual_factor=rec_dose_pres.get("habitual_factor"),
+            estimated_runtime_min=rec_dose_pres.get("estimated_runtime_min"),
         ))
 
         # Missing data prompts (Portuguese, shown to user)

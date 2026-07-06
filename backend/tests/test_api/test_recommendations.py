@@ -147,3 +147,17 @@ class TestAcceptRejectOverride:
         data = resp.json()
         assert data["irrigation_depth_mm"] == 8.0
         assert data["is_accepted"] is True
+
+
+class TestDoseFields:
+    @pytest.mark.asyncio
+    async def test_detail_exposes_dose_fields(self, client: AsyncClient, seed_sector_id: str):
+        gen = await client.post(f"/api/v1/sectors/{seed_sector_id}/recommendations/generate")
+        assert gen.status_code == 201
+        rec_id = gen.json()["id"]
+        resp = await client.get(f"/api/v1/recommendations/{rec_id}")
+        body = resp.json()
+        assert body["dose_band"] in ("reforcada", "normal", "curta", "pode_saltar")
+        assert body["dose_source"] in ("configured", "probe_learned", "mm_only")
+        assert "habitual_factor" in body
+        assert "estimated_runtime_min" in body

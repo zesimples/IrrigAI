@@ -34,6 +34,10 @@ class SectorSummary(BaseModel):
     last_irrigated_mm: float | None = None
     recommendation_generated_at: datetime | None = None
     source_confidence: str | None = None   # "fresh" | "stale" | "forecast_only" | "no_probe"
+    dose_band: str | None = None          # "reforcada" | "normal" | "curta" | "pode_saltar"
+    dose_source: str | None = None        # "configured" | "probe_learned" | "mm_only"
+    habitual_factor: float | None = None
+    estimated_runtime_min: float | None = None
 
 
 class AlertCounts(BaseModel):
