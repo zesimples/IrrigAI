@@ -16,8 +16,9 @@ export const BAND_ORDER: Record<DoseBand, number> = {
 };
 
 export function formatRuntime(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = Math.round(min % 60);
+  const t = Math.round(min);
+  const h = Math.floor(t / 60);
+  const m = t % 60;
   if (h === 0) return `${m} min`;
   return `${h}h${String(m).padStart(2, "0")}`;
 }

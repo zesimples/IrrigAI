@@ -5,6 +5,7 @@ describe("formatRuntime", () => {
   it("formats minutes only", () => expect(formatRuntime(45)).toBe("45 min"));
   it("formats hours+minutes", () => expect(formatRuntime(155)).toBe("2h35"));
   it("pads minutes", () => expect(formatRuntime(125)).toBe("2h05"));
+  it("rolls over fractional minutes", () => expect(formatRuntime(119.6)).toBe("2h00"));
 });
 
 describe("legacyDoseBand", () => {
