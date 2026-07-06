@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { OverrideModal } from "@/components/overrides/OverrideModal";
 import { recommendationsApi } from "@/lib/api";
+import { DOSE_BAND_LABELS, doseHeadline, legacyDoseBand } from "@/lib/dose";
 import type {
   ConfidenceLevel,
   RecommendationAction,
@@ -70,33 +71,36 @@ interface RecHeaderProps {
 }
 
 export function RecHeader({ rec, action, confPct }: RecHeaderProps) {
+  const band = rec.dose_band ?? legacyDoseBand(rec.action);
+  const headline = doseHeadline({
+    doseBand: band,
+    doseSource: rec.dose_source ?? null,
+    depthMm: rec.irrigation_depth_mm,
+    runtimeMin: rec.irrigation_runtime_min,
+    habitualFactor: rec.habitual_factor ?? null,
+    estimatedRuntimeMin: rec.estimated_runtime_min ?? null,
+  });
+
   return (
     <div className="px-4 pt-4 pb-3 border-b border-black/[0.06]">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className={`rounded-full px-3.5 py-1 text-[15px] font-medium ${action.badge}`}>
-            {action.label}
+            {DOSE_BAND_LABELS[band]}
           </span>
-          {rec.irrigation_depth_mm != null && (
-            <span className="text-[12px] text-irrigai-text-muted">
-              <span className="font-display font-[500] text-[16px] text-irrigai-text">
-                {rec.irrigation_depth_mm.toFixed(1)}
-              </span>
-              {" mm"}
-              {rec.irrigation_runtime_min != null && (
-                <>
-                  {" · "}
-                  <span className="font-display font-[500] text-[16px] text-irrigai-text">
-                    {Math.round(rec.irrigation_runtime_min)}
-                  </span>
-                  {" min"}
-                </>
-              )}
-            </span>
-          )}
+          <span className="text-[14px] text-ink-2">{headline}</span>
         </div>
         <span className="text-[12px] font-medium text-irrigai-text tabular-nums">{confPct}%</span>
       </div>
+
+      {rec.dose_source === "probe_learned" && rec.fingerprint_n_events != null && (
+        <p className="mt-1 text-[12px] text-ink-3">
+          Estimativa baseada em {rec.fingerprint_n_events} regas detetadas pela sonda.
+        </p>
+      )}
+      {rec.stress_projection?.message_pt && (
+        <p className="mt-1 text-[12px] text-ink-3">{rec.stress_projection.message_pt}</p>
+      )}
 
       {/* Confidence bar */}
       <div className="flex items-center gap-3 mt-3">

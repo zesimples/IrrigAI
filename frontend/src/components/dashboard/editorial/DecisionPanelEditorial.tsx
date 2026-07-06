@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { recommendationsApi } from "@/lib/api";
+import { doseHeadline, legacyDoseBand } from "@/lib/dose";
 import type { RecommendationDetail } from "@/types";
 
 interface Props {
@@ -17,7 +18,8 @@ export function DecisionPanelEditorial({ rec, onUpdate, onOverride }: Props) {
   const [optimisticAccepted, setOptimisticAccepted] = useState<boolean | null>(null);
 
   const displayAccepted = optimisticAccepted !== null ? optimisticAccepted : rec.is_accepted;
-  const isRegar = rec.action === "irrigate";
+  const band = rec.dose_band ?? legacyDoseBand(rec.action);
+  const isRegar = band !== "pode_saltar";
 
   async function handleAccept() {
     setLoading("accept");
@@ -113,7 +115,14 @@ export function DecisionPanelEditorial({ rec, onUpdate, onOverride }: Props) {
           {loading === "accept"
             ? "A guardar…"
             : isRegar
-            ? `Iniciar rega${rec.irrigation_depth_mm ? ` — ${rec.irrigation_depth_mm.toFixed(0)} mm` : ""}`
+            ? `Iniciar rega — ${doseHeadline({
+                doseBand: band,
+                doseSource: rec.dose_source ?? null,
+                depthMm: rec.irrigation_depth_mm,
+                runtimeMin: rec.irrigation_runtime_min,
+                habitualFactor: rec.habitual_factor ?? null,
+                estimatedRuntimeMin: rec.estimated_runtime_min ?? null,
+              })}`
             : "Aceitar recomendação"}
         </button>
         <button

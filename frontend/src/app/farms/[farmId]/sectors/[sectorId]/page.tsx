@@ -73,7 +73,7 @@ function buildAiLede(
       before: "A depleção atingiu ",
       emphasis: depletionPct != null ? `${depletionPct}% da água disponível` : "nível crítico",
       emphasisColor: "terra",
-      after: depth ? `. Regar ${depth.toFixed(0)} mm para repor reservas.` : ". Regar para repor reservas.",
+      after: depth ? `. Aplicar ${depth.toFixed(0)} mm para repor reservas.` : ". Rega recomendada para repor reservas.",
     };
   }
 
@@ -279,7 +279,7 @@ export default function SectorDetailPage({ params }: Props) {
               </h1>
               {status.latest_action && (
                 <VerdictPill
-                  verdict={legacyDoseBand(status.latest_action)}
+                  verdict={rec?.dose_band ?? legacyDoseBand(status.latest_action)}
                   size="lg"
                 />
               )}

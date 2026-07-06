@@ -65,16 +65,20 @@ function deriveFarmData(farm: Farm, dashboard: DashboardResponse | null): FarmDa
   }
 
   const ss = dashboard.sectors_summary;
-  const irrigateCount = ss.filter((s) => s.action === "irrigate").length;
+  const bandOf = (s: (typeof ss)[number]) => s.dose_band ?? (s.action === "irrigate" ? "normal" : "pode_saltar");
+  const reforcadaCount = ss.filter((s) => bandOf(s) === "reforcada").length;
+  const irrigateCount = reforcadaCount; // kept name so downstream usages stay valid
   const totalSectors = ss.length;
 
   const verdict: "regar" | "parcial" | "ok" =
-    irrigateCount === 0 ? "ok" :
-    irrigateCount >= Math.ceil(totalSectors / 2) ? "regar" :
+    reforcadaCount === 0 ? "ok" :
+    reforcadaCount >= Math.ceil(totalSectors / 2) ? "regar" :
     "parcial";
 
   const verdictLabel =
-    irrigateCount === 0 ? "Tudo em ordem" : `Regar ${irrigateCount} sector${irrigateCount !== 1 ? "es" : ""}`;
+    reforcadaCount === 0
+      ? "Rega em dia"
+      : `Reforçar rega em ${reforcadaCount} sector${reforcadaCount !== 1 ? "es" : ""}`;
 
   const et0 = dashboard.weather_today?.et0_mm ?? null;
   const verdictWhy = et0 != null
