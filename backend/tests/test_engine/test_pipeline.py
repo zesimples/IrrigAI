@@ -306,10 +306,39 @@ async def test_irrigate_recommendation_band_reforcada(seeded_sector_depleted: Se
 
 @pytest.mark.asyncio
 async def test_inputs_snapshot_carries_dose_fields(seeded_sector_depleted: Sector, db: AsyncSession):
+    # generate_recommendation COMMITS (unlike _pipeline.run above), so a trailing
+    # rollback is a no-op and the fixture farm would otherwise leak into the DB
+    # on every run. Self-clean the subtree it created (see test_api/conftest.py's
+    # delete_farm_subtree — same FK-safe, children-first idiom; recommendation
+    # and recommendation_reason aren't part of that helper's farm subtree, since
+    # API tests don't generate recommendations, so delete them here first).
     from app.services.recommendation_service import generate_recommendation
+    from tests.test_api.conftest import delete_farm_subtree
 
-    rec, eng = await generate_recommendation(str(seeded_sector_depleted.id), db)
-    assert rec.inputs_snapshot["dose_band"] == eng.dose_band
-    assert rec.inputs_snapshot["dose_source"] == eng.dose_source
-    assert "dose_presentation" in rec.inputs_snapshot
-    await db.rollback()
+    sector = seeded_sector_depleted
+    farm_id = (
+        await db.execute(
+            select(Plot.farm_id).join(Sector, Sector.plot_id == Plot.id).where(Sector.id == sector.id)
+        )
+    ).scalar_one()
+
+    try:
+        rec, eng = await generate_recommendation(str(sector.id), db)
+        assert rec.inputs_snapshot["dose_band"] == eng.dose_band
+        assert rec.inputs_snapshot["dose_source"] == eng.dose_source
+        assert "dose_presentation" in rec.inputs_snapshot
+    finally:
+        # delete_farm_subtree doesn't know about recommendation/recommendation_reason
+        # (API tests never generate recommendations) or irrigation_system (this
+        # fixture's tree adds one) — clean those up first, then hand off the rest.
+        await db.execute(
+            text(
+                "DELETE FROM recommendation_reason WHERE recommendation_id IN "
+                "(SELECT id FROM recommendation WHERE sector_id=:sid)"
+            ),
+            {"sid": str(sector.id)},
+        )
+        await db.execute(text("DELETE FROM recommendation WHERE sector_id=:sid"), {"sid": str(sector.id)})
+        await db.execute(text("DELETE FROM irrigation_system WHERE sector_id=:sid"), {"sid": str(sector.id)})
+        await db.commit()
+        await delete_farm_subtree(db, str(farm_id))
