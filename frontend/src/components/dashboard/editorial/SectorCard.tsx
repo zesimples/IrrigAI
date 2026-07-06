@@ -55,8 +55,9 @@ function sectorSuffix(name: string, cropLabel: string): string {
 }
 
 export function EditorialSectorCard({ sector, farmId }: EditorialSectorCardProps) {
+  const noRecommendation = sector.dose_band == null && sector.action == null;
   const verdict = toVerdict(sector);
-  const reforcada = verdict === "reforcada";
+  const reforcada = !noRecommendation && verdict === "reforcada";
   const confidence = toConfidence(sector.confidence_level, sector.probe_health);
   const moisture = toMoisture(sector.depletion_pct, sector.rootzone_status);
   const noProbe = sector.probe_health === "no_probes" || sector.probe_health === "no_readings";
@@ -82,18 +83,29 @@ export function EditorialSectorCard({ sector, farmId }: EditorialSectorCardProps
             <span className="font-normal text-ink-3">· {stageLabel}</span>
           </h3>
         </div>
-        <VerdictPill verdict={verdict} />
+        {noRecommendation ? (
+          <span
+            aria-label="Recomendação: Sem recomendação"
+            className="inline-flex items-center gap-1.5 rounded-full font-medium tracking-[-0.01em] whitespace-nowrap px-2.5 py-[3px] text-[11px] bg-[#f4f1ec] text-ink-3 border border-[#e3ddd2]"
+          >
+            Sem recomendação
+          </span>
+        ) : (
+          <VerdictPill verdict={verdict} />
+        )}
       </header>
 
       <p className="text-[13px] leading-[1.5] text-ink-2 mb-3" style={{ textWrap: "pretty" } as React.CSSProperties}>
-        {doseHeadline({
-          doseBand: verdict === "em-rega" ? "normal" : verdict,
-          doseSource: sector.dose_source,
-          depthMm: sector.irrigation_depth_mm,
-          runtimeMin: sector.runtime_min,
-          habitualFactor: sector.habitual_factor,
-          estimatedRuntimeMin: sector.estimated_runtime_min,
-        })}
+        {noRecommendation
+          ? "Sem recomendação gerada."
+          : doseHeadline({
+              doseBand: verdict === "em-rega" ? "normal" : verdict,
+              doseSource: sector.dose_source,
+              depthMm: sector.irrigation_depth_mm,
+              runtimeMin: sector.runtime_min,
+              habitualFactor: sector.habitual_factor,
+              estimatedRuntimeMin: sector.estimated_runtime_min,
+            })}
       </p>
 
       <footer className="flex items-center gap-3.5 pt-2.5 border-t border-rule-soft mt-auto">

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { farmsApi, clearToken } from "@/lib/api";
 import { Logo } from "@/components/ui/Logo";
 import { CROP_LABELS } from "@/lib/cropConfig";
+import { legacyDoseBand } from "@/lib/dose";
 import type { Farm, DashboardResponse } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ function deriveFarmData(farm: Farm, dashboard: DashboardResponse | null): FarmDa
   }
 
   const ss = dashboard.sectors_summary;
-  const bandOf = (s: (typeof ss)[number]) => s.dose_band ?? (s.action === "irrigate" ? "normal" : "pode_saltar");
+  const bandOf = (s: (typeof ss)[number]) => s.dose_band ?? legacyDoseBand(s.action);
   const reforcadaCount = ss.filter((s) => bandOf(s) === "reforcada").length;
   const irrigateCount = reforcadaCount; // kept name so downstream usages stay valid
   const totalSectors = ss.length;

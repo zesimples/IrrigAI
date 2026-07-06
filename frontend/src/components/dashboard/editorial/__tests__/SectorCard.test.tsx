@@ -38,4 +38,14 @@ describe("EditorialSectorCard dose-do-dia", () => {
     );
     expect(screen.getByText("Pode saltar")).toBeInTheDocument();
   });
+
+  it("shows a distinct no-recommendation state instead of a false 'Pode saltar'", () => {
+    render(
+      <EditorialSectorCard sector={{ ...base, dose_band: null, action: null }} farmId="f1" />
+    );
+    expect(screen.getByText("Sem recomendação gerada.")).toBeInTheDocument();
+    expect(screen.getByText("Sem recomendação")).toBeInTheDocument();
+    expect(screen.queryByText("Pode saltar")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/sem recomenda/i)).toBeInTheDocument();
+  });
 });
