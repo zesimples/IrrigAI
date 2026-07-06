@@ -29,6 +29,7 @@ from app.models.flowmeter_reading import FlowmeterReading
 from app.models.irrigation_event_detected import IrrigationEventDetected
 from app.models.flowmeter_reference import FlowmeterReference
 from app.models.probe_calibration import ProbeCalibration
+from app.models.irrigation_fingerprint import IrrigationFingerprint
 
 __all__ = [
     "CropProfileTemplate",
@@ -59,4 +60,5 @@ __all__ = [
     "IrrigationEventDetected",
     "FlowmeterReference",
     "ProbeCalibration",
+    "IrrigationFingerprint",
 ]
