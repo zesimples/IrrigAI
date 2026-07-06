@@ -8,6 +8,10 @@ export type SoilTexture = "clay" | "clay_loam" | "loam" | "sandy_loam" | "sand" 
 
 export type RecommendationAction = "irrigate" | "skip" | "reduce" | "increase" | "defer";
 
+export type DoseBand = "reforcada" | "normal" | "curta" | "pode_saltar";
+
+export type DoseSource = "configured" | "probe_learned" | "mm_only";
+
 export type ConfidenceLevel = "high" | "medium" | "low";
 
 export type AlertSeverity = "critical" | "warning" | "info";
@@ -413,6 +417,11 @@ export interface RecommendationDetail extends Recommendation {
     [key: string]: unknown;
   };
   stress_projection: StressProjection | null;
+  dose_band?: DoseBand | null;
+  dose_source?: DoseSource | null;
+  habitual_factor?: number | null;
+  estimated_runtime_min?: number | null;
+  fingerprint_n_events?: number | null;
 }
 
 export interface RecommendationReason {
@@ -473,6 +482,10 @@ export interface SectorSummary {
   confidence_level: ConfidenceLevel | null;
   irrigation_depth_mm: number | null;
   runtime_min: number | null;
+  dose_band: DoseBand | null;
+  dose_source: DoseSource | null;
+  habitual_factor: number | null;
+  estimated_runtime_min: number | null;
   recommendation_generated_at: string | null;
   /** Total active alerts count */
   active_alerts: number;
