@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import type { SectorSummary } from "@/types";
 import { CROP_LABELS } from "@/lib/cropConfig";
+import { BAND_ORDER, legacyDoseBand } from "@/lib/dose";
 import { EditorialSectorCard } from "./SectorCard";
 
 interface SectorGridProps {
@@ -13,9 +14,9 @@ interface SectorGridProps {
 
 function sortSectors(list: SectorSummary[]): SectorSummary[] {
   return [...list].sort((a, b) => {
-    const aRegar = a.action === "irrigate" ? 0 : 1;
-    const bRegar = b.action === "irrigate" ? 0 : 1;
-    if (aRegar !== bRegar) return aRegar - bRegar;
+    const aBand = BAND_ORDER[a.dose_band ?? legacyDoseBand(a.action)];
+    const bBand = BAND_ORDER[b.dose_band ?? legacyDoseBand(b.action)];
+    if (aBand !== bBand) return aBand - bBand;
     // Within same verdict: sort by depletion descending (most depleted first)
     const aD = a.depletion_pct ?? 50;
     const bD = b.depletion_pct ?? 50;

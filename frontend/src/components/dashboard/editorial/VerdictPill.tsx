@@ -1,14 +1,18 @@
-export type Verdict = "regar" | "nao" | "em-rega";
+import type { DoseBand } from "@/types";
+
+export type Verdict = DoseBand | "em-rega";
 
 interface VerdictPillProps {
   verdict: Verdict;
   size?: "sm" | "lg";
 }
 
-const CONFIG = {
-  regar:    { label: "Regar",     className: "bg-terra text-[#fef7f2]", dot: true },
-  nao:      { label: "Não regar", className: "bg-[#f4f1ec] text-ink-2 border border-[#e3ddd2]", dot: false },
-  "em-rega":{ label: "Em rega",   className: "bg-water text-white", dot: false },
+const CONFIG: Record<Verdict, { label: string; className: string; dot: boolean }> = {
+  reforcada:   { label: "Rega reforçada", className: "bg-terra text-[#fef7f2]", dot: true },
+  normal:      { label: "Rega normal",    className: "bg-olive/15 text-ink-2 border border-olive/30", dot: false },
+  curta:       { label: "Rega curta",     className: "bg-[#f4f1ec] text-ink-2 border border-[#e3ddd2]", dot: false },
+  pode_saltar: { label: "Pode saltar",    className: "bg-[#f4f1ec] text-ink-3 border border-[#e3ddd2]", dot: false },
+  "em-rega":   { label: "Em rega",        className: "bg-water text-white", dot: false },
 };
 
 export function VerdictPill({ verdict, size = "sm" }: VerdictPillProps) {

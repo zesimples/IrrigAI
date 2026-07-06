@@ -15,6 +15,7 @@ import { GDDStatusCard } from "@/components/sectors/GDDStatusCard";
 import { IrrigationSystemForm } from "@/components/sectors/IrrigationSystemForm";
 import { SoilProfileForm } from "@/components/sectors/SoilProfileForm";
 import { VerdictPill } from "@/components/dashboard/editorial/VerdictPill";
+import { legacyDoseBand } from "@/lib/dose";
 import { KpiCell } from "@/components/dashboard/editorial/KpiCell";
 import { ReasonList } from "@/components/dashboard/editorial/ReasonList";
 import { StressForecastEditorial } from "@/components/dashboard/editorial/StressForecastEditorial";
@@ -278,7 +279,7 @@ export default function SectorDetailPage({ params }: Props) {
               </h1>
               {status.latest_action && (
                 <VerdictPill
-                  verdict={status.latest_action === "irrigate" ? "regar" : "nao"}
+                  verdict={legacyDoseBand(status.latest_action)}
                   size="lg"
                 />
               )}
