@@ -327,11 +327,11 @@ export default function Home() {
             ) : ledeFarms === 1 ? (
               <>Uma das suas explorações precisa de atenção —{" "}
                 <strong className="not-italic font-semibold text-terra">{ledeCount} sector{ledeCount !== 1 ? "es" : ""}</strong>{" "}
-                recomendam rega antes do meio-dia.</>
+                recomendam rega reforçada antes do meio-dia.</>
             ) : (
               <>{ledeFarms} das suas explorações precisam de atenção —{" "}
                 <strong className="not-italic font-semibold text-terra">{ledeCount} sector{ledeCount !== 1 ? "es" : ""}</strong>{" "}
-                no total recomendam rega antes do meio-dia.</>
+                no total recomendam rega reforçada antes do meio-dia.</>
             )}
           </p>
 
@@ -340,7 +340,7 @@ export default function Home() {
             {[
               { label: "ET₀ médio hoje", value: avgEt0 != null ? avgEt0.toFixed(1) : "—", unit: avgEt0 != null ? "mm" : null },
               { label: "Explorações",    value: String(farmData.length),                    unit: null },
-              { label: "A regar hoje",   value: String(ledeCount),                          unit: ledeCount > 0 ? "sectores" : null },
+              { label: "Rega reforçada hoje",   value: String(ledeCount),                          unit: ledeCount > 0 ? "sectores" : null },
             ].map(({ label, value, unit }) => (
               <div key={label} className="shrink-0">
                 <div className="font-mono text-[9.5px] text-ink-3 tracking-[0.12em] uppercase mb-1">{label}</div>
