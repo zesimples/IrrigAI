@@ -15,6 +15,7 @@ import { NumericStrip } from "@/components/dashboard/editorial/NumericStrip";
 import { SectorGrid } from "@/components/dashboard/editorial/SectorGrid";
 import type { ProviderSyncStatus } from "@/types";
 import { FarmTabBar } from "@/components/ui/FarmTabBar";
+import { legacyDoseBand } from "@/lib/dose";
 
 interface Props {
   params: { farmId: string };
@@ -127,8 +128,10 @@ export default function FarmDashboardPage({ params }: Props) {
     );
   }
 
-  const toIrrigate = data.sectors_summary.filter((s) => s.action === "irrigate").length;
-  const noAction = data.sectors_summary.filter((s) => s.action !== "irrigate").length;
+  const toIrrigate = data.sectors_summary.filter(
+    (s) => (s.dose_band ?? legacyDoseBand(s.action)) === "reforcada"
+  ).length;
+  const noAction = data.sectors_summary.length - toIrrigate;
 
   return (
     <div className="min-h-screen bg-paper pb-20 sm:pb-8">

@@ -8,8 +8,8 @@ interface NumericStripProps {
 export function NumericStrip({ totalSectors, toIrrigate, noAction, forecastRain48h }: NumericStripProps) {
   const cells: { label: string; value: string | number; color?: string }[] = [
     { label: "Sectores no total", value: totalSectors },
-    { label: "A regar hoje",       value: toIrrigate,  color: toIrrigate > 0 ? "text-terra" : "text-ink" },
-    { label: "Sem rega necessária", value: noAction,    color: noAction > 0   ? "text-olive" : "text-ink" },
+    { label: "Rega reforçada hoje", value: toIrrigate,  color: toIrrigate > 0 ? "text-terra" : "text-ink" },
+    { label: "Sem rega reforçada",  value: noAction,    color: noAction > 0   ? "text-olive" : "text-ink" },
     { label: "Próxima reavaliação", value: "+48 h" },
     { label: "Água prevista",       value: `${forecastRain48h.toFixed(1)} mm` },
   ];

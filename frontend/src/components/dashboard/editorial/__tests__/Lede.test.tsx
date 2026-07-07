@@ -43,26 +43,46 @@ function sector(overrides: Partial<SectorSummary>): SectorSummary {
 }
 
 describe("Lede", () => {
-  it("does not say the whole olive crop can wait when some olive sectors need irrigation", () => {
+  it("does not say the whole olive crop can wait when some olive sectors need reinforced irrigation", () => {
     render(
       <Lede
         farmName="Innoliva"
         region="Alentejo"
         weather={weather}
         sectors={[
-          sector({ sector_id: "sector-1", sector_name: "Sector 1", action: "irrigate" }),
-          sector({ sector_id: "sector-2", sector_name: "Sector 2", action: "irrigate" }),
-          sector({ sector_id: "sector-3", sector_name: "Sector 3", action: "skip" }),
+          sector({ sector_id: "sector-1", sector_name: "Sector 1", action: "irrigate", dose_band: "reforcada" }),
+          sector({ sector_id: "sector-2", sector_name: "Sector 2", action: "irrigate", dose_band: "reforcada" }),
+          sector({ sector_id: "sector-3", sector_name: "Sector 3", action: "skip", dose_band: "pode_saltar" }),
         ]}
       />,
     );
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "Dois sectores do olival precisam de rega hoje; os restantes sectores podem esperar.",
+      "Dois sectores do olival precisam de rega reforçada hoje; os restantes sectores podem esperar.",
     );
     expect(screen.queryByText(/o olival pode esperar/i)).not.toBeInTheDocument();
     expect(screen.getByText(/ET₀ hoje: 7,7 mm/)).toBeInTheDocument();
     expect(screen.getByText(/Sem chuva prevista nas próximas 48 horas/)).toBeInTheDocument();
     expect(screen.getByText(/Prioridade aos sectores em défice/)).toBeInTheDocument();
+  });
+
+  it("speaks the reforcada band, not the legacy irrigate action, for a pre-feature (dose_band null) recommendation", () => {
+    render(
+      <Lede
+        farmName="Innoliva"
+        region="Alentejo"
+        weather={weather}
+        sectors={[
+          // Legacy rec: action=irrigate but no dose_band → legacyDoseBand maps to "normal",
+          // not "reforcada", so this must NOT be counted as needing reinforced irrigation.
+          sector({ sector_id: "sector-1", sector_name: "Sector 1", action: "irrigate", dose_band: null }),
+          sector({ sector_id: "sector-2", sector_name: "Sector 2", action: "skip", dose_band: null }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Hoje todos os sectores podem esperar.",
+    );
   });
 });

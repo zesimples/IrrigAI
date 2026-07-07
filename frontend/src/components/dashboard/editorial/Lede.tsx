@@ -1,5 +1,6 @@
 import type { SectorSummary, WeatherToday } from "@/types";
 import { CROP_LABELS } from "@/lib/cropConfig";
+import { legacyDoseBand } from "@/lib/dose";
 
 interface LedeProps {
   farmName: string;
@@ -8,9 +9,14 @@ interface LedeProps {
   weather: WeatherToday;
 }
 
+/** Same voice as the home page: only the "reforcada" band counts as needing rega hoje. */
+function isReforcada(s: SectorSummary): boolean {
+  return (s.dose_band ?? legacyDoseBand(s.action)) === "reforcada";
+}
+
 function buildHeadline(sectors: SectorSummary[]): { main: string; italic: string | null } {
-  const irrigate = sectors.filter((s) => s.action === "irrigate");
-  if (irrigate.length === 0) {
+  const reforcada = sectors.filter(isReforcada);
+  if (reforcada.length === 0) {
     return { main: "Hoje todos os sectores podem esperar.", italic: null };
   }
 
@@ -18,7 +24,7 @@ function buildHeadline(sectors: SectorSummary[]): { main: string; italic: string
   const safeCropSet = new Set<string>();
   for (const s of sectors) {
     const label = CROP_LABELS[s.crop_type] ?? s.crop_type;
-    if (s.action === "irrigate") byCrop.set(label, (byCrop.get(label) ?? 0) + 1);
+    if (isReforcada(s)) byCrop.set(label, (byCrop.get(label) ?? 0) + 1);
     else safeCropSet.add(label);
   }
 
@@ -33,13 +39,13 @@ function buildHeadline(sectors: SectorSummary[]): { main: string; italic: string
     return m[l] ?? l.toLowerCase();
   };
 
-  const total = irrigate.length;
+  const total = reforcada.length;
   const sWord = (n: number) => (n === 1 ? "sector" : "sectores");
   const vWord = (n: number) => (n === 1 ? "precisa" : "precisam");
 
   if (byCrop.size === 1) {
     const [[crop, count]] = byCrop.entries();
-    const main = `${toWord(count)} ${sWord(count)} ${deCrop(crop)} ${vWord(count)} de rega hoje;`;
+    const main = `${toWord(count)} ${sWord(count)} ${deCrop(crop)} ${vWord(count)} de rega reforçada hoje;`;
     if (safeCropSet.size === 1) {
       const [safe] = safeCropSet;
       if (safe === crop) return { main, italic: "os restantes sectores podem esperar." };
@@ -49,7 +55,7 @@ function buildHeadline(sectors: SectorSummary[]): { main: string; italic: string
     return { main: main.replace(";", "."), italic: null };
   }
 
-  const main = `${toWord(total)} ${sWord(total)} precisam de rega hoje;`;
+  const main = `${toWord(total)} ${sWord(total)} precisam de rega reforçada hoje;`;
   if (safeCropSet.size === 1) {
     const [safe] = safeCropSet;
     return { main, italic: `${artCrop(safe)} pode esperar.` };
@@ -68,7 +74,7 @@ function buildSubtext(sectors: SectorSummary[], weather: WeatherToday): string {
     ? `${formatMm(weather.forecast_rain_next_48h_mm)} mm previstos nas próximas 48h`
     : "Sem chuva prevista nas próximas 48 horas";
   const cropGroups = new Map<string, number>();
-  for (const s of sectors.filter((x) => x.action === "irrigate")) {
+  for (const s of sectors.filter(isReforcada)) {
     const label = CROP_LABELS[s.crop_type] ?? s.crop_type;
     cropGroups.set(label, (cropGroups.get(label) ?? 0) + 1);
   }
