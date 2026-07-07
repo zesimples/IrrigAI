@@ -316,18 +316,24 @@ async def test_inputs_snapshot_carries_dose_fields(seeded_sector_depleted: Secto
     from tests.test_api.conftest import delete_farm_subtree
 
     sector = seeded_sector_depleted
-    farm_id = (
+    sector_id = str(sector.id)
+    farm_id_owner = (
         await db.execute(
-            select(Plot.farm_id).join(Sector, Sector.plot_id == Plot.id).where(Sector.id == sector.id)
+            select(Plot.farm_id, Farm.owner_id).join(Farm, Plot.farm_id == Farm.id)
+            .join(Sector, Sector.plot_id == Plot.id).where(Sector.id == sector.id)
         )
-    ).scalar_one()
+    ).first()
+    farm_id = farm_id_owner[0]
+    owner_id = farm_id_owner[1]
 
     try:
-        rec, eng = await generate_recommendation(str(sector.id), db)
+        rec, eng = await generate_recommendation(sector_id, db)
         assert rec.inputs_snapshot["dose_band"] == eng.dose_band
         assert rec.inputs_snapshot["dose_source"] == eng.dose_source
         assert "dose_presentation" in rec.inputs_snapshot
     finally:
+        # Clear any failed-transaction state before attempting cleanup.
+        await db.rollback()
         # delete_farm_subtree doesn't know about recommendation/recommendation_reason
         # (API tests never generate recommendations) or irrigation_system (this
         # fixture's tree adds one) — clean those up first, then hand off the rest.
@@ -336,9 +342,12 @@ async def test_inputs_snapshot_carries_dose_fields(seeded_sector_depleted: Secto
                 "DELETE FROM recommendation_reason WHERE recommendation_id IN "
                 "(SELECT id FROM recommendation WHERE sector_id=:sid)"
             ),
-            {"sid": str(sector.id)},
+            {"sid": sector_id},
         )
-        await db.execute(text("DELETE FROM recommendation WHERE sector_id=:sid"), {"sid": str(sector.id)})
-        await db.execute(text("DELETE FROM irrigation_system WHERE sector_id=:sid"), {"sid": str(sector.id)})
+        await db.execute(text("DELETE FROM recommendation WHERE sector_id=:sid"), {"sid": sector_id})
+        await db.execute(text("DELETE FROM irrigation_system WHERE sector_id=:sid"), {"sid": sector_id})
         await db.commit()
         await delete_farm_subtree(db, str(farm_id))
+        # Delete the fixture's user row.
+        await db.execute(text("DELETE FROM \"user\" WHERE id=:uid"), {"uid": owner_id})
+        await db.commit()
