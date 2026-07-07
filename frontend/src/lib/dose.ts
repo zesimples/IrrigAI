@@ -39,7 +39,12 @@ export interface DoseHeadlineInput {
 
 export function doseHeadline(d: DoseHeadlineInput): string {
   if (d.doseBand === "pode_saltar") return "Pode saltar hoje";
-  if (d.doseSource === "configured" && d.runtimeMin != null) {
+  // A non-null runtime only ever comes from a configured irrigation system
+  // (probe_learned estimates live in estimatedRuntimeMin instead), so this
+  // branch fires regardless of doseSource — including pre-feature recs that
+  // predate dose_source and would otherwise fall through to the mm-only
+  // headline, hiding the runtime until the next daily regeneration.
+  if (d.runtimeMin != null) {
     const mm = d.depthMm != null ? ` (${d.depthMm.toFixed(0)} mm)` : "";
     if (d.doseBand === "curta") return `Bastam ${formatRuntime(d.runtimeMin)} hoje${mm}`;
     return `Regar ${formatRuntime(d.runtimeMin)}${mm}`;

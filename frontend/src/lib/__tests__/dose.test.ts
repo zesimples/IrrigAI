@@ -54,4 +54,9 @@ describe("doseHeadline", () => {
     expect(doseHeadline({ doseBand: "normal", doseSource: null, depthMm: null, runtimeMin: null, habitualFactor: null, estimatedRuntimeMin: null }))
       .toBe(DOSE_BAND_LABELS.normal);
   });
+
+  it("shows configured runtime for a pre-feature rec (dose_source null but a runtime is set)", () => {
+    expect(doseHeadline({ ...base, doseBand: "normal", doseSource: null, runtimeMin: 90 }))
+      .toBe("Regar 1h30 (6 mm)");
+  });
 });
