@@ -7,6 +7,7 @@ import { recommendationsApi } from "@/lib/api";
 import { DOSE_BAND_LABELS, doseHeadline, legacyDoseBand } from "@/lib/dose";
 import type {
   ConfidenceLevel,
+  DoseBand,
   RecommendationAction,
   RecommendationDetail as Rec,
 } from "@/types";
@@ -22,6 +23,17 @@ export const ACTION_CONFIG: Record<
   reduce:   { label: "Reduzir rega",    badge: "bg-irrigai-amber-bg text-irrigai-amber-dark" },
   increase: { label: "Aumentar rega",   badge: "bg-irrigai-amber-bg text-irrigai-amber-dark" },
   defer:    { label: "Adiar decisão",   badge: "bg-irrigai-amber-bg text-irrigai-amber-dark" },
+};
+
+// Header pill now shows the band label (e.g. "Rega normal"), so it must be
+// colored by band — not by action.badge (ACTION_CONFIG), which can mismatch
+// (e.g. "Rega normal" on a skip-day rendering gray, "Pode saltar" rendering
+// green). ACTION_CONFIG stays exported/untouched for other consumers.
+const BAND_BADGE: Record<DoseBand, string> = {
+  reforcada: "bg-irrigai-green-bg text-irrigai-green-dark",
+  normal: "bg-irrigai-amber-bg text-irrigai-amber-dark",
+  curta: "bg-irrigai-gray-bg text-irrigai-text-muted",
+  pode_saltar: "bg-irrigai-gray-bg text-irrigai-text-muted",
 };
 
 const CONF_COLOR: Record<ConfidenceLevel, string> = {
@@ -85,7 +97,7 @@ export function RecHeader({ rec, action, confPct }: RecHeaderProps) {
     <div className="px-4 pt-4 pb-3 border-b border-black/[0.06]">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className={`rounded-full px-3.5 py-1 text-[15px] font-medium ${action.badge}`}>
+          <span className={`rounded-full px-3.5 py-1 text-[15px] font-medium ${BAND_BADGE[band]}`}>
             {DOSE_BAND_LABELS[band]}
           </span>
           <span className="text-[14px] text-ink-2">{headline}</span>
