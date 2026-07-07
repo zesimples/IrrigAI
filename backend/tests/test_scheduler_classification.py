@@ -41,3 +41,43 @@ def test_probe_calibration_job_is_registered():
 
     ids = asyncio.run(_check())
     assert "probe_calibration" in ids
+
+
+async def test_start_scheduler_registers_all_expected_jobs():
+    """Exact job-id set + the irrigation_fingerprint cron schedule.
+
+    Guards against silent job-registration drift (a renamed/dropped add_job
+    call would otherwise only surface in production as a missing job run).
+    start_scheduler() calls _scheduler.start(), which needs a running event
+    loop — this test is async (pytest-asyncio auto mode) so one exists.
+    """
+    from apscheduler.triggers.cron import CronTrigger
+
+    from app.services import scheduler as scheduler_module
+    from app.services.scheduler import start_scheduler
+
+    scheduler_module._scheduler = None
+    try:
+        sched = start_scheduler()
+        jobs = {j.id: j for j in sched.get_jobs()}
+        assert set(jobs) == {
+            "alert_check",
+            "daily_recommendations",
+            "data_ingestion",
+            "flowmeter_ingestion",
+            "reference_recompute",
+            "probe_calibration",
+            "irrigation_fingerprint",
+        }
+
+        fingerprint_trigger = jobs["irrigation_fingerprint"].trigger
+        assert isinstance(fingerprint_trigger, CronTrigger)
+        trigger_fields = {f.name: str(f) for f in fingerprint_trigger.fields}
+        assert trigger_fields["day_of_week"] == "mon"
+        assert trigger_fields["hour"] == "4"
+        assert trigger_fields["minute"] == "30"
+    finally:
+        sched = scheduler_module._scheduler
+        if sched is not None:
+            sched.shutdown(wait=False)
+        scheduler_module._scheduler = None
