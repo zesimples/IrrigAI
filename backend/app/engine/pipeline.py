@@ -762,6 +762,7 @@ class RecommendationPipeline:
                 "estimated_runtime_min": dose_pres.estimated_runtime_min,
                 "fingerprint_n_events": dose_pres.fingerprint_n_events,
                 "typical_event_net_mm": dose_pres.typical_event_net_mm,
+                "fingerprint_confidence": dose_pres.fingerprint_confidence,
             },
             depletion_mm=wb.depletion_mm,
             raw_mm=wb.raw_mm,

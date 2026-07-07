@@ -24,6 +24,7 @@ class FakeFingerprint:
     typical_event_duration_min: float | None = 120.0
     n_events: int = 5
     computed_at: datetime = NOW - timedelta(days=3)
+    confidence: str = "high"
 
 
 def _dose(net=5.0, gross=6.2, runtime=None, requested=6.2):
@@ -61,6 +62,7 @@ class TestResolveDosePresentation:
         p = resolve_dose_presentation(_dose(runtime=90.0), DOSE_BAND_NORMAL, FakeFingerprint(), NOW)
         assert p.dose_source == DOSE_SOURCE_CONFIGURED
         assert p.habitual_factor is None
+        assert p.fingerprint_confidence is None
 
     def test_probe_learned_factor_and_estimate(self):
         p = resolve_dose_presentation(_dose(net=5.0), DOSE_BAND_NORMAL, FakeFingerprint(), NOW)
@@ -68,6 +70,7 @@ class TestResolveDosePresentation:
         assert p.habitual_factor == 1.25          # 5.0 / 4.0
         assert p.estimated_runtime_min == 150.0   # 1.25 × 120
         assert p.fingerprint_n_events == 5
+        assert p.fingerprint_confidence == "high"
 
     def test_probe_learned_without_duration(self):
         fp = FakeFingerprint(typical_event_duration_min=None)
@@ -88,7 +91,9 @@ class TestResolveDosePresentation:
     def test_no_fingerprint_mm_only(self):
         p = resolve_dose_presentation(_dose(), DOSE_BAND_NORMAL, None, NOW)
         assert p.dose_source == DOSE_SOURCE_MM_ONLY
+        assert p.fingerprint_confidence is None
 
     def test_no_dose_mm_only(self):
         p = resolve_dose_presentation(None, DOSE_BAND_PODE_SALTAR, FakeFingerprint(), NOW)
         assert p.dose_source == DOSE_SOURCE_MM_ONLY
+        assert p.fingerprint_confidence is None

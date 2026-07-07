@@ -3,6 +3,12 @@
 Pure functions; same precedence idiom as engine/soil_bounds.resolve_soil_bounds.
 The band is a PRESENTATION classifier over existing engine outputs — the
 RecommendationAction enum, alerts and the AI probe-guard are untouched.
+
+Note on fingerprint_confidence: the resolver's own quality floor for using a
+fingerprint at all is the service's >=3-events "medium" gate (see
+irrigation_fingerprint_service.py); the fingerprint's own `confidence` field
+surfaced here is currently informational only (for UI/analytics), not an
+additional gate on whether probe_learned is selected.
 """
 from __future__ import annotations
 
@@ -34,6 +40,7 @@ class DosePresentation:
     estimated_runtime_min: float | None = None  # factor × typical duration (estimate)
     fingerprint_n_events: int | None = None
     typical_event_net_mm: float | None = None
+    fingerprint_confidence: str | None = None
 
 
 def classify_dose_band(
@@ -86,5 +93,6 @@ def resolve_dose_presentation(
             estimated_runtime_min=estimated,
             fingerprint_n_events=fingerprint.n_events,
             typical_event_net_mm=fingerprint.typical_event_net_mm,
+            fingerprint_confidence=fingerprint.confidence,
         )
     return DosePresentation(dose_band=dose_band, dose_source=DOSE_SOURCE_MM_ONLY)
