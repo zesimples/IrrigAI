@@ -143,6 +143,39 @@ async def resolve_sector_soil_bounds(sector_id: str, db: AsyncSession, plot=None
     )
 
 
+def resolve_effective_root_depth_m(
+    scp: SectorCropProfile | None,
+    tree_age_years: int | None,
+    current_stage_key: str | None,
+) -> float:
+    """Effective root depth (m): young/mature by tree age, then stage override.
+
+    Mirrors the root-depth logic in `build_sector_context`; shared so the probe
+    chart's root zone can't diverge from the engine's.
+    """
+    if scp is None:
+        return _FALLBACK_ROOT_DEPTH
+
+    if (
+        tree_age_years is not None
+        and scp.maturity_age_years is not None
+        and tree_age_years < 4
+    ):
+        root_depth_m = scp.root_depth_young_m
+    else:
+        root_depth_m = scp.root_depth_mature_m
+
+    if current_stage_key:
+        stage = next(
+            (s for s in (scp.stages or []) if s.get("key") == current_stage_key),
+            None,
+        )
+        if stage and stage.get("root_depth_m") is not None:
+            root_depth_m = float(stage["root_depth_m"])
+
+    return root_depth_m
+
+
 async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContext:
     """Load all engine inputs for a sector from user-configured DB records.
 
@@ -231,8 +264,13 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
                 # Override root depth with stage-specific value if present
                 stage_root = stage_dict.get("root_depth_m")
                 if stage_root is not None:
-                    root_depth_m = float(stage_root)
                     defaults_used = [d for d in defaults_used if "root_depth" not in d]
+
+        # Value sourced from the shared helper so the probe chart's root zone
+        # can never diverge from the engine's (logging above stays inline).
+        root_depth_m = resolve_effective_root_depth_m(
+            scp, tree_age, sector.current_phenological_stage
+        )
 
     # --- IrrigationSystem ---
     irrig_result = await db.execute(
