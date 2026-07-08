@@ -60,6 +60,36 @@ _FALLBACK_ROOT_DEPTH = 0.60
 _FALLBACK_EFFICIENCY = 0.90
 
 
+async def _load_sector_fingerprint(db: AsyncSession, sector_id: str):
+    """Load the sector's irrigation fingerprint, degrading to None on any DB error.
+
+    The fingerprint only powers the "probe_learned" dose phrasing; it must never be
+    load-bearing for the recommendation itself. The lookup runs inside a SAVEPOINT
+    (`begin_nested`) so that if it fails — most plausibly a migration lag where the
+    `irrigation_fingerprint` table does not yet exist on a freshly deployed image —
+    the savepoint rolls back and leaves the outer transaction usable for the
+    downstream flush/commit, instead of aborting the whole recommendation.
+    """
+    from app.models.irrigation_fingerprint import IrrigationFingerprint
+
+    try:
+        async with db.begin_nested():
+            result = await db.execute(
+                select(IrrigationFingerprint).where(
+                    IrrigationFingerprint.sector_id == sector_id
+                )
+            )
+            return result.scalar_one_or_none()
+    except Exception:
+        logger.warning(
+            "IrrigationFingerprint lookup failed for sector %s — dose falls back to "
+            "mm_only (is the migration applied?)",
+            sector_id,
+            exc_info=True,
+        )
+        return None
+
+
 async def resolve_sector_soil_bounds(sector_id: str, db: AsyncSession, plot=None):
     """Resolve a sector's FC/refill bounds: calibration > SCP > plot > default.
 
@@ -702,11 +732,12 @@ class RecommendationPipeline:
         # Step 11.6: Dose-do-dia band + source precedence
         from app.engine.dose_presentation import classify_dose_band, resolve_dose_presentation
         from app.engine.trigger import effective_trigger_threshold
-        from app.models.irrigation_fingerprint import IrrigationFingerprint
 
-        fingerprint = (await db.execute(
-            select(IrrigationFingerprint).where(IrrigationFingerprint.sector_id == sector_id)
-        )).scalar_one_or_none()
+        # The fingerprint only enriches the "probe_learned" dose phrasing. A DB error
+        # here (e.g. migration lag on a fresh deploy — the irrigation_fingerprint table
+        # not yet created) must NOT take down the whole recommendation: degrade to no
+        # fingerprint (mm_only), mirroring the soil-water-model fallback above.
+        fingerprint = await _load_sector_fingerprint(db, sector_id)
         dose_band = classify_dose_band(
             depletion_mm=wb.depletion_mm,
             effective_threshold_mm=effective_trigger_threshold(wb, ctx),
