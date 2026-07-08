@@ -247,6 +247,8 @@ export interface ProbeReadingsResponse {
   depths: DepthReadings[];
   reference_lines: ReferenceLines;
   events: ProbeDetectedEvent[];
+  rootzone_swc?: { timestamp: string; vwc: number; quality?: string }[];
+  root_depth_cm?: number | null;
 }
 
 export interface ProbeReadingGap {

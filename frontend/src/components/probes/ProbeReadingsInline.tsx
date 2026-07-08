@@ -5,7 +5,7 @@ import Link from "next/link";
 import { subHours } from "date-fns";
 import { ChevronDown, ExternalLink, ScanLine, RefreshCw } from "lucide-react";
 import { useProbeReadings } from "@/hooks/useProbeReadings";
-import { ProbeChart } from "@/components/probes/ProbeChart";
+import { ProbeChart, formatRootDepthHint } from "@/components/probes/ProbeChart";
 import { ProbeSumChart } from "@/components/probes/ProbeSumChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { sectorsApi, probesApi, waterEventsApi } from "@/lib/api";
@@ -198,20 +198,38 @@ export function ProbeReadingsInline({
           ) : data && data.depths.length > 0 ? (
             <>
               {chartView === "depths" ? (
-                <ProbeChart
-                  depths={data.depths}
-                  referenceLines={activeRefLines}
-                  events={visibleEvents}
-                  hoveredEventId={hoveredEventId}
-                  interval={interval}
-                />
+                <>
+                  <ProbeChart
+                    depths={data.depths}
+                    referenceLines={activeRefLines}
+                    events={visibleEvents}
+                    hoveredEventId={hoveredEventId}
+                    interval={interval}
+                    rootzoneSwc={data.rootzone_swc}
+                    rootDepthCm={data.root_depth_cm}
+                  />
+                  {data.rootzone_swc && data.rootzone_swc.length > 0 && (
+                    <p className="font-mono text-[10.5px] text-ink-3">
+                      {formatRootDepthHint(data.root_depth_cm)}
+                    </p>
+                  )}
+                </>
               ) : (
-                <ProbeSumChart
-                  depths={data.depths}
-                  referenceLines={activeRefLines}
-                  events={visibleEvents}
-                  hoveredEventId={hoveredEventId}
-                />
+                <>
+                  <ProbeSumChart
+                    depths={data.depths}
+                    referenceLines={activeRefLines}
+                    events={visibleEvents}
+                    hoveredEventId={hoveredEventId}
+                  />
+                  <p
+                    title="A recomendação usa a média da zona radicular (ver vista Profundidades)."
+                    className="font-serif italic text-[11.5px] text-ink-3"
+                  >
+                    A vista Soma soma todas as profundidades. A recomendação usa a média da
+                    zona radicular (ver vista Profundidades).
+                  </p>
+                </>
               )}
 
               <DetectedEvents

@@ -22,16 +22,29 @@ const DEPTH_COLORS = [
   "#db2777", // pink-600
 ];
 
+interface RootzonePoint {
+  timestamp: string;
+  vwc: number;
+  quality?: string;
+}
+
 interface ProbeChartProps {
   depths: DepthReadings[];
   referenceLines: ReferenceLines;
   events?: ProbeDetectedEvent[];
   hoveredEventId?: string | null;
   interval?: string;
+  /** Rootzone-weighted SWC series — the value the recommendation engine actually
+   *  uses. Rendered as a distinct, prominent line so the chart can't visually
+   *  disagree with the recommendation on split-moisture profiles. */
+  rootzoneSwc?: RootzonePoint[];
+  rootDepthCm?: number | null;
 }
 
+const ROOTZONE_COLOR = "#1c1917"; // near-black, distinct from depth palette + CC/PMP
+
 // Merge all depth readings into a unified timeline keyed by timestamp
-function buildChartData(depths: DepthReadings[]) {
+function buildChartData(depths: DepthReadings[], rootzoneSwc?: RootzonePoint[]) {
   const map = new Map<string, Record<string, number>>();
   for (const d of depths) {
     for (const pt of d.readings) {
@@ -41,6 +54,12 @@ function buildChartData(depths: DepthReadings[]) {
       row[`d_${d.depth_cm}`] = pt.vwc;
     }
   }
+  for (const pt of rootzoneSwc ?? []) {
+    const ts = pt.timestamp;
+    if (!map.has(ts)) map.set(ts, { ts: new Date(ts).getTime() });
+    const row = map.get(ts)!;
+    row.rootzone = pt.vwc;
+  }
   return [...map.values()].sort((a, b) => a.ts - b.ts);
 }
 
@@ -48,8 +67,15 @@ function fmtTick(ts: number) {
   return format(new Date(ts), "dd/MM HH:mm");
 }
 
-export function ProbeChart({ depths, referenceLines, events, hoveredEventId }: ProbeChartProps) {
-  const data = buildChartData(depths);
+export function ProbeChart({
+  depths,
+  referenceLines,
+  events,
+  hoveredEventId,
+  rootzoneSwc,
+  rootDepthCm,
+}: ProbeChartProps) {
+  const data = buildChartData(depths, rootzoneSwc);
 
   if (data.length === 0) {
     return (
@@ -80,14 +106,16 @@ export function ProbeChart({ depths, referenceLines, events, hoveredEventId }: P
         <Tooltip
           formatter={(value: number, name: string) => [
             `${(value * 100).toFixed(1)}%`,
-            name.replace("d_", "") + " cm",
+            name === "rootzone" ? "Zona radicular (média)" : name.replace("d_", "") + " cm",
           ]}
           labelFormatter={(label: number) =>
             format(new Date(label), "dd/MM/yyyy HH:mm")
           }
         />
         <Legend
-          formatter={(value) => value.replace("d_", "") + " cm"}
+          formatter={(value) =>
+            value === "rootzone" ? "Zona radicular (média)" : value.replace("d_", "") + " cm"
+          }
           wrapperStyle={{ fontSize: 12 }}
         />
         {referenceLines.field_capacity != null && (
@@ -138,7 +166,26 @@ export function ProbeChart({ depths, referenceLines, events, hoveredEventId }: P
             connectNulls={false}
           />
         ))}
+        {rootzoneSwc && rootzoneSwc.length > 0 && (
+          <Line
+            key="rootzone"
+            type="monotone"
+            dataKey="rootzone"
+            name="rootzone"
+            data-testid="rootzone-line"
+            stroke={ROOTZONE_COLOR}
+            dot={false}
+            strokeWidth={3}
+            connectNulls={false}
+          />
+        )}
       </LineChart>
     </ResponsiveContainer>
   );
+}
+
+/** Exported for the hint text next to the chart (root depth used for the overlay). */
+export function formatRootDepthHint(rootDepthCm?: number | null): string | null {
+  if (rootDepthCm == null) return null;
+  return `Zona radicular: ${Math.round(rootDepthCm)} cm (valor usado pela recomendação)`;
 }
