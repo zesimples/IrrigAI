@@ -89,3 +89,36 @@ async def test_non_soil_edit_does_not_regenerate(
 
     after = await _rec_count(db, seed_sector_id)
     assert after == before
+
+
+@pytest.mark.asyncio
+async def test_regeneration_failure_still_saves_profile(
+    client: AsyncClient, db: AsyncSession, seed_sector_id: str, monkeypatch
+):
+    """A failing regeneration must NOT lose the soil edit or 500 the request.
+
+    CI uses mock providers that always succeed, so the best-effort try/except
+    (and its rollback) is otherwise never exercised — force generation to raise
+    and assert the PUT still returns 200 with the updated FC and no extra rec.
+    """
+    import app.api.v1.crop_profiles as crop_profiles_module
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("simulated pipeline failure")
+
+    monkeypatch.setattr(crop_profiles_module, "generate_recommendation", _boom)
+
+    before = await _rec_count(db, seed_sector_id)
+    resp = await client.get(f"/api/v1/sectors/{seed_sector_id}/crop-profile")
+    current_fc = resp.json()["field_capacity"] or 0.20
+    new_fc = round(current_fc + 0.017, 3)
+
+    put_resp = await client.put(
+        f"/api/v1/sectors/{seed_sector_id}/crop-profile",
+        json={"field_capacity": new_fc},
+    )
+    # Edit is preserved and returned; no 500 from a PendingRollbackError at teardown.
+    assert put_resp.status_code == 200
+    assert put_resp.json()["field_capacity"] == pytest.approx(new_fc)
+    # Regeneration failed → no new recommendation persisted.
+    assert await _rec_count(db, seed_sector_id) == before

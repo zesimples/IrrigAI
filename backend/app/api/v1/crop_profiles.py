@@ -107,6 +107,11 @@ async def update_sector_crop_profile(
 
     await db.commit()
     await db.refresh(profile)
+    # Serialize the saved profile NOW, while the session is clean and the object is
+    # populated — before the regeneration side-effect. A failed regen calls
+    # db.rollback() below, which expires `profile` and would make a later
+    # model_validate() lazy-load in async context (MissingGreenlet → 500).
+    response = SectorCropProfileOut.model_validate(profile)
 
     # Best-effort: regenerate the recommendation so depletion reflects the new
     # soil bounds immediately instead of staying frozen until the next scheduled
@@ -116,6 +121,10 @@ async def update_sector_crop_profile(
         try:
             await generate_recommendation(sector_id, db)
         except Exception:
+            # Clear any aborted-transaction state left by a failed generation so
+            # get_db()'s teardown commit does not raise PendingRollbackError (which
+            # would turn a best-effort regen failure into a 500).
+            await db.rollback()
             logger.warning(
                 "Recommendation regeneration failed after crop-profile soil edit "
                 "for sector %s",
@@ -123,7 +132,7 @@ async def update_sector_crop_profile(
                 exc_info=True,
             )
 
-    return SectorCropProfileOut.model_validate(profile)
+    return response
 
 
 @router.post("/sectors/{sector_id}/crop-profile/reset", response_model=SectorCropProfileOut)
