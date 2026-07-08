@@ -81,6 +81,9 @@ async def _load_sector_fingerprint(db: AsyncSession, sector_id: str):
             )
             return result.scalar_one_or_none()
     except Exception:
+        from app.metrics import dose_fingerprint_lookup_failures_total
+
+        dose_fingerprint_lookup_failures_total.inc()
         logger.warning(
             "IrrigationFingerprint lookup failed for sector %s — dose falls back to "
             "mm_only (is the migration applied?)",

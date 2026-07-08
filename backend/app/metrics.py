@@ -49,6 +49,12 @@ flowmeter_device_ingestion_total = Counter(
     ["result"],  # result: success | failure
 )
 
+dose_fingerprint_lookup_failures_total = Counter(
+    "irrigai_dose_fingerprint_lookup_failures_total",
+    "Irrigation-fingerprint lookups that failed and degraded the dose to mm_only "
+    "(a sustained rise means more than a one-off migration lag — investigate)",
+)
+
 # ── AI / LLM ─────────────────────────────────────────────────────────────────
 
 ai_requests_total = Counter(
