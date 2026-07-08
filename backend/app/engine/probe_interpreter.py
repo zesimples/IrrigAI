@@ -21,7 +21,9 @@ from app.engine.types import (
 )
 from app.models import Probe, ProbeDepth, ProbeReading
 
-STALE_THRESHOLD_H = 6.0
+# 30h: daily-publishing providers (MyIrrigation / iMetos) deliver ~daily, so a 6h
+# cutoff marked nearly every reading stale. Matches confidence.PROBE_STALE_H.
+STALE_THRESHOLD_H = 30.0
 MAX_READINGS_PER_DEPTH = 48  # last 48h
 
 # VWC plausible range (m³/m³)
@@ -227,6 +229,57 @@ def _compute_rootzone(depth_statuses: list[DepthStatus], root_depth_m: float) ->
         hours_since_any_reading=hours_any,
         all_depths_ok=all_ok,
     )
+
+
+def weighted_rootzone_series(
+    series_by_depth: dict[int, list[tuple[datetime, float]]],
+    root_depth_cm: float,
+) -> list[tuple[datetime, float]]:
+    """Rootzone-weighted VWC time series, for overlaying on the probe chart.
+
+    Pure function: `series_by_depth` maps depth_cm -> [(timestamp, vwc), ...]
+    (already deduped/merged upstream). Only depths within the root zone
+    (`depth_cm <= root_depth_cm`) contribute; each contributing depth is weighted
+    by `_depth_interval_weights` — the same depth-interval weighting
+    `_compute_rootzone` uses for the engine's SWC — so this line can never
+    diverge from the recommendation.
+
+    At each timestamp, the average is renormalized over whichever in-zone depths
+    actually have a reading at that timestamp (matching `_compute_rootzone`,
+    which averages over `valid` with `total_weight`). Timestamps with no in-zone
+    reading at all are skipped. Values are rounded to 4 decimal places. Results
+    are sorted by timestamp.
+    """
+    in_zone_depths = sorted(d for d in series_by_depth if d <= root_depth_cm)
+    if not in_zone_depths:
+        return []
+
+    weights_by_depth = dict(
+        zip(
+            in_zone_depths,
+            _depth_interval_weights(in_zone_depths, root_depth_cm),
+            strict=True,
+        )
+    )
+
+    # Group readings by timestamp across in-zone depths.
+    by_ts: dict[datetime, dict[int, float]] = {}
+    for depth_cm in in_zone_depths:
+        for ts, vwc in series_by_depth.get(depth_cm, []):
+            by_ts.setdefault(ts, {})[depth_cm] = vwc
+
+    result: list[tuple[datetime, float]] = []
+    for ts in sorted(by_ts):
+        present = by_ts[ts]
+        if not present:
+            continue
+        total_weight = sum(weights_by_depth[d] for d in present)
+        if total_weight <= 0:
+            continue
+        weighted_sum = sum(weights_by_depth[d] * v for d, v in present.items())
+        result.append((ts, round(weighted_sum / total_weight, 4)))
+
+    return result
 
 
 def _empty_snapshot(sector_id: str, reason: str) -> ProbeSnapshot:

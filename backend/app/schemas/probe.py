@@ -99,6 +99,8 @@ class ProbeReadingsResponse(BaseModel):
     depths: list[DepthReadings]
     reference_lines: ReferenceLines
     events: list[ProbeDetectedEvent] = Field(default_factory=list)
+    rootzone_swc: list[TimeSeriesPoint] = Field(default_factory=list)
+    root_depth_cm: float | None = None
 
 
 class ProbeReadingGap(BaseModel):
