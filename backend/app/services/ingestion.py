@@ -33,6 +33,7 @@ from app.adapters.dto import (
     WeatherObservationDTO,
 )
 from app.config import get_settings
+from app.engine.staleness import PROBE_STALE_H, PROBE_VERY_STALE_H
 from app.models import (
     Probe,
     ProbeDepth,
@@ -48,10 +49,11 @@ logger = logging.getLogger(__name__)
 # Adaptive lookback — cap gap-fill at 7 days to avoid unbounded API requests
 MAX_ADAPTIVE_LOOKBACK_HOURS = 168
 
-# Freshness thresholds for ProbeDepth.data_status
-_FRESH_HOURS = 6.0   # readings newer than this → "ok"
-_STALE_HOURS = 24.0  # readings older than _FRESH_HOURS but newer than _STALE_HOURS → "partial"
-                     # older than _STALE_HOURS → "stale"
+# Freshness thresholds for ProbeDepth.data_status — shared source of truth so daily-
+# publishing providers aren't demoted on every run (see engine/staleness.py).
+_FRESH_HOURS = PROBE_STALE_H        # readings newer than this → "ok"
+_STALE_HOURS = PROBE_VERY_STALE_H   # _FRESH_HOURS < age <= _STALE_HOURS → "partial";
+                                    # older than _STALE_HOURS → "stale"
 
 
 def _adaptive_since(last_ts: datetime | None, default_lookback_hours: int, now: datetime) -> datetime:

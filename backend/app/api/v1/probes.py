@@ -184,7 +184,6 @@ async def get_probe_readings(
 
     depth_results: list[DepthReadings] = []
     event_source_depths: list[DepthReadings] = []
-    series_by_depth: dict[int, list[tuple]] = {}
     for depth_cm_val in sorted(depths_by_cm):
         depth_group = depths_by_cm[depth_cm_val]
         depth_ids = [d.id for d in depth_group]
@@ -216,9 +215,6 @@ async def get_probe_readings(
             for r in merged_rows
         ]
         event_source_depths.append(DepthReadings(depth_cm=depth_cm_val, readings=points))
-        # Pre-downsample series, for the rootzone-weighted overlay (weighting must
-        # run on the full-resolution merged points, not the downsampled ones).
-        series_by_depth[depth_cm_val] = [(p.timestamp, p.vwc) for p in points]
 
         if downsample_h and points:
             points = _downsample(points, downsample_h)
@@ -264,12 +260,17 @@ async def get_probe_readings(
             scp, tree_age, sector.current_phenological_stage
         )
         root_depth_cm = root_depth_m * 100
+        # Weight from the SAME (already-downsampled) points sent to the chart, so the
+        # rootzone line's timestamps are a subset of the depth lines' timestamps and
+        # the two can't drift out of phase under any interval (independent downsampling
+        # of two series bucketed from different first-timestamps would misalign them).
+        series_by_depth: dict[int, list[tuple]] = {
+            dr.depth_cm: [(p.timestamp, p.vwc) for p in dr.readings] for dr in depth_results
+        }
         rootzone_series = weighted_rootzone_series(series_by_depth, root_depth_cm)
         rootzone_points = [
             TimeSeriesPoint(timestamp=ts, vwc=vwc, quality="ok") for ts, vwc in rootzone_series
         ]
-        if downsample_h and rootzone_points:
-            rootzone_points = _downsample(rootzone_points, downsample_h)
 
     # Read-only: event persistence happens after ingestion or via explicit refresh.
     persisted = await list_persisted_water_events(

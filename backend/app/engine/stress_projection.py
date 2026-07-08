@@ -172,9 +172,9 @@ def _build_messages(urgency: str, hours: float | None, stress_date: date | None)
         )
     h = round(hours) if hours is not None else "?"
     date_str = stress_date.strftime("%-d %b") if stress_date else ""
-    # Already at/past the threshold (hours clamped to 0): stress is present now, not
-    # "in ~0h" — avoids the nonsensical "~-425h" phrasing on already-depleted sectors.
-    if hours is not None and hours <= 0:
+    # Already at/past the threshold, or so close it rounds to 0h: stress is present
+    # now, not "in ~0h" — avoids nonsensical phrasing on already-depleted sectors.
+    if hours is not None and round(hours) <= 0:
         return (
             "Stress hídrico já presente — recomenda-se rega imediata.",
             "Water stress already present — irrigation recommended now.",

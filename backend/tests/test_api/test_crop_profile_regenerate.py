@@ -9,11 +9,11 @@ no new farm subtree to clean up.
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
-from app.models import Farm, Plot, Recommendation, Sector
+from app.models import Farm, Plot, Recommendation, Sector, SectorCropProfile
 
 
 @pytest.fixture
@@ -27,11 +27,41 @@ async def db():
 
 
 @pytest.fixture
-async def seed_sector_id(db: AsyncSession) -> str:
+async def seed_sector_id(db: AsyncSession):
     farm = (await db.execute(select(Farm).where(Farm.name == "Herdade do Esporão"))).scalar_one()
     plot = (await db.execute(select(Plot).where(Plot.farm_id == farm.id))).scalars().first()
     sector = (await db.execute(select(Sector).where(Sector.plot_id == plot.id))).scalars().first()
-    return sector.id
+
+    # These tests PUT soil/mad edits to this SHARED, globally-seeded sector. Snapshot
+    # the crop-profile fields and restore them afterwards so we don't corrupt the
+    # seeded data for other suites (e.g. test_context_loading asserts this sector's mad).
+    scp = (
+        await db.execute(
+            select(SectorCropProfile).where(SectorCropProfile.sector_id == sector.id)
+        )
+    ).scalar_one_or_none()
+    snap = None
+    if scp is not None:
+        snap = (
+            scp.field_capacity, scp.wilting_point, scp.mad,
+            scp.soil_preset_id, scp.is_customized,
+        )
+    try:
+        yield sector.id
+    finally:
+        if snap is not None:
+            fc, wp, mad, preset, cust = snap
+            # Core UPDATE (not ORM) to avoid identity-map/lazy-load greenlet issues
+            # in async teardown; the client PUTs committed via a different session.
+            await db.execute(
+                update(SectorCropProfile)
+                .where(SectorCropProfile.sector_id == sector.id)
+                .values(
+                    field_capacity=fc, wilting_point=wp, mad=mad,
+                    soil_preset_id=preset, is_customized=cust,
+                )
+            )
+            await db.commit()
 
 
 async def _rec_count(db: AsyncSession, sector_id: str) -> int:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.engine.staleness import PROBE_STALE_H, PROBE_VERY_STALE_H
 from app.engine.types import (
     ConfidenceResult,
     DepthStatus,
@@ -20,13 +21,6 @@ from app.engine.types import (
 if TYPE_CHECKING:
     from app.anomaly.types import Anomaly as AnomalyObj
 
-# Daily-publishing providers (MyIrrigation / iMetos) routinely deliver readings
-# 12–24h apart, so a 6h "stale" cutoff flagged virtually every such sector as
-# stale and dropped confidence to "medium". 30h keeps a genuine gap visible while
-# treating one normal daily-publish cycle as fresh. Beyond PROBE_VERY_STALE_H the
-# probe is effectively dead and we lean on the forecast.
-PROBE_STALE_H = 30.0
-PROBE_VERY_STALE_H = 72.0
 WEATHER_STALE_H = 24.0
 
 # Anomaly severity penalties

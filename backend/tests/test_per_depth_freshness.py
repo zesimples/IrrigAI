@@ -33,8 +33,10 @@ def test_derive_data_status_buckets():
     now = datetime(2026, 5, 11, 12, tzinfo=UTC)
     assert _derive_data_status(None, now) == "no_data"
     assert _derive_data_status(now - timedelta(hours=2), now) == "ok"
-    assert _derive_data_status(now - timedelta(hours=10), now) == "partial"
-    assert _derive_data_status(now - timedelta(days=2), now) == "stale"
+    # A ~20h daily-provider gap is fresh now (thresholds raised for daily providers).
+    assert _derive_data_status(now - timedelta(hours=20), now) == "ok"
+    assert _derive_data_status(now - timedelta(hours=40), now) == "partial"  # 30–72h
+    assert _derive_data_status(now - timedelta(days=4), now) == "stale"      # >72h
 
 
 @pytest.mark.asyncio

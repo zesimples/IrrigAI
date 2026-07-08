@@ -154,10 +154,11 @@ class ConfidenceResult:
     level: str              # "high", "medium", "low"
     penalties: list[tuple[str, float]]   # (reason, penalty_amount)
     warnings: list[str]
-    # Structured data-source label — used by AI explanation layer and UI badges
-    # "fresh"        → probe reading < 6 h old
-    # "stale"        → probe reading 6–24 h old
-    # "forecast_only"→ probe exists but last reading > 24 h ago (or never)
+    # Structured data-source label — used by AI explanation layer and UI badges.
+    # Thresholds come from engine/staleness.py (tuned for daily-publishing providers):
+    # "fresh"        → probe reading <= PROBE_STALE_H (30 h)
+    # "stale"        → probe reading PROBE_STALE_H..PROBE_VERY_STALE_H (30–72 h)
+    # "forecast_only"→ probe exists but last reading > PROBE_VERY_STALE_H (72 h; or never)
     # "no_probe"     → no probe configured for this sector
     source_confidence: str = "fresh"
 

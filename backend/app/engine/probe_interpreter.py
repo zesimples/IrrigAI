@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.engine.staleness import PROBE_STALE_H
 from app.engine.types import (
     DepthStatus,
     ProbeSnapshot,
@@ -21,9 +22,7 @@ from app.engine.types import (
 )
 from app.models import Probe, ProbeDepth, ProbeReading
 
-# 30h: daily-publishing providers (MyIrrigation / iMetos) deliver ~daily, so a 6h
-# cutoff marked nearly every reading stale. Matches confidence.PROBE_STALE_H.
-STALE_THRESHOLD_H = 30.0
+STALE_THRESHOLD_H = PROBE_STALE_H  # shared source of truth (see engine/staleness.py)
 MAX_READINGS_PER_DEPTH = 48  # last 48h
 
 # VWC plausible range (m³/m³)
@@ -249,8 +248,15 @@ def weighted_rootzone_series(
     which averages over `valid` with `total_weight`). Timestamps with no in-zone
     reading at all are skipped. Values are rounded to 4 decimal places. Results
     are sorted by timestamp.
+
+    If no sensor falls within the root zone, this falls back to weighting ALL
+    depths (still against `root_depth_cm`) — mirroring `_compute_rootzone`'s
+    `if not in_zone: in_zone = depth_statuses` fallback, so the chart line can't
+    silently vanish while the engine still produces an SWC.
     """
     in_zone_depths = sorted(d for d in series_by_depth if d <= root_depth_cm)
+    if not in_zone_depths:
+        in_zone_depths = sorted(series_by_depth)
     if not in_zone_depths:
         return []
 

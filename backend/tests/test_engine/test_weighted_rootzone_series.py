@@ -23,10 +23,17 @@ def test_empty_series_returns_empty():
     assert weighted_rootzone_series({}, root_depth_cm=60) == []
 
 
-def test_no_in_zone_depths_returns_empty():
-    # Only a 90cm sensor, root zone is 60cm — nothing qualifies.
-    series_by_depth = {90: [(_ts(0), 0.30)]}
-    assert weighted_rootzone_series(series_by_depth, root_depth_cm=60) == []
+def test_no_in_zone_depths_falls_back_to_all_depths():
+    # No sensor within the root zone → mirror _compute_rootzone's all-depths
+    # fallback (weighted against root_depth_cm) rather than returning nothing, so
+    # the chart line can't vanish while the engine still produces an SWC.
+    from app.engine.probe_interpreter import _depth_interval_weights
+
+    series_by_depth = {80: [(_ts(0), 0.30)], 90: [(_ts(0), 0.50)]}
+    weights = _depth_interval_weights([80, 90], 60)
+    expected = round((weights[0] * 0.30 + weights[1] * 0.50) / sum(weights), 4)
+    result = weighted_rootzone_series(series_by_depth, root_depth_cm=60)
+    assert [v for _, v in result] == [expected]
 
 
 def test_single_in_zone_depth_matches_its_own_value():
@@ -71,6 +78,21 @@ def test_split_moisture_profile_matches_prod_example():
     _, vwc = result[0]
     # 90cm sensor is out of the 80cm root zone and must not pull the average up.
     assert vwc < 0.15
+
+
+def test_output_timestamps_are_subset_of_input_and_sorted():
+    # Alignment guarantee: the endpoint builds this from the SAME (already-downsampled)
+    # per-depth points sent to the chart, so the rootzone line's timestamps are always
+    # a subset of the depth lines' — it can't drift out of phase under any interval.
+    series_by_depth = {
+        30: [(_ts(0), 0.20), (_ts(2), 0.22), (_ts(6), 0.19)],
+        60: [(_ts(0), 0.18), (_ts(2), 0.20)],  # staggered: no reading at t=6
+    }
+    result = weighted_rootzone_series(series_by_depth, root_depth_cm=80)
+    input_ts = {t for pts in series_by_depth.values() for t, _ in pts}
+    out_ts = [t for t, _ in result]
+    assert all(t in input_ts for t in out_ts)
+    assert out_ts == sorted(out_ts)
 
 
 def test_skips_timestamps_with_no_in_zone_reading():

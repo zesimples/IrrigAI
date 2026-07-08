@@ -36,6 +36,14 @@ def test_hours_to_stress_never_negative():
         assert proj.hours_to_stress is None or proj.hours_to_stress >= 0.0
 
 
+def test_build_messages_rounds_sub_hour_to_present():
+    from app.engine.stress_projection import _build_messages
+
+    pt, _ = _build_messages("high", 0.4, _TODAY)
+    assert "já presente" in pt
+    assert "~0h" not in pt
+
+
 def test_not_yet_stressed_still_projects_forward():
     # Low depletion → stress is in the future (positive hours) or None, message not "já presente"
     proj = _project(10.0)

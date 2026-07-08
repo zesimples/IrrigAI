@@ -21,14 +21,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums import AlertSeverity, AlertType
 from app.engine.pipeline import build_sector_context, build_weather_context
 from app.engine.probe_interpreter import interpret_probes
+from app.engine.staleness import PROBE_VERY_STALE_H
 from app.engine.water_balance import build_water_balance
 from app.models import Alert, Farm, Plot, Probe, Sector, WeatherObservation
 from app.models.recommendation import Recommendation
 
 logger = logging.getLogger(__name__)
 
-# Thresholds
-_STALE_PROBE_HOURS = 6.0
+# Thresholds. A persisted "check connectivity" probe alert should fire only when the
+# probe is effectively dead (≈3 missed daily-publish cycles), not on a normal daily
+# gap — so it uses PROBE_VERY_STALE_H, not the softer confidence "stale" cutoff.
+_STALE_PROBE_HOURS = PROBE_VERY_STALE_H
 _STALE_WEATHER_HOURS = 24.0
 _WATER_STRESS_FRACTION = 0.80    # depletion / TAW
 _WATER_STRESS_CRITICAL = 0.90
