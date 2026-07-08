@@ -20,7 +20,13 @@ from app.engine.types import (
 if TYPE_CHECKING:
     from app.anomaly.types import Anomaly as AnomalyObj
 
-PROBE_STALE_H = 6.0
+# Daily-publishing providers (MyIrrigation / iMetos) routinely deliver readings
+# 12–24h apart, so a 6h "stale" cutoff flagged virtually every such sector as
+# stale and dropped confidence to "medium". 30h keeps a genuine gap visible while
+# treating one normal daily-publish cycle as fresh. Beyond PROBE_VERY_STALE_H the
+# probe is effectively dead and we lean on the forecast.
+PROBE_STALE_H = 30.0
+PROBE_VERY_STALE_H = 72.0
 WEATHER_STALE_H = 24.0
 
 # Anomaly severity penalties
@@ -148,7 +154,7 @@ def score(
     # Structured data-source label for AI explanations and UI badges
     if not rz.has_data:
         src_conf = "no_probe"
-    elif rz.hours_since_any_reading is not None and rz.hours_since_any_reading > 24:
+    elif rz.hours_since_any_reading is not None and rz.hours_since_any_reading > PROBE_VERY_STALE_H:
         src_conf = "forecast_only"
     elif rz.hours_since_any_reading is not None and rz.hours_since_any_reading > PROBE_STALE_H:
         src_conf = "stale"

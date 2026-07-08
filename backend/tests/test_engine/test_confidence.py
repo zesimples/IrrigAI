@@ -76,9 +76,17 @@ class TestPenalties:
         assert without_probes.score < with_probes.score
 
     def test_stale_probe_penalises(self):
+        # 10h is now within the fresh window (PROBE_STALE_H=30 for daily providers);
+        # use a genuinely stale age (>30h) to exercise the penalty.
         fresh = score(make_ctx(), make_probes(hours_since=1.0), make_weather())
-        stale = score(make_ctx(), make_probes(hours_since=10.0), make_weather())
+        stale = score(make_ctx(), make_probes(hours_since=40.0), make_weather())
         assert stale.score < fresh.score
+
+    def test_daily_provider_reading_is_not_stale(self):
+        # A ~20h-old reading (normal daily-publish lag) must NOT be penalised now.
+        fresh = score(make_ctx(), make_probes(hours_since=1.0), make_weather())
+        daily = score(make_ctx(), make_probes(hours_since=20.0), make_weather())
+        assert daily.score == fresh.score
 
     def test_per_depth_quality_penalises_missing_depths(self):
         fresh = make_probes(hours_since=1.0)
