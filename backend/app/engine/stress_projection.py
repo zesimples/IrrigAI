@@ -8,7 +8,7 @@ exceeds RAW — a stressed crop transpires less, so the projection is not
 as pessimistic as assuming full ETc throughout.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 
@@ -79,6 +79,15 @@ class StressProjector:
         hours_to_stress: float | None = None
         stress_date: date | None = None
 
+        # Already at/past the stress threshold: stress is not "in N hours", it's now.
+        # Anchor hours_to_stress at 0 up front so the forward loop's fraction math
+        # (gap = threshold - prev_depletion, negative here) can't produce a nonsensical
+        # large-negative "~-425h" projection.
+        already_stressed = taw_mm > 0 and current_depletion_mm >= stress_threshold_mm
+        if already_stressed:
+            hours_to_stress = 0.0
+            stress_date = today
+
         # Use the first available forecast ET0 as fallback for missing days
         fallback_et0 = next((e for e in forecast_et0 if e is not None), 4.0)
 
@@ -126,7 +135,9 @@ class StressProjector:
                 delta = depletion - prev_depletion
                 gap = stress_threshold_mm - prev_depletion
                 fraction = gap / delta if delta > 0 else 1.0
-                hours_to_stress = round((day_idx + fraction) * 24, 1)
+                # Clamp: a prior day already past threshold makes gap negative;
+                # stress is then "now", not a negative number of hours.
+                hours_to_stress = max(0.0, round((day_idx + fraction) * 24, 1))
 
         urgency = _classify_urgency(hours_to_stress)
         message_pt, message_en = _build_messages(urgency, hours_to_stress, stress_date)
@@ -161,6 +172,13 @@ def _build_messages(urgency: str, hours: float | None, stress_date: date | None)
         )
     h = round(hours) if hours is not None else "?"
     date_str = stress_date.strftime("%-d %b") if stress_date else ""
+    # Already at/past the threshold (hours clamped to 0): stress is present now, not
+    # "in ~0h" — avoids the nonsensical "~-425h" phrasing on already-depleted sectors.
+    if hours is not None and hours <= 0:
+        return (
+            "Stress hídrico já presente — recomenda-se rega imediata.",
+            "Water stress already present — irrigation recommended now.",
+        )
     if urgency == "high":
         return (
             f"Stress hídrico previsto em ~{h}h ({date_str}). Recomenda-se rega imediata.",
