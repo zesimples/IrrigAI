@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +17,9 @@ from app.schemas.crop_profile import (
     SectorCropProfileUpdate,
     SoilPresetOut,
 )
+from app.services.recommendation_service import generate_recommendation
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["crop-profiles"])
 
@@ -83,8 +88,12 @@ async def update_sector_crop_profile(
         setattr(profile, k, v)
     profile.is_customized = True
 
+    soil_bounds_changed = (
+        "field_capacity" in updates or "wilting_point" in updates or "soil_preset_id" in updates
+    )
+
     # Propagate soil changes to the Plot so the probe chart reference lines update
-    if "field_capacity" in updates or "wilting_point" in updates or "soil_preset_id" in updates:
+    if soil_bounds_changed:
         sector = await db.get(Sector, sector_id)
         if sector:
             plot = await db.get(Plot, sector.plot_id)
@@ -98,6 +107,22 @@ async def update_sector_crop_profile(
 
     await db.commit()
     await db.refresh(profile)
+
+    # Best-effort: regenerate the recommendation so depletion reflects the new
+    # soil bounds immediately instead of staying frozen until the next scheduled
+    # or manually-triggered run. The profile edit is already committed above, so
+    # a generation failure here must not fail the save.
+    if soil_bounds_changed:
+        try:
+            await generate_recommendation(sector_id, db)
+        except Exception:
+            logger.warning(
+                "Recommendation regeneration failed after crop-profile soil edit "
+                "for sector %s",
+                sector_id,
+                exc_info=True,
+            )
+
     return SectorCropProfileOut.model_validate(profile)
 
 
