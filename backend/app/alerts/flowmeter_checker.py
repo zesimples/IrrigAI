@@ -1,31 +1,26 @@
-# backend/app/alerts/flowmeter_checker.py
-"""Flowmeter deviation alert checker.
+"""Flowmeter irrigation-dose deviation checker.
 
-Detects sectors whose per-day water consumption deviates more than ±5%
-from the crop-average. Works directly on FlowmeterReading rows:
+The checker compares a sector's typical irrigation dose with comparable sectors
+of the same crop. It uses detected irrigation events rather than raw meter
+readings, so an irrigation crossing midnight is counted once and no artificial
+first/last-reading trimming is needed.
 
-  Sub-hourly flowmeters (median interval < HOURLY_THRESHOLD_MINUTES):
-    For each (flowmeter, calendar-day):
-      - Sort readings by timestamp
-      - Strip the first and last reading (partial valve-open/close intervals)
-      - Sum the interior readings → clean daily total
-      - Days with fewer than 3 readings are skipped (cannot form an interior)
-
-  Hourly flowmeters (median interval ≥ HOURLY_THRESHOLD_MINUTES):
-    Outlier stripping is skipped — with only ~1 reading/h there is no meaningful
-    spin-up noise to remove. All readings in each day are summed directly.
-
-  A sector needs at least MIN_INTERIOR_DAYS valid day-totals to be evaluated;
-  otherwise it is flagged as insufficient_data.
+For each sector, the typical dose is the median ``total_m3_ha`` of its events
+in the selected period. Its baseline is the leave-one-out median of the other
+evaluated sectors of the same crop. At least two events and two peers are
+required before a deviation is reported.
 """
+
 from __future__ import annotations
 
 import logging
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Literal
 
+from sqlalchemy import func as sql_func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,32 +29,20 @@ from app.models.alert import Alert
 
 logger = logging.getLogger(__name__)
 
-PERIOD_DAYS = 7
-DEVIATION_THRESHOLD_PCT = 5.0
-MIN_INTERIOR_DAYS = 2
+DEFAULT_PERIOD = "7d"
+MIN_EVENTS = 2
+MIN_PEER_SECTORS = 2
+INFO_DEVIATION_THRESHOLD_PCT = 5.0
+WARNING_DEVIATION_THRESHOLD_PCT = 15.0
 
-# Flowmeters whose median reading interval is at or above this value (minutes)
-# are treated as hourly — outlier stripping is skipped for them.
-_HOURLY_THRESHOLD_MINUTES: float = 45.0
-
-
-def _infer_median_interval(readings: list) -> float:
-    """Return the median gap (minutes) between consecutive readings.
-
-    Falls back to 15.0 if the interval cannot be determined (< 2 readings).
-    Readings must already be sorted by timestamp.
-    """
-    if len(readings) < 2:
-        return 15.0
-    gaps = sorted(
-        (readings[i + 1].timestamp - readings[i].timestamp).total_seconds() / 60
-        for i in range(len(readings) - 1)
-        if (readings[i + 1].timestamp - readings[i].timestamp).total_seconds() > 0
-    )
-    if not gaps:
-        return 15.0
-    mid = len(gaps) // 2
-    return gaps[mid] if len(gaps) % 2 == 1 else (gaps[mid - 1] + gaps[mid]) / 2
+DeviationPeriod = Literal["7d", "30d", "season"]
+DeviationStatus = Literal[
+    "normal",
+    "info",
+    "warning",
+    "insufficient_data",
+    "insufficient_peer_data",
+]
 
 
 @dataclass
@@ -67,14 +50,25 @@ class _SectorResult:
     sector_id: str
     sector_name: str
     crop_type: str
-    interior_days: list[float]   # per-day sums of interior readings (outliers stripped)
-    interior_avg: float | None   # mean of interior_days; None if < MIN_INTERIOR_DAYS
+    event_doses: list[float]
+    typical_dose: float | None
+
+
+@dataclass
+class _SectorDeviation:
+    sector: _SectorResult
+    status: DeviationStatus
+    peer_sector_count: int
+    crop_baseline: float | None = None
+    deviation_pct: float | None = None
+    absolute_delta_m3ha: float | None = None
 
 
 @dataclass
 class _ComputeResult:
     sector_results: list[_SectorResult]
     crop_averages: dict[str, float]
+    period_days: int
 
 
 def _alert(
@@ -103,218 +97,354 @@ def _alert(
 
 
 class FlowmeterAlertChecker:
-    """Check for flowmeter consumption deviations vs per-crop interior-reading averages."""
+    """Check typical irrigation-dose deviations against same-crop peers."""
 
     async def check(self, farm_id: str, db: AsyncSession) -> list[Alert]:
-        """Compute deviations and return Alert objects. Does NOT write to DB."""
-        result = await self._compute(farm_id, db)
+        """Compute the default 7-day deviations and return Alert objects.
+
+        This method is used by the scheduled alert engine. It does not write to
+        the database itself.
+        """
+        result = await self._compute(farm_id, db, DEFAULT_PERIOD)
         return self._build_alerts(result, farm_id)
 
-    async def compute_deviations(self, farm_id: str, db: AsyncSession):
-        """Compute deviations and return structured response for the frontend."""
+    async def compute_deviations(
+        self,
+        farm_id: str,
+        db: AsyncSession,
+        period: DeviationPeriod = DEFAULT_PERIOD,
+    ):
+        """Return all sector deviation states for the selected dashboard period."""
         from app.schemas.flowmeter import (
             FlowmeterDeviationSector,
             FlowmeterDeviationsResponse,
             FlowmeterInsufficientDataSector,
         )
-        result = await self._compute(farm_id, db)
-        deviating = []
-        insufficient_data = []
 
-        for sr in result.sector_results:
-            if sr.interior_avg is None:
-                insufficient_data.append(
-                    FlowmeterInsufficientDataSector(
-                        sector_id=sr.sector_id,
-                        sector_name=sr.sector_name,
-                        crop_type=sr.crop_type,
-                        interior_day_count=len(sr.interior_days),
-                    )
-                )
-                continue
-
-            crop_avg = result.crop_averages.get(sr.crop_type)
-            if crop_avg is None:
-                continue
-
-            deviation_pct = (sr.interior_avg - crop_avg) / crop_avg * 100
-            if abs(deviation_pct) > DEVIATION_THRESHOLD_PCT:
-                deviating.append(
-                    FlowmeterDeviationSector(
-                        sector_id=sr.sector_id,
-                        sector_name=sr.sector_name,
-                        crop_type=sr.crop_type,
-                        direction="above" if deviation_pct > 0 else "below",
-                        deviation_pct=round(deviation_pct, 1),
-                        sector_avg_m3ha=round(sr.interior_avg, 2),
-                        crop_avg_m3ha=round(crop_avg, 2),
-                        interior_day_count=len(sr.interior_days),
-                    )
-                )
+        result = await self._compute(farm_id, db, period)
+        evaluations = self._evaluate_sectors(result)
+        sectors = [
+            self._as_schema(evaluation, FlowmeterDeviationSector) for evaluation in evaluations
+        ]
+        deviating = [sector for sector in sectors if sector.status in {"info", "warning"}]
+        insufficient_data = [
+            FlowmeterInsufficientDataSector(
+                sector_id=evaluation.sector.sector_id,
+                sector_name=evaluation.sector.sector_name,
+                crop_type=evaluation.sector.crop_type,
+                event_count=len(evaluation.sector.event_doses),
+                reason=(
+                    "insufficient_events"
+                    if evaluation.status == "insufficient_data"
+                    else "insufficient_peers"
+                ),
+            )
+            for evaluation in evaluations
+            if evaluation.status in {"insufficient_data", "insufficient_peer_data"}
+        ]
 
         return FlowmeterDeviationsResponse(
-            period_days=PERIOD_DAYS,
+            period_days=result.period_days,
+            sectors=sectors,
             deviating=deviating,
             insufficient_data=insufficient_data,
             crop_averages={k: round(v, 2) for k, v in result.crop_averages.items()},
             evaluated_at=datetime.now(UTC),
         )
 
-    def _compute_from_data(self, pairs: list, all_readings: list) -> _ComputeResult:
-        """Compute interior day totals and crop means. Testable without DB.
+    @staticmethod
+    def _as_schema(evaluation: _SectorDeviation, schema_type):
+        sector = evaluation.sector
+        direction: Literal["above", "below"] | None = None
+        if evaluation.deviation_pct is not None and evaluation.deviation_pct != 0:
+            direction = "above" if evaluation.deviation_pct > 0 else "below"
+        return schema_type(
+            sector_id=sector.sector_id,
+            sector_name=sector.sector_name,
+            crop_type=sector.crop_type,
+            status=evaluation.status,
+            direction=direction,
+            deviation_pct=(
+                round(evaluation.deviation_pct, 1) if evaluation.deviation_pct is not None else None
+            ),
+            absolute_delta_m3ha=(
+                round(evaluation.absolute_delta_m3ha, 2)
+                if evaluation.absolute_delta_m3ha is not None
+                else None
+            ),
+            sector_avg_m3ha=(
+                round(sector.typical_dose, 2) if sector.typical_dose is not None else None
+            ),
+            crop_avg_m3ha=(
+                round(evaluation.crop_baseline, 2) if evaluation.crop_baseline is not None else None
+            ),
+            event_count=len(sector.event_doses),
+            peer_sector_count=evaluation.peer_sector_count,
+        )
 
-        Infers the reading interval per flowmeter from the full dataset and applies
-        different day-aggregation strategies:
-          - Sub-hourly (< HOURLY_THRESHOLD_MINUTES): strip first+last per day, need ≥3 readings.
-          - Hourly (≥ HOURLY_THRESHOLD_MINUTES): sum all readings per day, no stripping.
+    def _compute_from_events(
+        self,
+        pairs: list,
+        events: list,
+        period_days: int = 7,
+    ) -> _ComputeResult:
+        """Compute sector dose medians from pre-loaded detected events.
+
+        Kept independent of the database for deterministic regression tests.
         """
-        # Classify each flowmeter's interval from its full reading set.
-        all_fm_readings: dict[str, list] = defaultdict(list)
-        for r in all_readings:
-            all_fm_readings[str(r.flowmeter_id)].append(r)
-
-        fm_is_hourly: dict[str, bool] = {}
-        for fm_id, fm_readings in all_fm_readings.items():
-            sorted_all = sorted(fm_readings, key=lambda r: r.timestamp)
-            interval = _infer_median_interval(sorted_all)
-            fm_is_hourly[fm_id] = interval >= _HOURLY_THRESHOLD_MINUTES
-            logger.debug(
-                "flowmeter %s: median interval %.1f min → %s",
-                fm_id, interval, "hourly" if fm_is_hourly[fm_id] else "sub-hourly",
-            )
-
-        readings_by_fm_date: dict[tuple, list] = defaultdict(list)
-        for r in all_readings:
-            day = r.timestamp.astimezone(timezone.utc).date()
-            readings_by_fm_date[(str(r.flowmeter_id), day)].append(r)
-
-        day_totals_by_fm: dict[str, list[float]] = defaultdict(list)
-        for (fm_id, _day), day_readings in readings_by_fm_date.items():
-            sorted_day = sorted(day_readings, key=lambda r: r.timestamp)
-            if fm_is_hourly.get(fm_id, False):
-                # Hourly: no spin-up noise to strip — use all readings.
-                if sorted_day:
-                    day_totals_by_fm[fm_id].append(sum(r.value_m3_ha for r in sorted_day))
-            else:
-                # Sub-hourly: strip first+last; need ≥3 readings to have ≥1 interior.
-                if len(sorted_day) >= 3:
-                    interior = sorted_day[1:-1]
-                    day_totals_by_fm[fm_id].append(sum(r.value_m3_ha for r in interior))
+        event_doses_by_fm: dict[str, list[float]] = defaultdict(list)
+        for event in events:
+            if event.total_m3_ha > 0:
+                event_doses_by_fm[str(event.flowmeter_id)].append(event.total_m3_ha)
 
         sector_results: list[_SectorResult] = []
-        for fm, sector in pairs:
-            fm_id = str(fm.id)
-            day_totals = day_totals_by_fm.get(fm_id, [])
-            avg: float | None = (
-                statistics.mean(day_totals)
-                if len(day_totals) >= MIN_INTERIOR_DAYS
-                else None
+        for flowmeter, sector in pairs:
+            event_doses = event_doses_by_fm.get(str(flowmeter.id), [])
+            typical_dose = (
+                statistics.median(event_doses) if len(event_doses) >= MIN_EVENTS else None
             )
             sector_results.append(
                 _SectorResult(
                     sector_id=str(sector.id),
                     sector_name=sector.name,
                     crop_type=sector.crop_type or "unknown",
-                    interior_days=day_totals,
-                    interior_avg=avg,
+                    event_doses=event_doses,
+                    typical_dose=typical_dose,
                 )
             )
 
-        crop_avgs_raw: dict[str, list[float]] = defaultdict(list)
-        for sr in sector_results:
-            if sr.interior_avg is not None:
-                crop_avgs_raw[sr.crop_type].append(sr.interior_avg)
+        crop_values: dict[str, list[float]] = defaultdict(list)
+        for sector in sector_results:
+            if sector.typical_dose is not None:
+                crop_values[sector.crop_type].append(sector.typical_dose)
 
-        crop_averages = {
-            crop: statistics.mean(avgs)
-            for crop, avgs in crop_avgs_raw.items()
-            if avgs
-        }
-        return _ComputeResult(sector_results=sector_results, crop_averages=crop_averages)
+        return _ComputeResult(
+            sector_results=sector_results,
+            crop_averages={
+                crop: statistics.median(values) for crop, values in crop_values.items() if values
+            },
+            period_days=period_days,
+        )
+
+    def _evaluate_sectors(self, result: _ComputeResult) -> list[_SectorDeviation]:
+        """Build leave-one-out peer baselines and severity states."""
+        evaluated_by_crop: dict[str, list[_SectorResult]] = defaultdict(list)
+        for sector in result.sector_results:
+            if sector.typical_dose is not None:
+                evaluated_by_crop[sector.crop_type].append(sector)
+
+        evaluations: list[_SectorDeviation] = []
+        for sector in result.sector_results:
+            if sector.typical_dose is None:
+                evaluations.append(
+                    _SectorDeviation(
+                        sector=sector,
+                        status="insufficient_data",
+                        peer_sector_count=0,
+                    )
+                )
+                continue
+
+            peers = [
+                peer.typical_dose
+                for peer in evaluated_by_crop[sector.crop_type]
+                if peer.sector_id != sector.sector_id and peer.typical_dose is not None
+            ]
+            if len(peers) < MIN_PEER_SECTORS:
+                evaluations.append(
+                    _SectorDeviation(
+                        sector=sector,
+                        status="insufficient_peer_data",
+                        peer_sector_count=len(peers),
+                    )
+                )
+                continue
+
+            baseline = statistics.median(peers)
+            if baseline <= 0:
+                logger.warning(
+                    "Skipping deviation for sector %s because crop baseline is non-positive",
+                    sector.sector_id,
+                )
+                evaluations.append(
+                    _SectorDeviation(
+                        sector=sector,
+                        status="insufficient_peer_data",
+                        peer_sector_count=len(peers),
+                    )
+                )
+                continue
+
+            absolute_delta = sector.typical_dose - baseline
+            deviation_pct = absolute_delta / baseline * 100
+            magnitude = abs(deviation_pct)
+            status: DeviationStatus
+            if magnitude <= INFO_DEVIATION_THRESHOLD_PCT:
+                status = "normal"
+            elif magnitude <= WARNING_DEVIATION_THRESHOLD_PCT:
+                status = "info"
+            else:
+                status = "warning"
+
+            evaluations.append(
+                _SectorDeviation(
+                    sector=sector,
+                    status=status,
+                    peer_sector_count=len(peers),
+                    crop_baseline=baseline,
+                    deviation_pct=deviation_pct,
+                    absolute_delta_m3ha=absolute_delta,
+                )
+            )
+        return evaluations
 
     def _build_alerts(self, result: _ComputeResult, farm_id: str) -> list[Alert]:
         alerts: list[Alert] = []
-        for sr in result.sector_results:
-            if sr.interior_avg is None:
-                alerts.append(_alert(
-                    alert_type=AlertType.FLOWMETER_INSUFFICIENT_DATA,
-                    severity=AlertSeverity.INFO,
-                    title_pt=f"Dados insuficientes: {sr.sector_name}",
-                    title_en=f"Insufficient data: {sr.sector_name}",
+        for evaluation in self._evaluate_sectors(result):
+            sector = evaluation.sector
+            if evaluation.status == "insufficient_data":
+                alerts.append(
+                    _alert(
+                        alert_type=AlertType.FLOWMETER_INSUFFICIENT_DATA,
+                        severity=AlertSeverity.INFO,
+                        title_pt=f"Dados insuficientes: {sector.sector_name}",
+                        title_en=f"Insufficient data: {sector.sector_name}",
+                        description_pt=(
+                            f"{sector.sector_name} tem apenas {len(sector.event_doses)} rega(s) "
+                            f"detetada(s) nos últimos {result.period_days} dias. "
+                            f"São necessárias pelo menos {MIN_EVENTS} para avaliar a dotação."
+                        ),
+                        description_en=(
+                            f"{sector.sector_name} has only {len(sector.event_doses)} detected "
+                            f"irrigation event(s) in the last {result.period_days} days. "
+                            f"At least {MIN_EVENTS} are required to evaluate the dose."
+                        ),
+                        farm_id=farm_id,
+                        sector_id=sector.sector_id,
+                        data={
+                            "event_count": len(sector.event_doses),
+                            "period_days": result.period_days,
+                            "reason": "insufficient_events",
+                        },
+                    )
+                )
+                continue
+
+            if evaluation.status == "insufficient_peer_data":
+                alerts.append(
+                    _alert(
+                        alert_type=AlertType.FLOWMETER_INSUFFICIENT_DATA,
+                        severity=AlertSeverity.INFO,
+                        title_pt=f"Comparação indisponível: {sector.sector_name}",
+                        title_en=f"Comparison unavailable: {sector.sector_name}",
+                        description_pt=(
+                            f"{sector.sector_name} não tem pelo menos {MIN_PEER_SECTORS} sectores "
+                            "comparáveis da mesma cultura com dados suficientes."
+                        ),
+                        description_en=(
+                            f"{sector.sector_name} does not have at least {MIN_PEER_SECTORS} "
+                            "same-crop peer sectors with sufficient data."
+                        ),
+                        farm_id=farm_id,
+                        sector_id=sector.sector_id,
+                        data={
+                            "event_count": len(sector.event_doses),
+                            "peer_sector_count": evaluation.peer_sector_count,
+                            "period_days": result.period_days,
+                            "reason": "insufficient_peers",
+                        },
+                    )
+                )
+                continue
+
+            if evaluation.status == "normal":
+                continue
+
+            assert evaluation.deviation_pct is not None
+            assert evaluation.crop_baseline is not None
+            assert evaluation.absolute_delta_m3ha is not None
+            direction = "above" if evaluation.deviation_pct > 0 else "below"
+            direction_pt = "acima" if direction == "above" else "abaixo"
+            severity = AlertSeverity.INFO if evaluation.status == "info" else AlertSeverity.WARNING
+            alerts.append(
+                _alert(
+                    alert_type=AlertType.FLOWMETER_DEVIATION,
+                    severity=severity,
+                    title_pt=f"Desvio de dotação: {sector.sector_name}",
+                    title_en=f"Irrigation-dose deviation: {sector.sector_name}",
                     description_pt=(
-                        f"{sr.sector_name} tem apenas {len(sr.interior_days)} dia(s) "
-                        f"com leituras interiores nos últimos {PERIOD_DAYS} dias. "
-                        f"São necessários pelo menos {MIN_INTERIOR_DAYS} para avaliação."
+                        f"{sector.sector_name} aplica tipicamente {sector.typical_dose:.1f} m³/ha "
+                        f"por rega, {abs(evaluation.deviation_pct):.1f}% {direction_pt} da mediana "
+                        f"dos sectores comparáveis ({evaluation.crop_baseline:.1f} m³/ha; "
+                        f"diferença de {abs(evaluation.absolute_delta_m3ha):.1f} m³/ha)."
                     ),
                     description_en=(
-                        f"{sr.sector_name} has only {len(sr.interior_days)} day(s) "
-                        f"with interior readings in the last {PERIOD_DAYS} days. "
-                        f"At least {MIN_INTERIOR_DAYS} are required for evaluation."
+                        f"{sector.sector_name} typically applies {sector.typical_dose:.1f} m³/ha "
+                        f"per irrigation, {abs(evaluation.deviation_pct):.1f}% {direction} the peer "
+                        f"median ({evaluation.crop_baseline:.1f} m³/ha; "
+                        f"difference {abs(evaluation.absolute_delta_m3ha):.1f} m³/ha)."
                     ),
                     farm_id=farm_id,
-                    sector_id=sr.sector_id,
-                    data={"interior_day_count": len(sr.interior_days), "period_days": PERIOD_DAYS},
-                ))
-                continue
-
-            crop_avg = result.crop_averages.get(sr.crop_type)
-            if crop_avg is None:
-                continue
-
-            deviation_pct = (sr.interior_avg - crop_avg) / crop_avg * 100
-            if abs(deviation_pct) <= DEVIATION_THRESHOLD_PCT:
-                continue
-
-            direction = "above" if deviation_pct > 0 else "below"
-            direction_pt = "acima" if direction == "above" else "abaixo"
-            alerts.append(_alert(
-                alert_type=AlertType.FLOWMETER_DEVIATION,
-                severity=AlertSeverity.WARNING,
-                title_pt=f"Desvio de consumo: {sr.sector_name}",
-                title_en=f"Consumption deviation: {sr.sector_name}",
-                description_pt=(
-                    f"{sr.sector_name} aplica em média {sr.interior_avg:.1f} m³/ha por dia — "
-                    f"{abs(deviation_pct):.1f}% {direction_pt} da média da cultura "
-                    f"({crop_avg:.1f} m³/ha)."
-                ),
-                description_en=(
-                    f"{sr.sector_name} averages {sr.interior_avg:.1f} m³/ha per day — "
-                    f"{abs(deviation_pct):.1f}% {direction} the crop average ({crop_avg:.1f} m³/ha)."
-                ),
-                farm_id=farm_id,
-                sector_id=sr.sector_id,
-                data={
-                    "deviation_pct": round(deviation_pct, 1),
-                    "direction": direction,
-                    "sector_avg_m3ha": round(sr.interior_avg, 2),
-                    "crop_avg_m3ha": round(crop_avg, 2),
-                    "interior_day_count": len(sr.interior_days),
-                    "period_days": PERIOD_DAYS,
-                },
-            ))
+                    sector_id=sector.sector_id,
+                    data={
+                        "deviation_pct": round(evaluation.deviation_pct, 1),
+                        "absolute_delta_m3ha": round(evaluation.absolute_delta_m3ha, 2),
+                        "direction": direction,
+                        "sector_avg_m3ha": round(sector.typical_dose, 2),
+                        "crop_avg_m3ha": round(evaluation.crop_baseline, 2),
+                        "event_count": len(sector.event_doses),
+                        "peer_sector_count": evaluation.peer_sector_count,
+                        "period_days": result.period_days,
+                        "status": evaluation.status,
+                    },
+                )
+            )
         return alerts
 
-    async def _compute(self, farm_id: str, db: AsyncSession) -> _ComputeResult:
-        from app.models import Flowmeter, FlowmeterReading, Plot, Sector
+    async def _compute(
+        self,
+        farm_id: str,
+        db: AsyncSession,
+        period: DeviationPeriod,
+    ) -> _ComputeResult:
+        from app.models import Flowmeter, IrrigationEventDetected, Plot, Sector
+
         now = datetime.now(UTC)
-        since = now - timedelta(days=PERIOD_DAYS)
-        fm_result = await db.execute(
+        if period == "season":
+            first_event_result = await db.execute(
+                select(sql_func.min(IrrigationEventDetected.start_time))
+                .join(Flowmeter, IrrigationEventDetected.flowmeter_id == Flowmeter.id)
+                .join(Sector, Flowmeter.sector_id == Sector.id)
+                .join(Plot, Sector.plot_id == Plot.id)
+                .where(Plot.farm_id == farm_id, Flowmeter.is_active.is_(True))
+            )
+            since = first_event_result.scalar_one_or_none() or (now - timedelta(days=365))
+        else:
+            since = now - timedelta(days=7 if period == "7d" else 30)
+
+        period_days = max(1, (now.date() - since.date()).days)
+        flowmeters_result = await db.execute(
             select(Flowmeter, Sector)
             .join(Sector, Flowmeter.sector_id == Sector.id)
             .join(Plot, Sector.plot_id == Plot.id)
             .where(Plot.farm_id == farm_id, Flowmeter.is_active.is_(True))
         )
-        pairs = fm_result.all()
+        pairs = flowmeters_result.all()
         if not pairs:
-            return _ComputeResult(sector_results=[], crop_averages={})
-        fm_ids = [str(fm.id) for fm, _ in pairs]
-        readings_result = await db.execute(
-            select(FlowmeterReading)
+            return _ComputeResult(sector_results=[], crop_averages={}, period_days=period_days)
+
+        flowmeter_ids = [flowmeter.id for flowmeter, _ in pairs]
+        events_result = await db.execute(
+            select(IrrigationEventDetected)
             .where(
-                FlowmeterReading.flowmeter_id.in_(fm_ids),
-                FlowmeterReading.timestamp >= since,
+                IrrigationEventDetected.flowmeter_id.in_(flowmeter_ids),
+                IrrigationEventDetected.start_time >= since,
+                IrrigationEventDetected.start_time <= now,
             )
-            .order_by(FlowmeterReading.timestamp)
+            .order_by(IrrigationEventDetected.start_time)
         )
-        all_readings = readings_result.scalars().all()
-        return self._compute_from_data(pairs, all_readings)
+        return self._compute_from_events(
+            pairs,
+            events_result.scalars().all(),
+            period_days=period_days,
+        )

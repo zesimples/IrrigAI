@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { flowmeterApi } from "@/lib/api";
-import type { FlowmeterDashboardResponse, FlowmeterDeviationsResponse, FlowmeterFlowRateAlert, FlowmeterReferenceOut } from "@/types";
+import type { FlowmeterDashboardResponse, FlowmeterDeviationSector, FlowmeterDeviationsResponse, FlowmeterFlowRateAlert, FlowmeterReferenceOut } from "@/types";
 import { FlowmeterSectorTable } from "./FlowmeterSectorTable";
 import { FlowmeterAIAnalysis } from "./FlowmeterAIAnalysis";
 import { FlowmeterFlowRateAlerts } from "./FlowmeterFlowRateAlerts";
@@ -31,7 +31,7 @@ export function FlowmeterDashboard({ farmId }: Props) {
     setAlertsLoading(true);
     Promise.all([
       flowmeterApi.dashboard(farmId, period),
-      flowmeterApi.deviations(farmId),
+      flowmeterApi.deviations(farmId, period),
       flowmeterApi.getFarmReferences(farmId),
       flowmeterApi.getFlowRateAlerts(farmId),
     ])
@@ -59,13 +59,11 @@ export function FlowmeterDashboard({ farmId }: Props) {
     return { totalRegas, semDados, avgPerRega, almondTotal, oliveTotal, almondSectors, oliveSectors, almondPct, olivePct };
   }, [data]);
 
-  // Build sector_id → deviation_pct | null from the backend deviations response.
-  // Sectors in `deviating` carry a pre-computed deviation_pct; all others are null.
-  const deviationMap = useMemo((): Record<string, number | null> => {
+  // The deviations endpoint returns a state for every active flowmeter sector.
+  const deviationMap = useMemo((): Record<string, FlowmeterDeviationSector> => {
     if (!deviations || !data) return {};
-    const map: Record<string, number | null> = {};
-    for (const s of data.sectors) map[s.sector_id] = null;
-    for (const d of deviations.deviating) map[d.sector_id] = d.deviation_pct;
+    const map: Record<string, FlowmeterDeviationSector> = {};
+    for (const d of deviations.sectors) map[d.sector_id] = d;
     return map;
   }, [deviations, data]);
 

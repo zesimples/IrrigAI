@@ -63,7 +63,7 @@ export function FlowmeterDeviationWarnings({ farmId, embedded = false }: Props) 
       {data && !loading && totalIssues === 0 && (
         <p className="text-sm text-green-600 flex items-center gap-1.5">
           <span>✓</span>
-          <span>Consumo dentro do normal</span>
+          <span>Dotação dentro do normal</span>
         </p>
       )}
 
@@ -85,10 +85,10 @@ export function FlowmeterDeviationWarnings({ farmId, embedded = false }: Props) 
                   }
                 >
                   {s.direction === "above" ? "▲ +" : "▼ −"}
-                  {Math.abs(s.deviation_pct).toFixed(1)}%
+                  {Math.abs(s.deviation_pct ?? 0).toFixed(1)}%
                 </span>
                 <span className="text-ink-4">
-                  {s.sector_avg_m3ha.toFixed(1)} m³/ha
+                  {s.sector_avg_m3ha?.toFixed(1)} m³/ha/rega
                 </span>
               </div>
             </div>
@@ -107,7 +107,9 @@ export function FlowmeterDeviationWarnings({ farmId, embedded = false }: Props) 
             >
               <span className="text-ink-3 truncate mr-2">{s.sector_name}</span>
               <span className="text-ink-4 shrink-0">
-                {s.interior_day_count} dia{s.interior_day_count !== 1 ? "s" : ""} com leituras
+                {s.reason === "insufficient_events"
+                  ? `${s.event_count} rega${s.event_count !== 1 ? "s" : ""} detetada${s.event_count !== 1 ? "s" : ""}`
+                  : "sem sectores comparáveis"}
               </span>
             </div>
           ))}
@@ -150,7 +152,7 @@ export function FlowmeterDeviationWarnings({ farmId, embedded = false }: Props) 
         <div className="flex items-center gap-2">
           <span className="text-base">⚠️</span>
           <span className="text-sm font-semibold text-ink-1">
-            Desvios de Consumo — 7 dias
+            Desvios de Dotação — {data?.period_days ?? 7} dias
           </span>
           {!loading && data && totalIssues > 0 && (
             <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">

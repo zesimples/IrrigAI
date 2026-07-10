@@ -1,5 +1,6 @@
 # backend/app/api/v1/flowmeter.py
 """Flowmeter endpoints — sector-level readings/events and farm-level dashboard."""
+
 from __future__ import annotations
 
 import json as _json
@@ -58,7 +59,9 @@ def _build_farm_statistics(
         stopped_sectors=[s.sector_name for s in analytics.stopped_sectors],
         top_consumers=[f"{r.sector_name} ({r.value:.1f} m³/ha)" for r in analytics.top_consumers],
         trend=analytics.trend,
-        typical_start_hour=analytics.most_common_start_hour if analytics.start_hour_distribution else None,
+        typical_start_hour=analytics.most_common_start_hour
+        if analytics.start_hour_distribution
+        else None,
     )
 
 
@@ -231,10 +234,11 @@ async def get_flowmeter_dashboard(
     now = datetime.now(UTC)
 
     if period == "season":
-        # Start = first flowmeter reading for this farm
+        # Start = first detected irrigation event for this farm. Dashboard totals
+        # and deviation analysis both use these event records.
         first_ts_result = await db.execute(
-            select(sql_func.min(FlowmeterReading.timestamp))
-            .join(Flowmeter, FlowmeterReading.flowmeter_id == Flowmeter.id)
+            select(sql_func.min(IrrigationEventDetected.start_time))
+            .join(Flowmeter, IrrigationEventDetected.flowmeter_id == Flowmeter.id)
             .join(Sector, Flowmeter.sector_id == Sector.id)
             .join(Plot, Sector.plot_id == Plot.id)
             .where(Plot.farm_id == farm_id, Flowmeter.is_active.is_(True))
@@ -247,7 +251,6 @@ async def get_flowmeter_dashboard(
 
     period_start = since.date()
     period_end = now.date()
-    period_days = max(1, (period_end - period_start).days)
 
     # Load all flowmeters for this farm with sector info
     flowmeters_result = await db.execute(
@@ -262,45 +265,32 @@ async def get_flowmeter_dashboard(
     if not flowmeter_sector_pairs:
         raise HTTPException(404, detail="No flowmeters found for this farm")
 
-    # Build daily totals per flowmeter
-    daily_result = await db.execute(
-        select(
-            FlowmeterReading.flowmeter_id,
-            sql_func.date_trunc("day", FlowmeterReading.timestamp).label("day"),
-            sql_func.sum(FlowmeterReading.value_m3_ha).label("total"),
-        )
-        .where(
-            FlowmeterReading.flowmeter_id.in_([fm.id for fm, _ in flowmeter_sector_pairs]),
-            FlowmeterReading.timestamp >= since,
-            FlowmeterReading.timestamp <= now,
-        )
-        .group_by(FlowmeterReading.flowmeter_id, "day")
-    )
-    # {flowmeter_id: {date: total}}
-    daily_map: dict[str, dict[date, float]] = {}
-    for row in daily_result.all():
-        day_date = row.day.date() if hasattr(row.day, "date") else row.day
-        daily_map.setdefault(row.flowmeter_id, {})[day_date] = round(row.total or 0.0, 4)
-
-    # Latest event per flowmeter
-    latest_events_result = await db.execute(
+    # Use detected events as the source of truth for totals, event counts, and
+    # daily breakdowns. This preserves an irrigation event that crosses midnight
+    # as one operational unit instead of splitting it between calendar days.
+    events_result = await db.execute(
         select(IrrigationEventDetected)
         .where(
             IrrigationEventDetected.flowmeter_id.in_([fm.id for fm, _ in flowmeter_sector_pairs]),
             IrrigationEventDetected.start_time >= since,
+            IrrigationEventDetected.start_time <= now,
         )
         .order_by(IrrigationEventDetected.start_time.desc())
     )
-    all_events = latest_events_result.scalars().all()
-    # {flowmeter_id: [events]}
+    all_events = events_result.scalars().all()
+    daily_map: dict[str, dict[date, float]] = {}
     events_by_fm: dict[str, list[IrrigationEventDetected]] = {}
     for ev in all_events:
         events_by_fm.setdefault(ev.flowmeter_id, []).append(ev)
+        daily_totals = daily_map.setdefault(ev.flowmeter_id, {})
+        daily_totals[ev.date] = round(
+            daily_totals.get(ev.date, 0.0) + ev.total_m3_ha,
+            4,
+        )
 
     # Build inclusive date range from period_start to period_end
     date_range = [
-        period_start + timedelta(days=i)
-        for i in range((period_end - period_start).days + 1)
+        period_start + timedelta(days=i) for i in range((period_end - period_start).days + 1)
     ]
 
     sectors_out: list[FlowmeterSectorDashboard] = []
@@ -315,25 +305,28 @@ async def get_flowmeter_dashboard(
         crop = sector.crop_type
 
         farm_total += total
-        crop_data = by_crop.setdefault(crop, {"total_m3_ha": 0.0, "num_sectors": 0, "num_events": 0})
+        crop_data = by_crop.setdefault(
+            crop, {"total_m3_ha": 0.0, "num_sectors": 0, "num_events": 0}
+        )
         crop_data["total_m3_ha"] = round(crop_data["total_m3_ha"] + total, 4)
         crop_data["num_sectors"] += 1
         crop_data["num_events"] += len(fm_events)
 
-        sectors_out.append(FlowmeterSectorDashboard(
-            sector_id=sector.id,
-            sector_name=sector.name,
-            crop=crop,
-            has_flowmeter=True,
-            total_m3_ha=round(total, 4),
-            num_events=len(fm_events),
-            last_irrigation=last_event.start_time if last_event else None,
-            last_event_m3_ha=last_event.total_m3_ha if last_event else None,
-            daily_breakdown=[
-                SectorDailyBreakdown(date=d, m3_ha=fm_daily.get(d, 0.0))
-                for d in date_range
-            ],
-        ))
+        sectors_out.append(
+            FlowmeterSectorDashboard(
+                sector_id=sector.id,
+                sector_name=sector.name,
+                crop=crop,
+                has_flowmeter=True,
+                total_m3_ha=round(total, 4),
+                num_events=len(fm_events),
+                last_irrigation=last_event.start_time if last_event else None,
+                last_event_m3_ha=last_event.total_m3_ha if last_event else None,
+                daily_breakdown=[
+                    SectorDailyBreakdown(date=d, m3_ha=fm_daily.get(d, 0.0)) for d in date_range
+                ],
+            )
+        )
 
     return FlowmeterDashboardResponse(
         farm_name=farm.name,
@@ -384,7 +377,9 @@ async def farm_flowmeter_analysis(
 
     # Check cache for AI text
     if not body.force_refresh:
-        cached_text = await get_analysis_cache("farm", farm_id, body.period_days, language=body.language)
+        cached_text = await get_analysis_cache(
+            "farm", farm_id, body.period_days, language=body.language
+        )
         if cached_text:
             return FlowmeterAnalysisResponse(analysis=cached_text, statistics=stats)
 
@@ -407,7 +402,9 @@ async def farm_flowmeter_analysis(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"AI analysis failed: {exc}") from exc
 
-    await set_analysis_cache("farm", farm_id, body.period_days, language=body.language, value=analysis_text)
+    await set_analysis_cache(
+        "farm", farm_id, body.period_days, language=body.language, value=analysis_text
+    )
 
     return FlowmeterAnalysisResponse(analysis=analysis_text, statistics=stats)
 
@@ -444,7 +441,9 @@ async def sector_flowmeter_analysis(
     stats = _build_sector_statistics(sector_analytics)
 
     if not body.force_refresh:
-        cached_text = await get_analysis_cache("sector", sector_id, body.period_days, language=body.language)
+        cached_text = await get_analysis_cache(
+            "sector", sector_id, body.period_days, language=body.language
+        )
         if cached_text:
             return FlowmeterSectorAnalysisResponse(analysis=cached_text, statistics=stats)
 
@@ -491,7 +490,9 @@ async def sector_flowmeter_analysis(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"AI analysis failed: {exc}") from exc
 
-    await set_analysis_cache("sector", sector_id, body.period_days, language=body.language, value=analysis_text)
+    await set_analysis_cache(
+        "sector", sector_id, body.period_days, language=body.language, value=analysis_text
+    )
 
     return FlowmeterSectorAnalysisResponse(analysis=analysis_text, statistics=stats)
 
@@ -500,14 +501,16 @@ async def sector_flowmeter_analysis(
 async def get_flowmeter_deviations(
     farm_id: str,
     access: Access,
+    period: Literal["7d", "30d", "season"] = Query("7d"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return per-sector deviation summary vs crop interior-event averages (7-day window).
+    """Return per-sector irrigation-dose deviations for the selected period.
 
-    Pure computation — no LLM, no cache, no DB writes. Used by the inline
-    FlowmeterDeviationWarnings frontend component.
+    The comparison uses median detected-event doses and leave-one-out same-crop
+    peer medians. Pure computation — no LLM, cache, or DB writes.
     """
     await access.farm(farm_id)
 
     from app.alerts.flowmeter_checker import FlowmeterAlertChecker
-    return await FlowmeterAlertChecker().compute_deviations(farm_id, db)
+
+    return await FlowmeterAlertChecker().compute_deviations(farm_id, db, period)

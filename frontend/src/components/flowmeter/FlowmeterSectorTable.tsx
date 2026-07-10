@@ -1,8 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { FlowmeterSectorDashboard } from "@/types";
-import type { FlowmeterReferenceOut } from "@/types";
+import type { FlowmeterDeviationSector, FlowmeterReferenceOut, FlowmeterSectorDashboard } from "@/types";
 import { FlowmeterSectorRow } from "./FlowmeterSectorRow";
 
 type SortKey = "name" | "last_irrigation" | "total" | "events";
@@ -12,16 +11,14 @@ interface Props {
   sectors: FlowmeterSectorDashboard[];
   period: "7d" | "30d" | "season";
   farmId: string;
-  /** sector_id → deviation_pct (null = insufficient data). Computed server-side from interior event averages. */
-  deviationMap: Record<string, number | null>;
-  /** Per-crop interior event average (m³/ha). From the deviations endpoint. */
+  /** sector_id → complete irrigation-dose comparison state. */
+  deviationMap: Record<string, FlowmeterDeviationSector>;
+  /** Per-crop median irrigation dose (m³/ha/event). From the deviations endpoint. */
   cropAverages: Record<string, number>;
   /** sector_id → FlowmeterReferenceOut (null = not yet computed) */
   referenceMap?: Record<string, FlowmeterReferenceOut | null>;
   onRecompute?: (sectorId: string) => void;
 }
-
-const ALARM_THRESHOLD = 5;
 
 export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviationMap, cropAverages, referenceMap, onRecompute }: Props) {
   const [cropFilter, setCropFilter] = useState<CropFilter>("all");
@@ -49,8 +46,7 @@ export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviati
   // Alarm counts per group (for chip)
   function alarmCount(list: FlowmeterSectorDashboard[]) {
     return list.filter((s) => {
-      const d = deviationMap[s.sector_id];
-      return d != null && Math.abs(d) > ALARM_THRESHOLD;
+      return deviationMap[s.sector_id]?.status === "warning";
     }).length;
   }
 
@@ -96,7 +92,7 @@ export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviati
         </span>
         {avg && (
           <span style={{ fontFamily: 'var(--font-jetbrains, ui-monospace)', fontSize: 10, color: '#8a7f74', letterSpacing: '0.06em' }}>
-            · média/sector {avg} m³
+            · mediana/rega {avg} m³
           </span>
         )}
         {alarms > 0 && (
@@ -237,9 +233,9 @@ export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviati
               alignSelf: 'stretch',
             }}>
               <span style={{ width: 5, height: 5, borderRadius: 999, background: '#b84a2a', flexShrink: 0 }} />
-              <span style={{ color: '#2a2520', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.16em' }}>Desvio</span>
+              <span style={{ color: '#2a2520', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.16em' }}>Desvio dotação</span>
               <span
-                title="Alarme se o desvio face à média da cultura ultrapassar ±5%."
+                title={`Compara a mediana de dose por rega com a mediana dos sectores comparáveis da mesma cultura, excluindo o próprio sector. ${period === "season" ? "Campanha" : period} selecionado: 5–15% é para observar; acima de 15% é aviso.`}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -314,16 +310,16 @@ export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviati
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
               <span>
                 <span style={{ color: '#c9a34a', marginRight: 6 }}>●</span>
-                {noData} sector{noData !== 1 ? 'es' : ''} sem leituras nos últimos 7 dias — pode haver problema de comunicação.
+                {noData} sector{noData !== 1 ? 'es' : ''} sem regas detetadas no período selecionado — pode haver problema de comunicação.
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontStyle: 'normal', fontFamily: 'var(--font-dm-sans, system-ui)', fontSize: 11.5, color: '#5a5048' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                   <span style={{ width: 6, height: 6, borderRadius: 999, background: '#b84a2a' }} />
-                  <span>acima +5%</span>
+                  <span>observar 5–15%</span>
                 </span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                   <span style={{ width: 6, height: 6, borderRadius: 999, background: '#c9a34a' }} />
-                  <span>abaixo −5%</span>
+                  <span>aviso &gt;15%</span>
                 </span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                   <span style={{ width: 6, height: 6, borderRadius: 999, background: '#6b8f4e' }} />

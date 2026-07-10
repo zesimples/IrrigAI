@@ -3,30 +3,39 @@ import { DeviationMeter } from './DeviationMeter';
 
 interface DeviationCellProps {
   deviation: number | null;
+  status?: "normal" | "info" | "warning" | "insufficient_data" | "insufficient_peer_data";
   threshold?: number;
 }
 
-export function DeviationCell({ deviation, threshold = 5 }: DeviationCellProps) {
+export function DeviationCell({ deviation, status, threshold = 5 }: DeviationCellProps) {
   if (deviation == null) {
+    const label = status === "insufficient_data"
+      ? "sem regas"
+      : status === "insufficient_peer_data"
+        ? "sem pares"
+        : "—";
     return (
       <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
         <DeviationMeter pct={null} threshold={threshold} />
-        <span style={{ fontFamily: 'var(--font-fraunces)', fontStyle: 'italic', fontSize: 13, color: '#8a7f74', minWidth: 46, textAlign: 'right' }}>—</span>
+        <span style={{ fontFamily: 'var(--font-fraunces)', fontStyle: 'italic', fontSize: 12, color: '#8a7f74', minWidth: 54, textAlign: 'right' }}>{label}</span>
       </div>
     );
   }
 
   const abs = Math.abs(deviation);
-  const isAlarm = abs > threshold;
+  const isWarning = status === "warning";
+  const isInfo = status === "info";
   const above = deviation > 0;
+  const sign = abs < 0.05 ? "" : above ? "+" : "−";
 
-  if (!isAlarm) {
+  if (!isWarning) {
+    const tone = isInfo ? '#c9a34a' : '#6b8f4e';
     return (
       <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-        <DeviationMeter pct={deviation} threshold={threshold} tone="#6b8f4e" />
+        <DeviationMeter pct={deviation} threshold={threshold} tone={tone} />
         <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 3, minWidth: 54, justifyContent: 'flex-end' }}>
-          <span style={{ fontFamily: 'var(--font-fraunces)', fontSize: 15, fontWeight: 500, color: '#5a5048', letterSpacing: '-0.01em' }}>
-            {above ? '+' : '−'}{abs.toFixed(1)}
+          <span style={{ fontFamily: 'var(--font-fraunces)', fontSize: 15, fontWeight: 500, color: isInfo ? tone : '#5a5048', letterSpacing: '-0.01em' }}>
+            {sign}{abs.toFixed(1)}
           </span>
           <span style={{ fontFamily: 'var(--font-jetbrains, ui-monospace)', fontSize: 10, color: '#8a7f74' }}>%</span>
         </span>
@@ -63,7 +72,7 @@ export function DeviationCell({ deviation, threshold = 5 }: DeviationCellProps) 
         }} />
         <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 2 }}>
           <span style={{ fontFamily: 'var(--font-fraunces)', fontSize: 17, fontWeight: 600, color: tone, letterSpacing: '-0.015em', lineHeight: 1 }}>
-            {above ? '+' : '−'}{abs.toFixed(1)}
+            {sign}{abs.toFixed(1)}
           </span>
           <span style={{ fontFamily: 'var(--font-jetbrains, ui-monospace)', fontSize: 10.5, color: tone, fontWeight: 600 }}>%</span>
         </span>

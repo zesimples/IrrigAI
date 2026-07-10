@@ -89,6 +89,7 @@ class FlowmeterDashboardResponse(BaseModel):
 
 # ── AI Analysis schemas ──────────────────────────────────────────────────────
 
+
 class FlowmeterAnalysisRequest(BaseModel):
     period_days: int = Field(default=7, ge=1, le=365)
     language: str = "pt"
@@ -136,35 +137,52 @@ class FlowmeterSectorAnalysisResponse(BaseModel):
     statistics: FlowmeterSectorStatistics
 
 
-# ── Deviation alarm schemas ───────────────────────────────────────────────────
+# ── Irrigation-dose deviation schemas ────────────────────────────────────────
+
 
 class FlowmeterDeviationSector(BaseModel):
+    """A sector's irrigation-dose comparison for the selected period."""
+
     sector_id: str
     sector_name: str
     crop_type: str
-    direction: Literal["above", "below"]
-    deviation_pct: float
-    sector_avg_m3ha: float
-    crop_avg_m3ha: float
-    interior_day_count: int   # days with interior 15-min readings (first+last reading stripped per day)
+    status: Literal[
+        "normal",
+        "info",
+        "warning",
+        "insufficient_data",
+        "insufficient_peer_data",
+    ]
+    direction: Literal["above", "below"] | None
+    deviation_pct: float | None
+    absolute_delta_m3ha: float | None
+    sector_avg_m3ha: float | None  # median m³/ha per irrigation event
+    crop_avg_m3ha: float | None  # leave-one-out median of same-crop peers
+    event_count: int
+    peer_sector_count: int
 
 
 class FlowmeterInsufficientDataSector(BaseModel):
+    """Legacy summary entry for sectors that cannot be compared."""
+
     sector_id: str
     sector_name: str
     crop_type: str
-    interior_day_count: int   # days with interior 15-min readings (first+last reading stripped per day)
+    event_count: int
+    reason: Literal["insufficient_events", "insufficient_peers"]
 
 
 class FlowmeterDeviationsResponse(BaseModel):
     period_days: int
-    deviating: list[FlowmeterDeviationSector]
+    sectors: list[FlowmeterDeviationSector]  # every active flowmeter sector
+    deviating: list[FlowmeterDeviationSector]  # informational and warning deviations
     insufficient_data: list[FlowmeterInsufficientDataSector]
-    crop_averages: dict[str, float]   # crop_type → mean of sector interior-day averages (m³/ha/day)
+    crop_averages: dict[str, float]  # crop_type → median sector irrigation dose (m³/ha/event)
     evaluated_at: datetime
 
 
 # ── Flow rate reference schemas ───────────────────────────────────────────────
+
 
 class FlowmeterReferenceOut(BaseModel):
     id: str

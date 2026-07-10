@@ -855,22 +855,27 @@ export interface FlowmeterDeviationSector {
   sector_id: string;
   sector_name: string;
   crop_type: string;
-  direction: "above" | "below";
-  deviation_pct: number;
-  sector_avg_m3ha: number;
-  crop_avg_m3ha: number;
-  interior_day_count: number;
+  status: "normal" | "info" | "warning" | "insufficient_data" | "insufficient_peer_data";
+  direction: "above" | "below" | null;
+  deviation_pct: number | null;
+  absolute_delta_m3ha: number | null;
+  sector_avg_m3ha: number | null;
+  crop_avg_m3ha: number | null;
+  event_count: number;
+  peer_sector_count: number;
 }
 
 export interface FlowmeterInsufficientDataSector {
   sector_id: string;
   sector_name: string;
   crop_type: string;
-  interior_day_count: number;
+  event_count: number;
+  reason: "insufficient_events" | "insufficient_peers";
 }
 
 export interface FlowmeterDeviationsResponse {
   period_days: number;
+  sectors: FlowmeterDeviationSector[];
   deviating: FlowmeterDeviationSector[];
   insufficient_data: FlowmeterInsufficientDataSector[];
   crop_averages: Record<string, number>;

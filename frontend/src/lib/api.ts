@@ -430,8 +430,10 @@ export const flowmeterApi = {
     params,
   ),
 
-  deviations: (farmId: string) =>
-    get<FlowmeterDeviationsResponse>(`/farms/${farmId}/flowmeter-deviations`),
+  deviations: (farmId: string, period: "7d" | "30d" | "season" = "7d") =>
+    get<FlowmeterDeviationsResponse>(
+      `/farms/${farmId}/flowmeter-deviations?period=${period}`,
+    ),
 
   getReference: (sectorId: string) =>
     get<FlowmeterReferenceOut>(`/sectors/${sectorId}/flowmeter-reference`),

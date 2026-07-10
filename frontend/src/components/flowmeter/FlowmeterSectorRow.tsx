@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { FlowmeterSectorDashboard } from "@/types";
+import type { FlowmeterDeviationSector, FlowmeterSectorDashboard } from "@/types";
 import { FlowmeterSparkline } from "./FlowmeterSparkline";
 import { FlowmeterSectorDetail } from "./FlowmeterSectorDetail";
 import { DeviationCell } from "./DeviationCell";
@@ -11,7 +11,7 @@ import type { FlowmeterReferenceOut } from "@/types";
 interface Props {
   sector: FlowmeterSectorDashboard;
   period: "7d" | "30d" | "season";
-  deviation: number | null;   // pre-computed % vs crop avg; null = no data
+  deviation: FlowmeterDeviationSector | null;
   odd?: boolean;
   reference?: FlowmeterReferenceOut | null;
   onRecompute?: (sectorId: string) => void;
@@ -25,13 +25,11 @@ function relativeDate(iso: string | null): string {
   return `há ${daysAgo} dias`;
 }
 
-const ALARM_THRESHOLD = 5;
-
 export function FlowmeterSectorRow({ sector, period, deviation, reference, onRecompute, odd }: Props) {
   const [expanded, setExpanded] = useState(false);
   const hasData = sector.num_events > 0;
-  const isAlarm = deviation != null && Math.abs(deviation) > ALARM_THRESHOLD;
-  const above = deviation != null && deviation > 0;
+  const isAlarm = deviation?.status === "warning";
+  const above = deviation?.direction === "above";
 
   return (
     <>
@@ -139,7 +137,6 @@ export function FlowmeterSectorRow({ sector, period, deviation, reference, onRec
         <div style={{ paddingLeft: 8 }}>
           <FlowmeterReferenceStatusDot
             reference={reference}
-            latestDeviationPct={deviation}
             sectorId={sector.sector_id}
             onRecompute={onRecompute}
           />
@@ -159,7 +156,7 @@ export function FlowmeterSectorRow({ sector, period, deviation, reference, onRec
             zIndex: 1,
           }}
         >
-          <DeviationCell deviation={deviation} threshold={ALARM_THRESHOLD} />
+          <DeviationCell deviation={deviation?.deviation_pct ?? null} status={deviation?.status} />
         </div>
       </div>
 
