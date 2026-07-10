@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import type { SectorSummary } from "@/types";
 import { CROP_LABELS } from "@/lib/cropConfig";
@@ -10,6 +10,8 @@ import { EditorialSectorCard } from "./SectorCard";
 interface SectorGridProps {
   sectors: SectorSummary[];
   farmId: string;
+  /** Fired with the active plot_id when tabbing by plot, null in crop tab mode. */
+  onPlotChange?: (plotId: string | null) => void;
 }
 
 function sortSectors(list: SectorSummary[]): SectorSummary[] {
@@ -24,7 +26,7 @@ function sortSectors(list: SectorSummary[]): SectorSummary[] {
   });
 }
 
-export function SectorGrid({ sectors, farmId }: SectorGridProps) {
+export function SectorGrid({ sectors, farmId, onPlotChange }: SectorGridProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -60,6 +62,10 @@ export function SectorGrid({ sectors, farmId }: SectorGridProps) {
   })();
   const [activeTab, setActiveTab] = useState<string | null>(initialTab);
   const currentTab = activeTab && tabs.some((t) => t.key === activeTab) ? activeTab : tabs[0]?.key ?? null;
+
+  useEffect(() => {
+    onPlotChange?.(tabMode === "plot" ? currentTab : null);
+  }, [currentTab, tabMode, onPlotChange]);
 
   const tabSectors = useMemo(() => {
     const filtered = sectors.filter((s) => {

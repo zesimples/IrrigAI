@@ -48,6 +48,10 @@ _FARM_SUBTREE_DELETES = (
     "DELETE FROM probe WHERE sector_id IN (SELECT s.id FROM sector s "
     "JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",
     "DELETE FROM sector WHERE plot_id IN (SELECT id FROM plot WHERE farm_id=:fid)",
+    # Weather rows may reference plots (plot_id FK has no ON DELETE rule), so
+    # they must go before the plots.
+    "DELETE FROM weather_forecast WHERE farm_id=:fid",
+    "DELETE FROM weather_observation WHERE farm_id=:fid",
     "DELETE FROM plot WHERE farm_id=:fid",
     "DELETE FROM farm WHERE id=:fid",
 )

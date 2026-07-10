@@ -38,31 +38,18 @@ from app.schemas.dashboard import (
 router = APIRouter(tags=["dashboard"])
 
 
-@router.get("/farms/{farm_id}/dashboard", response_model=DashboardResponse)
-async def get_dashboard(farm_id: str, access: Access, db: AsyncSession = Depends(get_db)):
-    farm = await access.farm(farm_id)
+def _build_weather_today(
+    farm_lat: float | None,
+    latest_obs: WeatherObservation | None,
+    forecasts: list[WeatherForecast],
+    today,
+) -> WeatherToday:
+    """Assemble a WeatherToday card from one observation + up-to-2 forecast rows.
 
-    today = datetime.now(UTC).date()
-
-    # --- Weather ---
-    latest_obs = (
-        await db.execute(
-            select(WeatherObservation)
-            .where(WeatherObservation.farm_id == farm_id)
-            .order_by(WeatherObservation.timestamp.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-
-    forecasts = (
-        await db.execute(
-            select(WeatherForecast)
-            .where(WeatherForecast.farm_id == farm_id)
-            .order_by(WeatherForecast.forecast_date)
-            .limit(2)
-        )
-    ).scalars().all()
-
+    Observation-less inputs (a plot with no station, e.g. a forecast-only polo)
+    fall back to the nearest forecast row for temperature/humidity/wind so the
+    card shows that plot's own forecast rather than another station's readings.
+    """
     rain_48h = sum((f.rainfall_mm or 0.0) for f in forecasts[:2])
     rain_prob = forecasts[0].rainfall_probability_pct if forecasts else None
 
@@ -91,19 +78,107 @@ async def get_dashboard(farm_id: str, access: Access, db: AsyncSession = Depends
             wind_ms=latest_obs.wind_speed_ms,
             solar_mjm2=latest_obs.solar_radiation_mjm2,
         )
-        lat = farm.location_lat or 38.5  # Alentejo default
-        et0_today, _ = compute_et0(dw, lat)
+        et0_today, _ = compute_et0(dw, farm_lat or 38.5)  # Alentejo default lat
 
-    weather_today = WeatherToday(
+    fc0 = forecasts[0] if latest_obs is None and forecasts else None
+    t_max = latest_obs.temperature_max_c if latest_obs else (fc0.temperature_max_c if fc0 else None)
+    t_min = latest_obs.temperature_min_c if latest_obs else (fc0.temperature_min_c if fc0 else None)
+    humidity = latest_obs.humidity_pct if latest_obs else (fc0.humidity_pct if fc0 else None)
+    wind_ms = latest_obs.wind_speed_ms if latest_obs else (fc0.wind_speed_ms if fc0 else None)
+
+    return WeatherToday(
         et0_mm=et0_today,
-        temperature_max_c=latest_obs.temperature_max_c if latest_obs else None,
-        temperature_min_c=latest_obs.temperature_min_c if latest_obs else None,
+        temperature_max_c=t_max,
+        temperature_min_c=t_min,
         rainfall_mm=latest_obs.rainfall_mm if latest_obs else None,
         forecast_rain_next_48h_mm=rain_48h,
         forecast_rain_probability=rain_prob,
-        humidity_pct=latest_obs.humidity_pct if latest_obs else None,
-        wind_speed_kmh=round(latest_obs.wind_speed_ms * 3.6, 1) if latest_obs and latest_obs.wind_speed_ms else None,
+        humidity_pct=humidity,
+        wind_speed_kmh=round(wind_ms * 3.6, 1) if wind_ms else None,
     )
+
+
+@router.get("/farms/{farm_id}/dashboard", response_model=DashboardResponse)
+async def get_dashboard(farm_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    farm = await access.farm(farm_id)
+
+    today = datetime.now(UTC).date()
+
+    # --- Weather (farm-level: latest row regardless of plot scope) ---
+    latest_obs = (
+        await db.execute(
+            select(WeatherObservation)
+            .where(WeatherObservation.farm_id == farm_id)
+            .order_by(WeatherObservation.timestamp.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    forecasts = (
+        await db.execute(
+            select(WeatherForecast)
+            .where(WeatherForecast.farm_id == farm_id)
+            .order_by(WeatherForecast.forecast_date)
+            .limit(2)
+        )
+    ).scalars().all()
+
+    weather_today = _build_weather_today(farm.location_lat, latest_obs, list(forecasts), today)
+
+    # --- Per-plot weather (plots with their own station/forecast, e.g. Innoliva) ---
+    plot_ids_with_weather = {
+        pid
+        for pid in (
+            await db.execute(
+                select(WeatherObservation.plot_id)
+                .where(
+                    WeatherObservation.farm_id == farm_id,
+                    WeatherObservation.plot_id.is_not(None),
+                )
+                .distinct()
+            )
+        ).scalars()
+    } | {
+        pid
+        for pid in (
+            await db.execute(
+                select(WeatherForecast.plot_id)
+                .where(
+                    WeatherForecast.farm_id == farm_id,
+                    WeatherForecast.plot_id.is_not(None),
+                )
+                .distinct()
+            )
+        ).scalars()
+    }
+
+    weather_by_plot: dict[str, WeatherToday] = {}
+    for pid in plot_ids_with_weather:
+        obs_p = (
+            await db.execute(
+                select(WeatherObservation)
+                .where(
+                    WeatherObservation.farm_id == farm_id,
+                    WeatherObservation.plot_id == pid,
+                )
+                .order_by(WeatherObservation.timestamp.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        forecasts_p = (
+            await db.execute(
+                select(WeatherForecast)
+                .where(
+                    WeatherForecast.farm_id == farm_id,
+                    WeatherForecast.plot_id == pid,
+                )
+                .order_by(WeatherForecast.forecast_date)
+                .limit(2)
+            )
+        ).scalars().all()
+        weather_by_plot[pid] = _build_weather_today(
+            farm.location_lat, obs_p, list(forecasts_p), today
+        )
 
     # --- Load all sectors for this farm ---
     plots = (
@@ -289,6 +364,7 @@ async def get_dashboard(farm_id: str, access: Access, db: AsyncSession = Depends
         farm=FarmOut(id=farm.id, name=farm.name, region=farm.region),
         date=today,
         weather_today=weather_today,
+        weather_by_plot=weather_by_plot,
         sectors_summary=sector_summaries,
         active_alerts_count=AlertCounts(
             critical=all_alerts_critical,

@@ -66,6 +66,33 @@ describe("Lede", () => {
     expect(screen.getByText(/Prioridade aos sectores em défice/)).toBeInTheDocument();
   });
 
+  it("shows the polo name in the Boletim header when the weather is plot-scoped", () => {
+    render(
+      <Lede
+        farmName="Innoliva"
+        region="Alentejo"
+        weather={weather}
+        plotName="Fátima"
+        sectors={[sector({ sector_id: "sector-1" })]}
+      />,
+    );
+
+    expect(screen.getByText(/Boletim · hoje · Fátima/)).toBeInTheDocument();
+  });
+
+  it("shows the plain Boletim header when no plot-scoped weather applies", () => {
+    render(
+      <Lede
+        farmName="Conqueiros"
+        region="Leiria"
+        weather={weather}
+        sectors={[sector({ sector_id: "sector-1" })]}
+      />,
+    );
+
+    expect(screen.getByText("Boletim · hoje")).toBeInTheDocument();
+  });
+
   it("speaks the reforcada band, not the legacy irrigate action, for a pre-feature (dose_band null) recommendation", () => {
     render(
       <Lede

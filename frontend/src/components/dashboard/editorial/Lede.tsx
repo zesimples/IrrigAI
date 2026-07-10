@@ -7,6 +7,8 @@ interface LedeProps {
   region: string | null;
   sectors: SectorSummary[];
   weather: WeatherToday;
+  /** Polo/plot name when `weather` is plot-scoped — shown in the Boletim header. */
+  plotName?: string | null;
 }
 
 /** Same voice as the home page: only the "reforcada" band counts as needing rega hoje. */
@@ -82,7 +84,7 @@ function buildSubtext(sectors: SectorSummary[], weather: WeatherToday): string {
   return [et0, rain48, urgentCrop].filter(Boolean).join(". ").replace(/\.\./g, ".");
 }
 
-export function Lede({ farmName, region, sectors, weather }: LedeProps) {
+export function Lede({ farmName, region, sectors, weather, plotName }: LedeProps) {
   const { main, italic } = buildHeadline(sectors);
   const subtext = buildSubtext(sectors, weather);
 
@@ -121,7 +123,7 @@ export function Lede({ farmName, region, sectors, weather }: LedeProps) {
         {/* Boletim */}
         <aside className="bg-card border border-rule-soft rounded-md p-4">
           <p className="font-mono text-[10px] tracking-[0.16em] uppercase text-ink-3 mb-3">
-            Boletim · hoje
+            Boletim · hoje{plotName ? ` · ${plotName}` : ""}
           </p>
           <div className="grid grid-cols-2 gap-x-5 gap-y-3.5">
             {boletimRows.map(([label, value]) => (

@@ -66,6 +66,10 @@ class DashboardResponse(BaseModel):
     farm: FarmOut
     date: date
     weather_today: WeatherToday
+    # Plot-scoped weather, keyed by plot_id — only for plots that have their own
+    # weather rows (per-plot stations, e.g. Innoliva's polos). Empty for farms
+    # with a single farm-level station.
+    weather_by_plot: dict[str, WeatherToday] = {}
     sectors_summary: list[SectorSummary]
     active_alerts_count: AlertCounts
     missing_data_prompts: list[str]

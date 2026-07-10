@@ -16,6 +16,7 @@ import { SectorGrid } from "@/components/dashboard/editorial/SectorGrid";
 import type { ProviderSyncStatus } from "@/types";
 import { FarmTabBar } from "@/components/ui/FarmTabBar";
 import { legacyDoseBand } from "@/lib/dose";
+import { resolvePlotWeather } from "@/lib/weather";
 
 interface Props {
   params: { farmId: string };
@@ -74,6 +75,7 @@ export default function FarmDashboardPage({ params }: Props) {
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [activePlotId, setActivePlotId] = useState<string | null>(null);
 
   async function generateAll() {
     setGenerating(true);
@@ -133,6 +135,17 @@ export default function FarmDashboardPage({ params }: Props) {
   ).length;
   const noAction = data.sectors_summary.length - toIrrigate;
 
+  // Boletim follows the active plot tab when that plot has its own weather
+  // station (Innoliva polos); single-station farms keep the farm-level card.
+  const { weather, plotScoped } = resolvePlotWeather(
+    data.weather_today,
+    data.weather_by_plot,
+    activePlotId
+  );
+  const activePlotName = plotScoped
+    ? data.sectors_summary.find((s) => s.plot_id === activePlotId)?.plot_name ?? null
+    : null;
+
   return (
     <div className="min-h-screen bg-paper pb-20 sm:pb-8">
       <AppHeader
@@ -186,7 +199,8 @@ export default function FarmDashboardPage({ params }: Props) {
         farmName={data.farm.name}
         region={data.farm.region}
         sectors={data.sectors_summary}
-        weather={data.weather_today}
+        weather={weather}
+        plotName={activePlotName}
       />
 
       {/* Numeric strip is inside Lede's wrapper padding area */}
@@ -195,7 +209,7 @@ export default function FarmDashboardPage({ params }: Props) {
           totalSectors={data.sectors_summary.length}
           toIrrigate={toIrrigate}
           noAction={noAction}
-          forecastRain48h={data.weather_today.forecast_rain_next_48h_mm}
+          forecastRain48h={weather.forecast_rain_next_48h_mm}
         />
       </div>
 
@@ -205,7 +219,7 @@ export default function FarmDashboardPage({ params }: Props) {
 
       {/* Sector grid with tabs */}
       {data.sectors_summary.length > 0 ? (
-        <SectorGrid sectors={data.sectors_summary} farmId={farmId} />
+        <SectorGrid sectors={data.sectors_summary} farmId={farmId} onPlotChange={setActivePlotId} />
       ) : (
         <div className="mx-4 mt-8 sm:mx-8 rounded-md border border-dashed border-rule px-6 py-12 text-center">
           <p className="font-serif text-[18px] text-ink-2">Sem sectores configurados.</p>

@@ -522,6 +522,8 @@ export interface DashboardResponse {
   farm: DashboardFarm;
   date: string;
   weather_today: WeatherToday;
+  /** Plot-scoped weather keyed by plot_id — only plots with their own station/forecast. */
+  weather_by_plot?: Record<string, WeatherToday>;
   sectors_summary: SectorSummary[];
   active_alerts_count: AlertCounts;
   missing_data_prompts: string[];
