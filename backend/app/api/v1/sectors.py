@@ -90,6 +90,10 @@ async def get_sector_status(sector_id: str, access: Access, db: AsyncSession = D
 
     now = datetime.now(UTC)
 
+    plot_name = (
+        await db.execute(select(Plot.name).where(Plot.id == sector.plot_id))
+    ).scalar_one_or_none()
+
     # Latest recommendation
     latest_rec = (
         await db.execute(
@@ -197,6 +201,8 @@ async def get_sector_status(sector_id: str, access: Access, db: AsyncSession = D
         sector_name=sector.name,
         crop_type=sector.crop_type,
         current_stage=sector.current_phenological_stage,
+        plot_id=sector.plot_id,
+        plot_name=plot_name,
         swc_current=swc_current,
         swc_source=swc_source,
         depletion_pct=depletion_pct,

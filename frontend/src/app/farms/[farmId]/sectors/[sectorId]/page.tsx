@@ -237,6 +237,14 @@ export default function SectorDetailPage({ params }: Props) {
         crumbs={[
           { label: "Exploração", href: `/farms/${farmId}` },
           { label: cropLabel, href: `/farms/${farmId}?crop=${status.crop_type}` },
+          // Plot level (e.g. Innoliva's polos). ?plot= matches SectorGrid's tab
+          // param on single-crop farms; on crop-tabbed farms it's ignored.
+          ...(status.plot_name
+            ? [{
+                label: status.plot_name,
+                href: `/farms/${farmId}${status.plot_id ? `?plot=${status.plot_id}` : ""}`,
+              }]
+            : []),
           { label: status.sector_name },
         ]}
         right={

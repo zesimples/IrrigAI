@@ -95,6 +95,10 @@ class SectorStatus(BaseModel):
     crop_type: str
     current_stage: str | None = None
 
+    # Parent plot (breadcrumb: Exploração / crop / plot / sector)
+    plot_id: str | None = None
+    plot_name: str | None = None
+
     # Rootzone
     swc_current: float | None = None
     swc_source: str | None = None

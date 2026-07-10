@@ -134,6 +134,8 @@ export interface SectorStatus {
   sector_name: string;
   crop_type: string;
   current_stage: string | null;
+  plot_id: string | null;
+  plot_name: string | null;
   swc_current: number | null;
   swc_source: string | null;
   depletion_pct: number | null;

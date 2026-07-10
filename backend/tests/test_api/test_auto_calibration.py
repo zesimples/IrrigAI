@@ -279,6 +279,21 @@ async def test_status_calibration_available_true_for_vwc(
 
 
 @pytest.mark.asyncio
+async def test_status_includes_plot_fields(
+    client: AsyncClient, calibratable_sector, db: AsyncSession
+):
+    """Status carries the sector's plot id + name (breadcrumb needs them)."""
+    resp = await client.get(f"/api/v1/sectors/{calibratable_sector}/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    sector = (
+        await db.execute(select(Sector).where(Sector.id == calibratable_sector))
+    ).scalar_one()
+    assert body["plot_id"] == sector.plot_id
+    assert body["plot_name"] == "P"
+
+
+@pytest.mark.asyncio
 async def test_status_calibration_available_false_for_tension(
     client: AsyncClient, tension_sector
 ):
