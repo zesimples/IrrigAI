@@ -34,6 +34,28 @@ export function countLiveDepths(depths: DepthReadings[]): number {
   return depths.filter((d) => d.readings.length > 0).length;
 }
 
+/** Sum one reference bound (CC or PMP) across live depths.
+ *
+ * Prefers each depth's own observed envelope (per-layer bounds from the
+ * backend); falls back to the sector-resolved per-depth value for depths
+ * without one. Dead depths (no readings) don't count at all. Returns null
+ * when a live depth has no envelope and there is no fallback. */
+export function sumReferenceBound(
+  depths: DepthReadings[],
+  perDepth: (d: DepthReadings) => number | null | undefined,
+  fallback: number | null | undefined,
+): number | null {
+  const live = depths.filter((d) => d.readings.length > 0);
+  if (live.length === 0) return null;
+  let total = 0;
+  for (const d of live) {
+    const v = perDepth(d) ?? fallback;
+    if (v == null) return null;
+    total += v;
+  }
+  return total * 100;
+}
+
 export function buildSumData(depths: DepthReadings[]) {
   const map = new Map<string, SumPoint>();
   for (const d of depths) {
@@ -72,16 +94,10 @@ export function ProbeSumChart({ depths, referenceLines, events, hoveredEventId }
     );
   }
 
-  // Scale reference lines by depths that actually report — a dead sensor's
-  // empty series must not push CC/PMP up while adding nothing to the sum.
-  const n = countLiveDepths(depths);
-
-  // Per-depth FC/WP take priority; fall back to the global reference lines
-  const fcPerDepth = depths[0]?.field_capacity ?? referenceLines.field_capacity;
-  const wpPerDepth = depths[0]?.wilting_point ?? referenceLines.wilting_point;
-
-  const sumFC = fcPerDepth != null ? fcPerDepth * 100 * n : null;
-  const sumWP = wpPerDepth != null ? wpPerDepth * 100 * n : null;
+  // Sum each live depth's own observed envelope (per-layer bounds); depths
+  // without one use the sector-resolved value. Dead sensors count for nothing.
+  const sumFC = sumReferenceBound(depths, (d) => d.field_capacity, referenceLines.field_capacity);
+  const sumWP = sumReferenceBound(depths, (d) => d.wilting_point, referenceLines.wilting_point);
 
   const maxVal = Math.max(...data.map((d) => d.sum));
   const minVal = Math.min(...data.map((d) => d.sum));

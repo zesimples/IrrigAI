@@ -26,7 +26,7 @@ PEAK_WINDOW_H = (6, 24)                 # look for peak 6–24h after irrigation
 SHALLOW_MAX_DEPTH_CM = 30               # prefer depths ≤30cm; fall back to ≤60cm
 
 # --- Probe-calibrated field-capacity (m³/m³) ---
-CALIB_WINDOW_DAYS = 60
+CALIB_WINDOW_DAYS = 30
 # A saved calibration is not trusted forever: once computed_at is older than this,
 # soil-bound resolution ignores it and falls back to the next source. Manual re-run
 # (or the next scheduled run) refreshes it.
@@ -109,7 +109,7 @@ class AutoCalibrationService:
         if sector is None:
             return None
 
-        since = datetime.now(UTC) - timedelta(days=60)
+        since = datetime.now(UTC) - timedelta(days=CALIB_WINDOW_DAYS)
 
         # --- Load probe depths at shallow levels ---
         probes_result = await db.execute(select(Probe).where(Probe.sector_id == sector_id))
@@ -608,6 +608,23 @@ def percentile(values: list[float], pct: float) -> float:
     hi = min(lo + 1, len(s) - 1)
     frac = rank - lo
     return s[lo] + (s[hi] - s[lo]) * frac
+
+
+def compute_depth_envelope(vwc_values: list[float]) -> tuple[float, float] | None:
+    """Display-only observed envelope (CC_i, refill_i) for ONE depth.
+
+    Same percentile envelope + plausibility guards as the sector calibration,
+    applied to a single depth's history. Returns None when the depth has too
+    little data or an implausible band (caller leaves the depth's bounds null).
+    Used by the probe readings endpoint so the Soma chart can sum real
+    per-layer bounds; never feeds the engine's TAW.
+    """
+    if len(vwc_values) < CALIB_MIN_READINGS:
+        return None
+    fc, refill = compute_envelope_points(vwc_values)
+    if not is_plausible_calibration(fc, refill):
+        return None
+    return fc, refill
 
 
 def compute_envelope_points(vwc_values: list[float]) -> tuple[float, float]:

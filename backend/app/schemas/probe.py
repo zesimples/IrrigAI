@@ -65,6 +65,12 @@ class TimeSeriesPoint(BaseModel):
 class DepthReadings(BaseModel):
     depth_cm: int
     readings: list[TimeSeriesPoint]
+    # Display-only observed envelope for THIS depth (30-day percentile band from
+    # its own readings) — lets the Soma chart sum real per-layer bounds. Null when
+    # the depth lacks data, the band is implausible, or a manual soil override
+    # (scp_override) is in force. Never feeds the engine's TAW.
+    field_capacity: float | None = None
+    wilting_point: float | None = None
 
 
 class ReferenceLines(BaseModel):

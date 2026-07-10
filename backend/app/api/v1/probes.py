@@ -241,6 +241,42 @@ async def get_probe_readings(
         fc = pwp = None
     optimal = [round(pwp + (fc - pwp) * 0.4, 3), round(pwp + (fc - pwp) * 0.8, 3)] if fc and pwp else None
 
+    # Per-depth observed envelopes (display-only): each depth's own 30-day
+    # [refill, CC] band from its readings, so the Soma view can sum real
+    # per-layer bounds instead of stretching one value across all layers.
+    # A deliberate manual soil override (scp_override) is authoritative —
+    # per-depth bounds stay null so the chart shows only the override lines.
+    # Never feeds the engine's TAW.
+    if sector is not None and bounds.source != "scp_override":
+        from app.engine.auto_calibration import CALIB_WINDOW_DAYS, compute_depth_envelope
+
+        env_rows = (
+            await db.execute(
+                select(
+                    ProbeDepth.depth_cm,
+                    ProbeReading.calibrated_value,
+                    ProbeReading.raw_value,
+                )
+                .join(ProbeDepth, ProbeReading.probe_depth_id == ProbeDepth.id)
+                .where(
+                    ProbeDepth.probe_id == probe_id,
+                    ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
+                    ProbeReading.timestamp >= now - timedelta(days=CALIB_WINDOW_DAYS),
+                    ProbeReading.unit == "vwc_m3m3",
+                    ProbeReading.quality_flag == "ok",
+                )
+            )
+        ).all()
+        vals_by_cm: dict[int, list[float]] = defaultdict(list)
+        for env_depth_cm, calibrated, raw in env_rows:
+            v = calibrated if calibrated is not None else raw
+            if v is not None:
+                vals_by_cm[env_depth_cm].append(v)
+        for dr in depth_results:
+            env = compute_depth_envelope(vals_by_cm.get(dr.depth_cm, []))
+            if env is not None:
+                dr.field_capacity, dr.wilting_point = env
+
     # Rootzone-weighted SWC overlay: the same weighted average the recommendation
     # engine uses (build_sector_context + probe_interpreter._compute_rootzone), so
     # the chart's "Profundidades" view can visually agree with the recommendation
