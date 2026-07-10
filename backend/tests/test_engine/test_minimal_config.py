@@ -232,5 +232,7 @@ class TestReasonLanguage:
         assert "FC/refill calibrated from probe envelope" not in rendered
         assert "irrigation system not configured" not in rendered
         assert "default (stage not set" not in rendered
-        assert "CC e linha de recarga efectiva calibradas pela sonda" in rendered
-        assert "sistema de rega não configurado" in rendered
+        assert "CC calibrada pela sonda" in rendered
+        assert "sistema de rega" in rendered
+        # merged into a single config entry
+        assert len(config_messages) == 1

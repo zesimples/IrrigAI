@@ -974,24 +974,29 @@ def _build_reasons(
             message_en=f"Dose adjusted — {dose.cap_reason}",
         ))
 
-    if ctx.defaults_used:
-        defaults_pt = _format_engine_notes_pt(ctx.defaults_used)
-        defaults_en = _format_engine_notes_en(ctx.defaults_used)
+    # Single merged "config" reason: unconfigured resources + engine-inferred
+    # parameters used to be two separate verbose entries.
+    if ctx.defaults_used or ctx.missing_config:
+        parts_pt: list[str] = []
+        parts_en: list[str] = []
+        if ctx.missing_config:
+            parts_pt.append(
+                "falta configurar: " + ", ".join(_format_missing_short_pt(ctx.missing_config))
+            )
+            parts_en.append("missing: " + "; ".join(ctx.missing_config))
+        if ctx.defaults_used:
+            parts_pt.append(
+                "valores estimados pelo motor: "
+                + ", ".join(_format_engine_notes_short_pt(ctx.defaults_used))
+            )
+            parts_en.append(
+                "engine-estimated: " + "; ".join(_format_engine_notes_en(ctx.defaults_used))
+            )
         reasons.append(ReasonEntry(
             order=next_order(),
             category="config",
-            message_pt=f"Alguns parâmetros foram inferidos pelo motor (revê a configuração para maior precisão): {'; '.join(defaults_pt)}",
-            message_en=f"Some parameters were inferred by the engine (review configuration for better accuracy): {'; '.join(defaults_en)}",
-        ))
-
-    if ctx.missing_config:
-        missing_pt = _format_engine_notes_pt(ctx.missing_config)
-        missing_en = _format_engine_notes_en(ctx.missing_config)
-        reasons.append(ReasonEntry(
-            order=next_order(),
-            category="config",
-            message_pt=f"Configuração incompleta — a recomendação pode ser menos precisa: {'; '.join(missing_pt)}",
-            message_en=f"Incomplete configuration — recommendation may be less accurate: {'; '.join(missing_en)}",
+            message_pt="Revê a configuração para maior precisão — " + "; ".join(parts_pt),
+            message_en="Review configuration for better accuracy — " + "; ".join(parts_en),
         ))
 
     conf_label = {"high": "alta", "medium": "média", "low": "baixa"}.get(conf.level, conf.level)
@@ -1012,9 +1017,9 @@ def _build_reasons(
     return reasons
 
 
-def _format_engine_notes_pt(notes: list[str]) -> list[str]:
-    """Render internal engine note tokens as user-facing Portuguese."""
-    return [_format_engine_note_pt(note) for note in notes]
+def _format_engine_notes_short_pt(notes: list[str]) -> list[str]:
+    """Render internal engine note tokens as short user-facing Portuguese."""
+    return [_format_engine_note_short_pt(note) for note in notes]
 
 
 def _format_engine_notes_en(notes: list[str]) -> list[str]:
@@ -1022,53 +1027,41 @@ def _format_engine_notes_en(notes: list[str]) -> list[str]:
     return [_format_engine_note_en(note) for note in notes]
 
 
-def _format_engine_note_pt(note: str) -> str:
+def _format_missing_short_pt(notes: list[str]) -> list[str]:
+    """Missing-config tokens as bare resource names ("falta configurar: …")."""
+    mapping = {
+        "irrigation system not configured": "sistema de rega",
+        "crop profile not created": "perfil de cultura",
+    }
+    return [mapping.get(note, _translate_note_fragment_pt(note)) for note in notes]
+
+
+def _format_engine_note_short_pt(note: str) -> str:
     if note == "soil FC/PWP (not configured, using clay-loam defaults)":
-        return "CC/PMP do solo não configurados; usados valores por defeito de solo franco-argiloso"
+        return "CC/PMP do solo (por defeito)"
     if note == "Kc/MAD/root_depth (no crop profile found)":
-        return "Kc, MAD e profundidade radicular estimados porque não há perfil de cultura"
-    if note == "crop profile not created":
-        return "perfil de cultura não criado"
-    if note == "irrigation system not configured":
-        return "sistema de rega não configurado"
+        return "Kc, MAD e profundidade radicular (sem perfil de cultura)"
 
     calib_match = re.fullmatch(
-        r"FC/refill calibrated from probe envelope \((?P<method>[^,]+), FC=(?P<fc>[^)]+)\)",
+        r"FC/refill calibrated from probe envelope \([^,]+, FC=(?P<fc>[^)]+)\)",
         note,
     )
     if calib_match:
-        method = {
-            "cycles": "ciclos",
-            "envelope": "envolvente",
-        }.get(calib_match.group("method"), calib_match.group("method"))
-        return (
-            "CC e linha de recarga efectiva calibradas pela sonda "
-            f"(método: {method}, CC={calib_match.group('fc')})"
-        )
+        return f"CC calibrada pela sonda (CC={calib_match.group('fc')})"
 
-    kc_match = re.fullmatch(r"Kc=(?P<kc>[0-9.]+) \((?P<source>.+)\)", note)
+    kc_match = re.fullmatch(r"Kc=(?P<kc>[0-9.]+) \(.+\)", note)
     if kc_match:
-        return f"Kc={kc_match.group('kc')} ({_translate_note_fragment_pt(kc_match.group('source'))})"
+        return f"Kc={kc_match.group('kc')} (por defeito)"
 
     root_match = re.fullmatch(
-        r"root_depth=(?P<depth>[0-9.]+)m \(young tree, age (?P<age>[0-9]+)yr\)",
+        r"root_depth=(?P<depth>[0-9.]+)m \(young tree, age [0-9]+yr\)",
         note,
     )
     if root_match:
-        return (
-            f"profundidade radicular={root_match.group('depth')} m "
-            f"(árvore jovem, {root_match.group('age')} anos)"
-        )
+        return f"profundidade radicular {root_match.group('depth')} m (árvore jovem)"
 
-    gdd_match = re.fullmatch(
-        r"GDD-estimated stage \((?P<stage>[^,]+), (?P<gdd>[0-9.]+) GDD\)",
-        note,
-    )
-    if gdd_match:
-        return (
-            f"fase estimada por GDD ({gdd_match.group('stage')}, "
-            f"{gdd_match.group('gdd')} GDD)"
-        )
+    if re.fullmatch(r"GDD-estimated stage \(.+\)", note):
+        return "fase fenológica estimada por GDD"
 
     return _translate_note_fragment_pt(note)
 
