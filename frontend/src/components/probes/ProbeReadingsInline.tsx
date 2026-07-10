@@ -38,6 +38,7 @@ export function ProbeReadingsInline({
   refreshTrigger,
 }: ProbeReadingsInlineProps) {
   const [collapsed, setCollapsed] = useState(true);
+  const [depthTableOpen, setDepthTableOpen] = useState(false);
 
   useEffect(() => {
     if (openTrigger && openTrigger > 0) setCollapsed(false);
@@ -338,7 +339,24 @@ export function ProbeReadingsInline({
               </div>
 
               {/* Depth summary table */}
-              <div className="overflow-x-auto rounded-md border border-rule-soft">
+              <div className="rounded-md border border-rule-soft">
+                <button
+                  type="button"
+                  onClick={() => setDepthTableOpen((o) => !o)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-left"
+                >
+                  <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
+                    Resumo por profundidade
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="font-mono text-[10px] text-ink-3">{data.depths.length}</span>
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 text-ink-3 transition-transform duration-200 ${depthTableOpen ? "" : "-rotate-90"}`}
+                    />
+                  </span>
+                </button>
+                {depthTableOpen && (
+                <div className="overflow-x-auto border-t border-rule-soft">
                 <table className="min-w-full">
                   <thead>
                     <tr className="border-b border-rule-soft bg-card">
@@ -375,6 +393,8 @@ export function ProbeReadingsInline({
                     })}
                   </tbody>
                 </table>
+                </div>
+                )}
               </div>
             </>
           ) : (
