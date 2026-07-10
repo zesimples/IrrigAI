@@ -91,6 +91,11 @@ async def update_sector_crop_profile(
     soil_bounds_changed = (
         "field_capacity" in updates or "wilting_point" in updates or "soil_preset_id" in updates
     )
+    # Every updatable profile field feeds the engine (soil bounds → depletion,
+    # MAD → RAW threshold, root depths → rootzone weighting, stages → Kc,
+    # maturity age → young/mature root depth), so any actual edit warrants a
+    # fresh recommendation — soil_bounds_changed stays scoped to Plot propagation.
+    agronomy_changed = bool(updates)
 
     # Propagate soil changes to the Plot so the probe chart reference lines update
     if soil_bounds_changed:
@@ -113,11 +118,11 @@ async def update_sector_crop_profile(
     # model_validate() lazy-load in async context (MissingGreenlet → 500).
     response = SectorCropProfileOut.model_validate(profile)
 
-    # Best-effort: regenerate the recommendation so depletion reflects the new
-    # soil bounds immediately instead of staying frozen until the next scheduled
-    # or manually-triggered run. The profile edit is already committed above, so
+    # Best-effort: regenerate the recommendation so it reflects the new profile
+    # immediately instead of staying frozen until the next scheduled or
+    # manually-triggered run. The profile edit is already committed above, so
     # a generation failure here must not fail the save.
-    if soil_bounds_changed:
+    if agronomy_changed:
         try:
             await generate_recommendation(sector_id, db)
         except Exception:

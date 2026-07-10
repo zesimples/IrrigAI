@@ -38,15 +38,16 @@ def compute_dosage(wb: WaterBalanceResult, ctx: SectorContext) -> DosageResult:
     capped = False
     cap_reason = None
 
-    # Apply min/max irrigation constraints
+    # Apply min/max irrigation constraints. Recomputed net must invert the
+    # gross formula above (net / (efficiency × DU)), so DU is included.
     if ctx.min_irrigation_mm is not None and gross_mm < ctx.min_irrigation_mm:
         gross_mm = ctx.min_irrigation_mm
-        net_mm = gross_mm * efficiency
+        net_mm = gross_mm * efficiency * du
         capped = True
         cap_reason = f"Below minimum ({ctx.min_irrigation_mm}mm gross)"
     if ctx.max_irrigation_mm is not None and gross_mm > ctx.max_irrigation_mm:
         gross_mm = ctx.max_irrigation_mm
-        net_mm = gross_mm * efficiency
+        net_mm = gross_mm * efficiency * du
         capped = True
         cap_reason = f"Capped at maximum ({ctx.max_irrigation_mm}mm gross)"
 

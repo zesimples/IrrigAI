@@ -167,7 +167,9 @@ async def get_probe_readings(
     # Load depths
     depths_query = select(ProbeDepth).where(
         ProbeDepth.probe_id == probe_id,
-        ProbeDepth.sensor_type == "soil_moisture",
+        # "moisture" is a legacy synonym for VWC depths; the engine accepts both
+        # (see sector-status calibration_available), so the chart must too.
+        ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
     )
     if depth_filter:
         depths_query = depths_query.where(ProbeDepth.depth_cm.in_(depth_filter))

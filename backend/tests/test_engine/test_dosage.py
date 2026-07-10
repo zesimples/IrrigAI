@@ -99,6 +99,29 @@ class TestCapping:
         assert result.irrigation_gross_mm <= 30.0
         assert result.capped is True
 
+    def test_capped_net_is_consistent_with_gross_formula(self):
+        """Capped net must invert gross = net / (efficiency × DU) — DU included.
+
+        With efficiency=0.9, DU=0.8 and a 30mm max cap, delivered net is
+        30 × 0.9 × 0.8 = 21.6mm, not 30 × 0.9 = 27mm.
+        """
+        wb = make_wb(50.0)
+        ctx = make_ctx(
+            app_rate=2.5, efficiency=0.9, distribution_uniformity=0.8, max_irrig=30.0
+        )
+        result = compute_dosage(wb, ctx)
+        assert result.capped is True
+        assert result.irrigation_net_mm == pytest.approx(30.0 * 0.9 * 0.8, rel=1e-3)
+
+    def test_min_capped_net_includes_du(self):
+        wb = make_wb(2.0)
+        ctx = make_ctx(
+            app_rate=2.5, efficiency=0.9, distribution_uniformity=0.8, min_irrig=10.0
+        )
+        result = compute_dosage(wb, ctx)
+        assert result.capped is True
+        assert result.irrigation_net_mm == pytest.approx(10.0 * 0.9 * 0.8, rel=1e-3)
+
     def test_max_runtime_cap(self):
         """Runtime exceeds max_runtime_hours → capped."""
         wb = make_wb(40.0)  # 40mm / 1.0mm/h = 40h

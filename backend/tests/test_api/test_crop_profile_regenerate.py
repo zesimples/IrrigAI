@@ -1,6 +1,7 @@
-"""API tests: PUT /sectors/{id}/crop-profile regenerates the recommendation when
-soil bounds (field_capacity/wilting_point/soil_preset_id) change, so the displayed
-depletion doesn't stay frozen until the next scheduled/manual generation.
+"""API tests: PUT /sectors/{id}/crop-profile regenerates the recommendation on any
+profile edit — every updatable field feeds the engine (soil bounds → depletion,
+MAD → RAW threshold, root depths → rootzone weighting, stages → Kc) — so the
+displayed recommendation doesn't stay frozen until the next scheduled/manual run.
 
 Uses the globally-seeded "Herdade do Esporão" farm/sector (mirrors
 test_recommendations.py's seed_farm_id/seed_sector_id fixtures) — reused read-only,
@@ -98,13 +99,13 @@ async def test_soil_edit_regenerates_recommendation(
 
 
 @pytest.mark.asyncio
-async def test_non_soil_edit_does_not_regenerate(
+async def test_agronomic_edit_regenerates_recommendation(
     client: AsyncClient, db: AsyncSession, seed_sector_id: str
 ):
+    """A MAD edit moves the RAW trigger threshold — it must regenerate too,
+    not only the soil-bounds fields (the dry-rootzone lever is agronomic)."""
     before = await _rec_count(db, seed_sector_id)
 
-    # `mad` (management allowed depletion) is accepted by SectorCropProfileUpdate
-    # but is not one of the soil-bounds fields that trigger regeneration.
     resp = await client.get(f"/api/v1/sectors/{seed_sector_id}/crop-profile")
     assert resp.status_code == 200
     current_mad = resp.json()["mad"]
@@ -118,7 +119,19 @@ async def test_non_soil_edit_does_not_regenerate(
     assert put_resp.json()["mad"] == pytest.approx(new_mad)
 
     after = await _rec_count(db, seed_sector_id)
-    assert after == before
+    assert after == before + 1
+
+
+@pytest.mark.asyncio
+async def test_empty_edit_does_not_regenerate(
+    client: AsyncClient, db: AsyncSession, seed_sector_id: str
+):
+    before = await _rec_count(db, seed_sector_id)
+    put_resp = await client.put(
+        f"/api/v1/sectors/{seed_sector_id}/crop-profile", json={}
+    )
+    assert put_resp.status_code == 200
+    assert await _rec_count(db, seed_sector_id) == before
 
 
 @pytest.mark.asyncio

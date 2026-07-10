@@ -122,7 +122,9 @@ class AutoCalibrationService:
             depths_result = await db.execute(
                 select(ProbeDepth).where(
                     ProbeDepth.probe_id == probe.id,
-                    ProbeDepth.sensor_type == "moisture",
+                    # Real VWC depths are "soil_moisture"; "moisture" is a legacy
+                    # synonym still present in old/mock data.
+                    ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
                 )
             )
             depths = depths_result.scalars().all()

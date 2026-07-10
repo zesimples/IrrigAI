@@ -188,3 +188,27 @@ async def test_reconcile_different_type_not_resolved():
     # Water stress should be auto-resolved, stale probe updated
     assert existing_ws.is_active is False
     assert existing_sp.is_active is True  # still active, was updated
+
+
+# ---------------------------------------------------------------------------
+# Rain-skip weather resolution
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_rain_skip_uses_sector_plot_weather():
+    """Rain-skip must resolve weather for the sector's own plot, not the farm's
+    representative plot (Innoliva-style farms have per-plot forecasts)."""
+    from types import SimpleNamespace
+
+    calls = {}
+
+    async def fake_weather_context(farm_id, db, plot_id=None):
+        calls["plot_id"] = plot_id
+        return SimpleNamespace(forecast=[SimpleNamespace(rainfall_mm=12.0)])
+
+    sector = SimpleNamespace(id=SECTOR_ID, name=SECTOR_NAME, plot_id="plot-42")
+    with patch("app.alerts.engine.build_weather_context", fake_weather_context):
+        alert = await AlertEngine()._check_rain_skip(sector, FARM_ID, MagicMock())
+
+    assert calls["plot_id"] == "plot-42"
+    assert alert is not None and alert.alert_type == AlertType.RAIN_SKIP

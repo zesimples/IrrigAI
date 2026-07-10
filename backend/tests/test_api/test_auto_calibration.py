@@ -293,6 +293,44 @@ async def test_status_includes_plot_fields(
     assert body["plot_name"] == "P"
 
 
+@pytest.fixture
+async def cyclic_sector(db: AsyncSession):
+    """Owned sector with a clean irrigation sawtooth on a "soil_moisture" depth:
+    4 sharp rises (>3 vol% within one 2h step) each followed by a slow decay —
+    enough cycles + readings for the legacy preview analysis."""
+    farm_id, sector_id, depth = await _owned_chain(db, name="Cyclic")
+    start = datetime.now(UTC) - timedelta(days=28)
+    ts = start
+    v = 0.30
+    for _cycle in range(4):
+        v = 0.38  # irrigation spike
+        for _ in range(80):  # ~6.7 days of 2h-step decay
+            db.add(ProbeReading(
+                probe_depth_id=depth.id,
+                timestamp=ts,
+                raw_value=round(v, 4), calibrated_value=round(v, 4),
+                unit="vwc_m3m3", quality_flag="ok",
+            ))
+            ts += timedelta(hours=2)
+            v = max(v - 0.001, 0.29)
+    await db.commit()
+    yield sector_id
+    await delete_farm_subtree(db, farm_id)
+
+
+@pytest.mark.asyncio
+async def test_preview_sees_soil_moisture_sectors(
+    client: AsyncClient, cyclic_sector
+):
+    """GET /auto-calibration (preview) must accept real VWC depths
+    (sensor_type "soil_moisture") — it used to match only the legacy
+    "moisture" and 404'd every real sector while /run worked."""
+    resp = await client.get(f"/api/v1/sectors/{cyclic_sector}/auto-calibration")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["observed"]["num_cycles"] >= 3
+
+
 @pytest.mark.asyncio
 async def test_status_calibration_available_false_for_tension(
     client: AsyncClient, tension_sector

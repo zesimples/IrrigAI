@@ -306,7 +306,9 @@ class AlertEngine:
         self, sector: Sector, farm_id: str, db: AsyncSession
     ) -> Alert | None:
         try:
-            weather = await build_weather_context(farm_id, db)
+            # Resolve the sector's own plot weather (per-plot-weather farms);
+            # build_weather_context falls back to farm-level rows itself.
+            weather = await build_weather_context(farm_id, db, plot_id=sector.plot_id)
             rain_48h = sum((f.rainfall_mm or 0.0) for f in weather.forecast[:2])
             if rain_48h >= 10.0:
                 return _rain_skip_alert(sector.name, rain_48h, farm_id, sector.id)

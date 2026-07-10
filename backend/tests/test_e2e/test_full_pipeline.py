@@ -78,9 +78,13 @@ async def test_full_day_pipeline(client: AsyncClient, db: AsyncSession, seed_far
     sector_by_name = {s.name: s for s in all_sectors}
 
     # ── Step 4: Kc comes from SectorCropProfile ───────────────────────────────
-    # Use the first available sector with a phenological stage
+    # Use an olive sector with a phenological stage (the assertions below check
+    # the olive oil-accumulation Kc). Don't rely on row order: the unordered
+    # sector query reorders whenever another suite UPDATEs a seeded row.
     setor1 = next(
-        s for s in all_sectors if s.current_phenological_stage is not None
+        s
+        for s in all_sectors
+        if s.current_phenological_stage is not None and s.crop_type == "olive"
     )
     scp = (
         await db.execute(
