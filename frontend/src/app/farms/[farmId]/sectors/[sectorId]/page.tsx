@@ -239,7 +239,11 @@ export default function SectorDetailPage({ params }: Props) {
           { label: cropLabel, href: `/farms/${farmId}?crop=${status.crop_type}` },
           // Plot level (e.g. Innoliva's polos). ?plot= matches SectorGrid's tab
           // param on single-crop farms; on crop-tabbed farms it's ignored.
-          ...(status.plot_name
+          // Skipped when the plot is named after the crop (Esporão/Conqueiros
+          // have a plot literally called "Olival") — it would duplicate the
+          // crop crumb.
+          ...(status.plot_name &&
+          status.plot_name.trim().toLowerCase() !== cropLabel.trim().toLowerCase()
             ? [{
                 label: status.plot_name,
                 href: `/farms/${farmId}${status.plot_id ? `?plot=${status.plot_id}` : ""}`,
