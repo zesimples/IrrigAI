@@ -77,7 +77,9 @@ export function ProbeReadingsInline({
 
   const activeRefLines = refLines ?? data?.reference_lines ?? { field_capacity: null, wilting_point: null };
 
-  const nDepths = data?.depths.length ?? 1;
+  // Count only depths with readings — matches ProbeSumChart's reference-line
+  // scale, so "% soma" edit inputs convert with the same n the chart displays.
+  const nDepths = data ? Math.max(1, data.depths.filter((d) => d.readings.length > 0).length) : 1;
   const editScale = chartView === "sum" ? nDepths : 1;
 
   function startEdit() {

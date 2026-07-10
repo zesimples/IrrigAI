@@ -27,7 +27,14 @@ interface SumPoint {
   depthCount: number;
 }
 
-function buildSumData(depths: DepthReadings[]) {
+/** Depths that actually have readings in the window. Silent sensors / stale
+ * ProbeDepth rows still arrive as empty series and must not scale the
+ * CC/PMP reference lines (they contribute nothing to the summed line). */
+export function countLiveDepths(depths: DepthReadings[]): number {
+  return depths.filter((d) => d.readings.length > 0).length;
+}
+
+export function buildSumData(depths: DepthReadings[]) {
   const map = new Map<string, SumPoint>();
   for (const d of depths) {
     for (const pt of d.readings) {
@@ -40,7 +47,18 @@ function buildSumData(depths: DepthReadings[]) {
       row.depthCount += 1;
     }
   }
-  return [...map.values()].sort((a, b) => a.ts - b.ts);
+  // Normalize rows where not every live depth reported at that timestamp
+  // (per-depth downsampling keeps original timestamps, so depths can
+  // misalign): plot avg-of-reporting × live-count instead of a partial sum
+  // that fakes a dip against the n-scaled reference lines.
+  const nLive = countLiveDepths(depths);
+  const rows = [...map.values()].sort((a, b) => a.ts - b.ts);
+  for (const row of rows) {
+    if (row.depthCount > 0 && row.depthCount < nLive) {
+      row.sum = (row.sum / row.depthCount) * nLive;
+    }
+  }
+  return rows;
 }
 
 export function ProbeSumChart({ depths, referenceLines, events, hoveredEventId }: ProbeSumChartProps) {
@@ -54,7 +72,9 @@ export function ProbeSumChart({ depths, referenceLines, events, hoveredEventId }
     );
   }
 
-  const n = depths.length;
+  // Scale reference lines by depths that actually report — a dead sensor's
+  // empty series must not push CC/PMP up while adding nothing to the sum.
+  const n = countLiveDepths(depths);
 
   // Per-depth FC/WP take priority; fall back to the global reference lines
   const fcPerDepth = depths[0]?.field_capacity ?? referenceLines.field_capacity;
