@@ -3,6 +3,9 @@
 Date: 2026-07-15  
 Implementation commit: `3c183dd fix(probes): align depth sum with root zone`
 Display follow-up commit: `f566946 fix(probes): zoom rootzone sum chart`
+Final calculation-alignment commit: `6815755 fix(probes): align rootzone chart with depletion`
+
+> **Current state:** commit `6815755` supersedes the arithmetic-sum presentation described in the first two implementation phases below. The UI no longer presents **Soma** as a decision metric; it presents the engine-equivalent weighted **Zona radicular** value instead. The earlier sections remain as diagnosis/history.
 
 ## Problem reported
 
@@ -55,7 +58,7 @@ The mismatch was in presentation semantics, not the depletion formula:
 
 There was already explanatory text below Soma and a root-zone-weighted overlay in the **Profundidades** view, but the primary Soma visualization still invited a direct and misleading comparison with depletion.
 
-## Implemented change
+## First correction: root-zone-only sum (historical)
 
 ### `frontend/src/components/probes/ProbeSumChart.tsx`
 
@@ -106,11 +109,11 @@ Results:
 - TypeScript: passed with no errors.
 - `git diff --check`: passed.
 
-## Resulting behavior
+## Result after the first correction (historical)
 
 For Turno 5, Soma will now display the combined 10–70 cm readings rather than being dominated by the wet 80/90 cm layers. The deeper readings are not discarded; users can still inspect them individually in **Profundidades**. This makes the decision-facing visualization refer to the same soil volume as depletion while preserving the full probe profile for diagnosis.
 
-## Follow-up: zoomed Soma display
+## Second correction: zoomed Soma display (historical)
 
 After the root-zone filter was deployed, a second production screenshot confirmed that the values and thresholds were now consistent but exposed a display problem: the Soma Y-axis still always started at zero.
 
@@ -151,9 +154,90 @@ TypeScript:      passed with no errors
 git diff check:  passed
 ```
 
+## Final correction: engine-equivalent root-zone chart
+
+A later production screenshot for **Turno 4 (S18)** showed that limiting and zooming the arithmetic sum was not sufficient. The top recommendation reported `35%` depletion while the root-zone sum chart still had values on a different scale. Those quantities could move in the same direction, but they could never correspond numerically because:
+
+- The chart still added depth VWC values without soil-volume weighting.
+- Its display envelopes could be per-depth observed CC/PMP values.
+- The engine uses one depth-interval-weighted root-zone VWC and one resolved CC/PMP pair.
+- The CC/PMP editor/footer still had sum-specific scaling paths, including an all-depth multiplier.
+
+The final correction removes the raw arithmetic sum from the decision-facing UI. The internal component filename remains `ProbeSumChart.tsx` for now, but the user-facing view is **Zona radicular**.
+
+### Final calculation
+
+The chart now consumes `ProbeReadingsResponse.rootzone_swc`, which the backend builds with the same depth-interval weights and effective root depth used by `probe_interpreter._compute_rootzone()`.
+
+For every weighted VWC point, the frontend mirrors `water_balance.build_water_balance()`:
+
+```text
+clamped VWC = clamp(VWC, PMP, CC)
+depletion % = (CC - clamped VWC) / (CC - PMP) × 100
+available water % = 100 - depletion %
+```
+
+The root depth cancels when converting `depletion_mm / TAW_mm` to a percentage, so this normalized formula is exactly equivalent to the engine percentage.
+
+Concrete regression example:
+
+```text
+CC = 11%
+PMP = 1%
+weighted root-zone VWC = 7.5%
+
+depletion = (11 - 7.5) / (11 - 1) = 35%
+available water = 65%
+```
+
+### Final UI behavior
+
+- The view selector is now **Profundidades** / **Zona radicular**, not **Profundidades** / **Soma**.
+- The line is **Zona radicular (média ponderada)** in VWC percent.
+- CC and PMP lines use the exact sector-resolved bounds returned by the API; they are not summed or replaced by per-depth display envelopes.
+- Three current-value cards make the relationship explicit:
+  - **Humidade atual · zona radicular**
+  - **Água disponível**
+  - **Depleção da sonda**
+- Inline copy states: depletion is 0% at CC and 100% at PMP, and available water is `100% − depletion`.
+- CC/PMP editing always uses ordinary per-volume percentages; all `% soma`, depth-count multiplication and sum footer paths were removed.
+- The standalone probe-history page also passes `rootzone_swc` to the corrected view.
+- The Y-axis remains dynamically zoomed around weighted VWC plus CC/PMP, now with a minimum one-percentage-point padding.
+
+### Files changed in the final correction
+
+- `frontend/src/components/probes/ProbeSumChart.tsx`
+- `frontend/src/components/probes/ProbeReadingsInline.tsx`
+- `frontend/src/components/probes/ReadingsControls.tsx`
+- `frontend/src/app/farms/[farmId]/sectors/[sectorId]/probes/[probeId]/page.tsx`
+- `frontend/src/components/probes/__tests__/ProbeSumChart.test.tsx`
+- `frontend/src/components/probes/__tests__/ProbeReadingsInline.test.tsx`
+
+### Final verification
+
+```bash
+cd frontend
+npm run test:run
+npx tsc --noEmit
+npm run build
+```
+
+Results:
+
+```text
+Frontend suite:          66/66 tests passed across 11 test files
+Direct root-zone tests:   9/9 passed
+Inline probe tests:       4/4 passed
+TypeScript:               passed with no errors
+Next.js production build: compiled successfully
+git diff check:           passed
+```
+
+The suite count decreased from 73 to 66 because obsolete arithmetic-sum helper tests were removed and replaced by direct equation, clamping, weighted-series and complement assertions; this is not a loss of current-behavior coverage.
+
 ## Scope and deployment notes
 
 - Frontend-only change; no migration or API schema change.
-- The backend already returned `root_depth_cm` and already used root-zone weighting for recommendations.
+- The backend already returned `root_depth_cm` and `rootzone_swc`, and already used root-zone weighting for recommendations.
 - Deploy/rebuild the frontend for the behavior to appear in the application.
-- Both implementation changes require only a frontend rebuild/restart; backend, worker, database and Redis do not need to be recreated.
+- All three implementation phases require only a frontend rebuild/restart; backend, worker, database and Redis do not need to be recreated.
