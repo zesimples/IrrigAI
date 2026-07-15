@@ -2,6 +2,7 @@
 
 Date: 2026-07-15  
 Implementation commit: `3c183dd fix(probes): align depth sum with root zone`
+Display follow-up commit: `f566946 fix(probes): zoom rootzone sum chart`
 
 ## Problem reported
 
@@ -109,10 +110,50 @@ Results:
 
 For Turno 5, Soma will now display the combined 10–70 cm readings rather than being dominated by the wet 80/90 cm layers. The deeper readings are not discarded; users can still inspect them individually in **Profundidades**. This makes the decision-facing visualization refer to the same soil volume as depletion while preserving the full probe profile for diagnosis.
 
+## Follow-up: zoomed Soma display
+
+After the root-zone filter was deployed, a second production screenshot confirmed that the values and thresholds were now consistent but exposed a display problem: the Soma Y-axis still always started at zero.
+
+The concrete chart had:
+
+- Observed root-zone sum: `162.9–197.2%`.
+- PMP sum: `154%`.
+- CC sum: `201%`.
+- Old Y-axis domain: approximately `0–226%`.
+
+Because the stress `ReferenceArea` extended from zero to PMP, most of the chart remained red even though the signal itself occupied a narrow range around PMP and CC. The variation and individual irrigation responses were visually compressed.
+
+### Follow-up implementation
+
+`frontend/src/components/probes/ProbeSumChart.tsx` now exports `calculateSumDomain()` and uses it for the Y-axis:
+
+1. Collect the observed minimum, observed maximum, PMP sum and CC sum.
+2. Calculate the full span across those values.
+3. Add padding equal to the greater of 5 percentage points or 12% of the span.
+4. Round outward and clamp the lower limit to zero.
+
+For the reported production values, this changes the visible range from approximately `0–226%` to `148–207%`. Both agronomic thresholds and the complete series remain visible, but the red stress band becomes a small contextual portion of the chart instead of dominating it.
+
+The calculation also handles:
+
+- Flat series by applying the minimum 5-point padding.
+- Missing CC/PMP reference lines by zooming around the observations.
+- Values near zero without producing a negative Y-axis.
+
+### Follow-up verification
+
+Added four regression cases to `frontend/src/components/probes/__tests__/ProbeSumChart.test.tsx`, including the exact production-shaped values above.
+
+```text
+Frontend suite: 73/73 tests passed across 11 test files
+ProbeSumChart:   16/16 tests passed
+TypeScript:      passed with no errors
+git diff check:  passed
+```
+
 ## Scope and deployment notes
 
 - Frontend-only change; no migration or API schema change.
 - The backend already returned `root_depth_cm` and already used root-zone weighting for recommendations.
 - Deploy/rebuild the frontend for the behavior to appear in the application.
-- The implementation commit was pushed to `origin/main` before this handoff was written.
-
+- Both implementation changes require only a frontend rebuild/restart; backend, worker, database and Redis do not need to be recreated.
