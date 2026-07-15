@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSumData,
+  calculateSumDomain,
   countLiveDepths,
   filterRootzoneDepths,
   sumReferenceBound,
@@ -83,6 +84,28 @@ describe("buildSumData", () => {
     const rows = buildSumData(depths);
     // sum stays the 2-live-depth sum; dead depth neither adds nor scales
     expect(rows[0].sum).toBeCloseTo(50);
+  });
+});
+
+describe("calculateSumDomain", () => {
+  it("zooms around the readings and CC/PMP instead of always starting at zero", () => {
+    // Production-shaped values from the reported chart: readings 162.9–197.2,
+    // PMP 154 and CC 201. The old domain was 0–226.
+    expect(calculateSumDomain(162.9, 197.2, 154, 201)).toEqual([148, 207]);
+  });
+
+  it("keeps both agronomic thresholds visible when readings sit between them", () => {
+    const [min, max] = calculateSumDomain(170, 180, 150, 200);
+    expect(min).toBeLessThan(150);
+    expect(max).toBeGreaterThan(200);
+  });
+
+  it("uses a minimum padding for a flat series without reference lines", () => {
+    expect(calculateSumDomain(20, 20, null, null)).toEqual([15, 25]);
+  });
+
+  it("never creates a negative lower bound", () => {
+    expect(calculateSumDomain(1, 3, 0, 4)[0]).toBe(0);
   });
 });
 

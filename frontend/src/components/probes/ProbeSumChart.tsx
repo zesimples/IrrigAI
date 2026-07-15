@@ -96,6 +96,29 @@ export function buildSumData(depths: DepthReadings[]) {
   return rows;
 }
 
+/** Zoom the Y axis around the observed series and agronomic thresholds.
+ * Keeping CC and PMP inside the domain preserves the meaning of the coloured
+ * bands, while a small padding avoids pinning the line to the chart edges. */
+export function calculateSumDomain(
+  minValue: number,
+  maxValue: number,
+  sumWP: number | null,
+  sumFC: number | null,
+): [number, number] {
+  const values = [minValue, maxValue, sumWP, sumFC].filter(
+    (value): value is number => value != null && Number.isFinite(value),
+  );
+  const domainMin = Math.min(...values);
+  const domainMax = Math.max(...values);
+  const span = domainMax - domainMin;
+  const padding = Math.max(5, span * 0.12);
+
+  return [
+    Math.floor(Math.max(0, domainMin - padding)),
+    Math.ceil(domainMax + padding),
+  ];
+}
+
 export function ProbeSumChart({
   depths,
   referenceLines,
@@ -122,8 +145,7 @@ export function ProbeSumChart({
   const maxVal = Math.max(...data.map((d) => d.sum));
   const minVal = Math.min(...data.map((d) => d.sum));
   const latest = data[data.length - 1];
-  const yMax = Math.ceil(Math.max(maxVal, sumFC ?? 0) * 1.12);
-  const yMin = 0;
+  const [yMin, yMax] = calculateSumDomain(minVal, maxVal, sumWP, sumFC);
 
   return (
     <div className="space-y-2">
