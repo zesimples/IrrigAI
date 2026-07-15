@@ -1,0 +1,118 @@
+# Claude Code handoff: probe depth sum vs. depletion
+
+Date: 2026-07-15  
+Implementation commit: `3c183dd fix(probes): align depth sum with root zone`
+
+## Problem reported
+
+On the sector detail page, depletion could be high while the probe's **Soma** chart appeared to show high soil moisture inside the green comfort band. The concrete report was for **Turno 5 (S20)** and probe **1597/3832**.
+
+This looked like a disagreement between the recommendation engine and the probe chart.
+
+## Live diagnosis
+
+The repository's read-only diagnostic was run inside the backend container:
+
+```bash
+docker compose exec -T backend python -m scripts.diagnose_sector_swc "Turno 5"
+```
+
+Relevant output:
+
+```text
+Effective root depth: 0.75 m
+
+10cm  0.131  IN-ROOTZONE
+20cm  0.125  IN-ROOTZONE
+30cm  0.151  IN-ROOTZONE
+40cm  0.096  IN-ROOTZONE
+50cm  0.067  IN-ROOTZONE
+60cm  0.078  IN-ROOTZONE
+70cm  0.074  IN-ROOTZONE
+80cm  0.320
+90cm  0.545
+
+all-depth average: 0.176
+rootzone simple average: 0.103
+```
+
+The old chart summed all nine live depths:
+
+- All-depth sum: approximately `158.7%`.
+- Root-zone-only sum (10–70 cm): approximately `72.2%`.
+- The 80 cm and 90 cm sensors were below the configured 75 cm root zone and contributed `86.5` percentage points to the displayed sum.
+
+The recommendation engine was already behaving differently and correctly for its purpose: `probe_interpreter._compute_rootzone()` excludes depths below the effective root depth and computes a depth-interval-weighted root-zone VWC. The wet 80/90 cm layers therefore did not reduce depletion.
+
+## Root cause
+
+The mismatch was in presentation semantics, not the depletion formula:
+
+- **Depletion** represented moisture in the effective crop root zone.
+- **Soma** represented the arithmetic sum of every live depth, including water below the active root zone.
+- Deep wet layers could therefore make Soma look comfortable while the active root zone was dry.
+
+There was already explanatory text below Soma and a root-zone-weighted overlay in the **Profundidades** view, but the primary Soma visualization still invited a direct and misleading comparison with depletion.
+
+## Implemented change
+
+### `frontend/src/components/probes/ProbeSumChart.tsx`
+
+- Added `rootDepthCm` to `ProbeSumChart`.
+- Added and exported `filterRootzoneDepths()`.
+- Soma data now includes only depths where `depth_cm <= rootDepthCm`.
+- CC/PMP summed reference bounds use the same filtered depth set.
+- Preserved safe fallbacks:
+  - If root depth is unavailable, all depths are retained.
+  - If no sensor lies inside the configured root zone, all depths are retained, mirroring the engine's no-in-zone fallback.
+- Updated the tooltip and summary label to **Soma da zona radicular** / **Soma atual · zona radicular**.
+
+### `frontend/src/components/probes/ProbeReadingsInline.tsx`
+
+- Passes `data.root_depth_cm` into `ProbeSumChart`.
+- The CC/PMP edit scale now counts only live depths included in the root-zone sum, so editing `% soma` remains mathematically consistent with the displayed chart.
+- Replaced the old all-depth warning with explicit copy stating that Soma is limited to the configured root zone and that deeper sensors remain available in **Profundidades**.
+- If root depth is unavailable, the copy accurately states that all depths are included.
+
+### Tests
+
+Updated:
+
+- `frontend/src/components/probes/__tests__/ProbeSumChart.test.tsx`
+- `frontend/src/components/probes/__tests__/ProbeReadingsInline.test.tsx`
+
+New regression coverage verifies that:
+
+- Wet sensors below the root zone are excluded from Soma.
+- All depths remain available when root depth is null.
+- The engine-compatible fallback is used when every sensor is deeper than the root zone.
+- The inline explanation describes the new root-zone behavior.
+
+## Verification
+
+Commands run:
+
+```bash
+cd frontend
+npm run test:run
+npx tsc --noEmit
+```
+
+Results:
+
+- Frontend: **69/69 tests passed** across 11 test files.
+- Targeted probe tests: **16/16 passed**.
+- TypeScript: passed with no errors.
+- `git diff --check`: passed.
+
+## Resulting behavior
+
+For Turno 5, Soma will now display the combined 10–70 cm readings rather than being dominated by the wet 80/90 cm layers. The deeper readings are not discarded; users can still inspect them individually in **Profundidades**. This makes the decision-facing visualization refer to the same soil volume as depletion while preserving the full probe profile for diagnosis.
+
+## Scope and deployment notes
+
+- Frontend-only change; no migration or API schema change.
+- The backend already returned `root_depth_cm` and already used root-zone weighting for recommendations.
+- Deploy/rebuild the frontend for the behavior to appear in the application.
+- The implementation commit was pushed to `origin/main` before this handoff was written.
+
