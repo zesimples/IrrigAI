@@ -6,7 +6,7 @@ import { subHours } from "date-fns";
 import { ChevronDown, ExternalLink, ScanLine, RefreshCw } from "lucide-react";
 import { useProbeReadings } from "@/hooks/useProbeReadings";
 import { ProbeChart, formatRootDepthHint } from "@/components/probes/ProbeChart";
-import { ProbeSumChart } from "@/components/probes/ProbeSumChart";
+import { filterRootzoneDepths, ProbeSumChart } from "@/components/probes/ProbeSumChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { sectorsApi, probesApi, waterEventsApi } from "@/lib/api";
 import type { ProbeDetectedEvent, ReferenceLines } from "@/types";
@@ -78,9 +78,16 @@ export function ProbeReadingsInline({
 
   const activeRefLines = refLines ?? data?.reference_lines ?? { field_capacity: null, wilting_point: null };
 
-  // Count only depths with readings — matches ProbeSumChart's reference-line
-  // scale, so "% soma" edit inputs convert with the same n the chart displays.
-  const nDepths = data ? Math.max(1, data.depths.filter((d) => d.readings.length > 0).length) : 1;
+  // Count only live depths inside the effective root zone — matches the Soma
+  // chart and the soil volume used by the recommendation engine.
+  const nDepths = data
+    ? Math.max(
+        1,
+        filterRootzoneDepths(data.depths, data.root_depth_cm).filter(
+          (d) => d.readings.length > 0,
+        ).length,
+      )
+    : 1;
   const editScale = chartView === "sum" ? nDepths : 1;
 
   function startEdit() {
@@ -222,15 +229,17 @@ export function ProbeReadingsInline({
                   <ProbeSumChart
                     depths={data.depths}
                     referenceLines={activeRefLines}
+                    rootDepthCm={data.root_depth_cm}
                     events={visibleEvents}
                     hoveredEventId={hoveredEventId}
                   />
                   <p
-                    title="A recomendação usa a média da zona radicular (ver vista Profundidades)."
+                    title="As profundidades abaixo das raízes continuam visíveis na vista Profundidades."
                     className="font-serif italic text-[11.5px] text-ink-3"
                   >
-                    A vista Soma soma todas as profundidades. A recomendação usa a média da
-                    zona radicular (ver vista Profundidades).
+                    {data.root_depth_cm != null
+                      ? `Soma limitada à zona radicular (${Math.round(data.root_depth_cm)} cm), a mesma zona usada pela recomendação. Profundidades abaixo das raízes continuam visíveis em Profundidades.`
+                      : "Sem profundidade radicular configurada, a Soma inclui todas as profundidades."}
                   </p>
                 </>
               )}

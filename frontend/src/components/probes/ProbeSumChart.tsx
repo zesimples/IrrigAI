@@ -17,6 +17,7 @@ import type { DepthReadings, ProbeDetectedEvent, ReferenceLines } from "@/types"
 interface ProbeSumChartProps {
   depths: DepthReadings[];
   referenceLines: ReferenceLines;
+  rootDepthCm?: number | null;
   events?: ProbeDetectedEvent[];
   hoveredEventId?: string | null;
 }
@@ -32,6 +33,18 @@ interface SumPoint {
  * CC/PMP reference lines (they contribute nothing to the summed line). */
 export function countLiveDepths(depths: DepthReadings[]): number {
   return depths.filter((d) => d.readings.length > 0).length;
+}
+
+/** Keep the summed decision view on the same soil volume as the recommendation.
+ * If the configured root zone is shallower than every sensor, mirror the engine's
+ * fallback and retain all depths instead of rendering an empty chart. */
+export function filterRootzoneDepths(
+  depths: DepthReadings[],
+  rootDepthCm?: number | null,
+): DepthReadings[] {
+  if (rootDepthCm == null) return depths;
+  const inZone = depths.filter((d) => d.depth_cm <= rootDepthCm);
+  return inZone.length > 0 ? inZone : depths;
 }
 
 /** Sum one reference bound (CC or PMP) across live depths.
@@ -83,8 +96,15 @@ export function buildSumData(depths: DepthReadings[]) {
   return rows;
 }
 
-export function ProbeSumChart({ depths, referenceLines, events, hoveredEventId }: ProbeSumChartProps) {
-  const data = buildSumData(depths);
+export function ProbeSumChart({
+  depths,
+  referenceLines,
+  rootDepthCm,
+  events,
+  hoveredEventId,
+}: ProbeSumChartProps) {
+  const summedDepths = filterRootzoneDepths(depths, rootDepthCm);
+  const data = buildSumData(summedDepths);
 
   if (data.length === 0) {
     return (
@@ -96,8 +116,8 @@ export function ProbeSumChart({ depths, referenceLines, events, hoveredEventId }
 
   // Sum each live depth's own observed envelope (per-layer bounds); depths
   // without one use the sector-resolved value. Dead sensors count for nothing.
-  const sumFC = sumReferenceBound(depths, (d) => d.field_capacity, referenceLines.field_capacity);
-  const sumWP = sumReferenceBound(depths, (d) => d.wilting_point, referenceLines.wilting_point);
+  const sumFC = sumReferenceBound(summedDepths, (d) => d.field_capacity, referenceLines.field_capacity);
+  const sumWP = sumReferenceBound(summedDepths, (d) => d.wilting_point, referenceLines.wilting_point);
 
   const maxVal = Math.max(...data.map((d) => d.sum));
   const minVal = Math.min(...data.map((d) => d.sum));
@@ -179,7 +199,7 @@ export function ProbeSumChart({ depths, referenceLines, events, hoveredEventId }
             width={40}
           />
           <Tooltip
-            formatter={(value: number) => [`${value.toFixed(1)}%`, "Soma das profundidades"]}
+            formatter={(value: number) => [`${value.toFixed(1)}%`, "Soma da zona radicular"]}
             labelFormatter={(label: number) => format(new Date(label), "dd/MM/yyyy HH:mm")}
             contentStyle={{ fontSize: 12 }}
           />
@@ -197,7 +217,7 @@ export function ProbeSumChart({ depths, referenceLines, events, hoveredEventId }
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div className="rounded-md border border-rule-soft bg-card px-3 py-2">
-          <p className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-3">Soma atual</p>
+          <p className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-3">Soma atual · zona radicular</p>
           <p className="mt-0.5 font-mono text-[14px] font-medium text-ink tabular-nums">
             {latest.sum.toFixed(1)}%
           </p>

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildSumData, countLiveDepths, sumReferenceBound } from "../ProbeSumChart";
+import {
+  buildSumData,
+  countLiveDepths,
+  filterRootzoneDepths,
+  sumReferenceBound,
+} from "../ProbeSumChart";
 import type { DepthReadings } from "@/types";
 
 function depth(
@@ -23,6 +28,23 @@ describe("countLiveDepths", () => {
       depth(30, []), // silent sensor / stale ProbeDepth row
     ];
     expect(countLiveDepths(depths)).toBe(2);
+  });
+});
+
+describe("filterRootzoneDepths", () => {
+  it("excludes wet depths below the effective root zone", () => {
+    const depths = [depth(30, []), depth(60, []), depth(90, [])];
+    expect(filterRootzoneDepths(depths, 60).map((d) => d.depth_cm)).toEqual([30, 60]);
+  });
+
+  it("keeps all depths when no sensor falls inside the configured root zone", () => {
+    const depths = [depth(30, []), depth(60, [])];
+    expect(filterRootzoneDepths(depths, 20)).toEqual(depths);
+  });
+
+  it("keeps all depths when root depth is unavailable", () => {
+    const depths = [depth(30, []), depth(60, [])];
+    expect(filterRootzoneDepths(depths, null)).toEqual(depths);
   });
 });
 

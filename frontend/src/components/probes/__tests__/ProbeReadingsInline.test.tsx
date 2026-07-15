@@ -53,6 +53,14 @@ vi.mock("@/components/probes/ProbeChart", () => ({
 
 vi.mock("@/components/probes/ProbeSumChart", () => ({
   ProbeSumChart: () => <div data-testid="probe-sum-chart" />,
+  filterRootzoneDepths: (
+    depths: { depth_cm: number }[],
+    rootDepthCm?: number | null,
+  ) => {
+    if (rootDepthCm == null) return depths;
+    const inZone = depths.filter((depth) => depth.depth_cm <= rootDepthCm);
+    return inZone.length > 0 ? inZone : depths;
+  },
 }));
 
 vi.mock("@/components/probes/ReadingsControls", () => ({
@@ -139,7 +147,7 @@ describe("ProbeReadingsInline", () => {
     expect(screen.queryByText(/Zona radicular:/)).not.toBeInTheDocument();
   });
 
-  it("shows the Soma explainer caption instead of the rootzone line in the sum view", () => {
+  it("explains that Soma is limited to the same root zone as the recommendation", () => {
     mockData = baseData;
     render(
       <ProbeReadingsInline
@@ -157,7 +165,7 @@ describe("ProbeReadingsInline", () => {
     expect(screen.queryByTestId("probe-chart")).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        "A vista Soma soma todas as profundidades. A recomendação usa a média da zona radicular (ver vista Profundidades).",
+        "Soma limitada à zona radicular (60 cm), a mesma zona usada pela recomendação. Profundidades abaixo das raízes continuam visíveis em Profundidades.",
       ),
     ).toBeInTheDocument();
   });
