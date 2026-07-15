@@ -97,7 +97,7 @@ export default function ProbeDetailPage({ params }: Props) {
                 />
               ) : (
                 <ProbeSumChart
-                  depths={data.depths}
+                  rootzoneSwc={data.rootzone_swc ?? []}
                   referenceLines={data.reference_lines}
                   events={visibleEvents}
                 />

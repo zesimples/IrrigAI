@@ -52,7 +52,7 @@ export function ReadingsControls({
         </div>
       </div>
       <div>
-        <p className="mb-1 font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">Agregação</p>
+        <p className="mb-1 font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">Vista</p>
         <div className="flex flex-wrap gap-1">
           <Button
             size="sm"
@@ -66,7 +66,7 @@ export function ReadingsControls({
             variant={view === "sum" ? "primary" : "secondary"}
             onClick={() => onViewChange("sum")}
           >
-            Soma
+            Zona radicular
           </Button>
         </div>
       </div>
@@ -82,7 +82,7 @@ export function ReadingsControls({
                 variant={interval === iv.value ? "primary" : "secondary"}
                 onClick={() => onIntervalChange(iv.value)}
                 disabled={brutoDisabled}
-                title={brutoDisabled ? "Bruto não disponível na vista Soma" : undefined}
+                title={brutoDisabled ? "Bruto não disponível na vista Zona radicular" : undefined}
               >
                 {iv.label}
               </Button>

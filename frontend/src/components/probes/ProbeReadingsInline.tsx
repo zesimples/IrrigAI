@@ -6,7 +6,7 @@ import { subHours } from "date-fns";
 import { ChevronDown, ExternalLink, ScanLine, RefreshCw } from "lucide-react";
 import { useProbeReadings } from "@/hooks/useProbeReadings";
 import { ProbeChart, formatRootDepthHint } from "@/components/probes/ProbeChart";
-import { filterRootzoneDepths, ProbeSumChart } from "@/components/probes/ProbeSumChart";
+import { ProbeSumChart } from "@/components/probes/ProbeSumChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { sectorsApi, probesApi, waterEventsApi } from "@/lib/api";
 import type { ProbeDetectedEvent, ReferenceLines } from "@/types";
@@ -78,23 +78,11 @@ export function ProbeReadingsInline({
 
   const activeRefLines = refLines ?? data?.reference_lines ?? { field_capacity: null, wilting_point: null };
 
-  // Count only live depths inside the effective root zone — matches the Soma
-  // chart and the soil volume used by the recommendation engine.
-  const nDepths = data
-    ? Math.max(
-        1,
-        filterRootzoneDepths(data.depths, data.root_depth_cm).filter(
-          (d) => d.readings.length > 0,
-        ).length,
-      )
-    : 1;
-  const editScale = chartView === "sum" ? nDepths : 1;
-
   function startEdit() {
     const fc = activeRefLines.field_capacity;
     const wp = activeRefLines.wilting_point;
-    setCcInput(fc != null ? (fc * 100 * editScale).toFixed(1) : "");
-    setPmpInput(wp != null ? (wp * 100 * editScale).toFixed(1) : "");
+    setCcInput(fc != null ? (fc * 100).toFixed(1) : "");
+    setPmpInput(wp != null ? (wp * 100).toFixed(1) : "");
     setSaved(false);
     setEditing(true);
   }
@@ -105,8 +93,8 @@ export function ProbeReadingsInline({
     if (isNaN(cc) || isNaN(pmp) || cc <= 0 || pmp <= 0 || pmp >= cc) return;
     setSaving(true);
     try {
-      const fcPerDepth = cc / 100 / editScale;
-      const wpPerDepth = pmp / 100 / editScale;
+      const fcPerDepth = cc / 100;
+      const wpPerDepth = pmp / 100;
       await sectorsApi.updateCropProfile(sectorId, {
         field_capacity: fcPerDepth,
         wilting_point: wpPerDepth,
@@ -227,19 +215,18 @@ export function ProbeReadingsInline({
               ) : (
                 <>
                   <ProbeSumChart
-                    depths={data.depths}
+                    rootzoneSwc={data.rootzone_swc ?? []}
                     referenceLines={activeRefLines}
-                    rootDepthCm={data.root_depth_cm}
                     events={visibleEvents}
                     hoveredEventId={hoveredEventId}
                   />
                   <p
-                    title="As profundidades abaixo das raízes continuam visíveis na vista Profundidades."
+                    title="A mesma média ponderada e os mesmos limites CC/PMP alimentam a recomendação."
                     className="font-serif italic text-[11.5px] text-ink-3"
                   >
-                    {data.root_depth_cm != null
-                      ? `Soma limitada à zona radicular (${Math.round(data.root_depth_cm)} cm), a mesma zona usada pela recomendação. Profundidades abaixo das raízes continuam visíveis em Profundidades.`
-                      : "Sem profundidade radicular configurada, a Soma inclui todas as profundidades."}
+                    A depleção usa esta média ponderada da zona radicular
+                    {data.root_depth_cm != null ? ` (${Math.round(data.root_depth_cm)} cm)` : ""}:
+                    0% na CC e 100% no PMP. Água disponível = 100% − depleção.
                   </p>
                 </>
               )}
@@ -264,12 +251,10 @@ export function ProbeReadingsInline({
                         onChange={(e) => setCcInput(e.target.value)}
                         step="0.1"
                         min="0"
-                        max={100 * editScale}
+                        max={100}
                         className="w-20 rounded-md border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink tabular-nums focus:outline-none focus:ring-1 focus:ring-olive/30"
                       />
-                      <span className="font-mono text-[11px] text-ink-3">
-                        {chartView === "sum" ? "% soma" : "%"}
-                      </span>
+                      <span className="font-mono text-[11px] text-ink-3">%</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <label className="font-mono text-[11px] font-medium text-terra min-w-[36px]">PMP</label>
@@ -279,12 +264,10 @@ export function ProbeReadingsInline({
                         onChange={(e) => setPmpInput(e.target.value)}
                         step="0.1"
                         min="0"
-                        max={100 * editScale}
+                        max={100}
                         className="w-20 rounded-md border border-rule bg-paper px-2.5 py-1.5 text-[13px] text-ink tabular-nums focus:outline-none focus:ring-1 focus:ring-terra/30"
                       />
-                      <span className="font-mono text-[11px] text-ink-3">
-                        {chartView === "sum" ? "% soma" : "%"}
-                      </span>
+                      <span className="font-mono text-[11px] text-ink-3">%</span>
                     </div>
                     <div className="flex items-center gap-2 ml-auto">
                       <button
@@ -306,34 +289,12 @@ export function ProbeReadingsInline({
                   </>
                 ) : (
                   <>
-                    {chartView === "depths" ? (
-                      <>
-                        <span className="font-mono text-[11.5px] font-medium text-olive">
-                          CC {activeRefLines.field_capacity != null ? `${(activeRefLines.field_capacity * 100).toFixed(1)}%` : "—"}
-                        </span>
-                        <span className="font-mono text-[11.5px] font-medium text-terra">
-                          PMP {activeRefLines.wilting_point != null ? `${(activeRefLines.wilting_point * 100).toFixed(1)}%` : "—"}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="font-mono text-[11.5px] font-medium text-olive">
-                          CC soma{" "}
-                          {activeRefLines.field_capacity != null
-                            ? `${(activeRefLines.field_capacity * 100 * data.depths.length).toFixed(1)}%`
-                            : "—"}
-                        </span>
-                        <span className="font-mono text-[11.5px] font-medium text-terra">
-                          PMP soma{" "}
-                          {activeRefLines.wilting_point != null
-                            ? `${(activeRefLines.wilting_point * 100 * data.depths.length).toFixed(1)}%`
-                            : "—"}
-                        </span>
-                        <span className="font-mono text-[10px] text-ink-3">
-                          ×{data.depths.length} profundidades
-                        </span>
-                      </>
-                    )}
+                    <span className="font-mono text-[11.5px] font-medium text-olive">
+                      CC {activeRefLines.field_capacity != null ? `${(activeRefLines.field_capacity * 100).toFixed(1)}%` : "—"}
+                    </span>
+                    <span className="font-mono text-[11.5px] font-medium text-terra">
+                      PMP {activeRefLines.wilting_point != null ? `${(activeRefLines.wilting_point * 100).toFixed(1)}%` : "—"}
+                    </span>
                     {saved && (
                       <span className="font-mono text-[11px] text-olive">Guardado ✓</span>
                     )}
