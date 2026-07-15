@@ -215,7 +215,10 @@ class FlowmeterIngestionService:
 
         settings = get_settings()
         farm_result = await db.execute(
-            select(Farm).where(Farm.id == farm_id).options(selectinload(Farm.credentials))
+            select(Farm).where(
+                Farm.id == farm_id,
+                Farm.is_archived.is_(False),
+            ).options(selectinload(Farm.credentials))
         )
         farm = farm_result.scalar_one_or_none()
         if farm is None:

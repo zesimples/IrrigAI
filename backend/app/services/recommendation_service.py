@@ -32,6 +32,7 @@ def _make_inputs_snapshot(eng: EngineRecommendation, target_date: date) -> dict:
         "taw_mm": eng.taw_mm,
         "rain_effective_mm": eng.rain_effective_mm,
         "forecast_rain_next_48h": eng.forecast_rain_next_48h,
+        "rain_skip_applies": eng.rain_skip_applies,
         "defaults_used": eng.defaults_used,
         "missing_config": eng.missing_config,
         "source_confidence": eng.confidence.source_confidence,

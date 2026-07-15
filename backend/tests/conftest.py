@@ -15,6 +15,7 @@ limiter.enabled = False
 
 _TEST_CLEANUP_STATEMENTS = (
     "DELETE FROM recommendation_reason",
+    "DELETE FROM recommendation_outcome",
     "DELETE FROM detected_water_event",
     "DELETE FROM irrigation_event",
     "DELETE FROM recommendation",

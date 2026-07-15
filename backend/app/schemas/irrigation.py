@@ -9,6 +9,7 @@ class IrrigationEventCreate(BaseModel):
     duration_minutes: float | None = None
     applied_mm: float | None = None
     source: str = "manual_log"
+    recommendation_id: str | None = None
     notes: str | None = None
 
 

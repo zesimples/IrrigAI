@@ -85,6 +85,8 @@ def _alert(
     return Alert(
         alert_type=alert_type,
         severity=severity,
+        source="flowmeter_deviation",
+        rule_key=f"{alert_type}:{sector_id}",
         title_pt=title_pt,
         title_en=title_en,
         description_pt=description_pt,
@@ -416,7 +418,12 @@ class FlowmeterAlertChecker:
                 .join(Flowmeter, IrrigationEventDetected.flowmeter_id == Flowmeter.id)
                 .join(Sector, Flowmeter.sector_id == Sector.id)
                 .join(Plot, Sector.plot_id == Plot.id)
-                .where(Plot.farm_id == farm_id, Flowmeter.is_active.is_(True))
+                .where(
+                    Plot.farm_id == farm_id,
+                    Plot.is_archived.is_(False),
+                    Sector.is_archived.is_(False),
+                    Flowmeter.is_active.is_(True),
+                )
             )
             since = first_event_result.scalar_one_or_none() or (now - timedelta(days=365))
         else:
@@ -427,7 +434,12 @@ class FlowmeterAlertChecker:
             select(Flowmeter, Sector)
             .join(Sector, Flowmeter.sector_id == Sector.id)
             .join(Plot, Sector.plot_id == Plot.id)
-            .where(Plot.farm_id == farm_id, Flowmeter.is_active.is_(True))
+            .where(
+                Plot.farm_id == farm_id,
+                Plot.is_archived.is_(False),
+                Sector.is_archived.is_(False),
+                Flowmeter.is_active.is_(True),
+            )
         )
         pairs = flowmeters_result.all()
         if not pairs:

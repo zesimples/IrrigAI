@@ -34,6 +34,7 @@ export interface Farm {
   name: string;
   location_lat: number | null;
   location_lon: number | null;
+  elevation_m: number | null;
   region: string | null;
   timezone: string;
   owner_id: string;
@@ -47,6 +48,7 @@ export interface FarmCreate {
   name: string;
   location_lat?: number;
   location_lon?: number;
+  elevation_m?: number;
   region?: string;
   timezone?: string;
 }
@@ -194,6 +196,38 @@ export interface Probe {
   health_status: string;
   last_reading_at: string | null;
   depths: ProbeDepth[];
+}
+
+export interface FarmCredentialsInput {
+  username: string;
+  password: string;
+  client_id: string;
+  client_secret: string;
+  project_id?: string;
+  weather_device_id?: string;
+}
+
+export interface FarmCredentialsStatus {
+  configured: boolean;
+  has_username: boolean;
+  has_password: boolean;
+  has_client_id: boolean;
+  has_client_secret: boolean;
+  project_id: string | null;
+  weather_device_id: string | null;
+}
+
+export interface ProviderResource {
+  id: string;
+  name: string;
+  kind: string | null;
+  project_id: string | null;
+  serial_number: string | null;
+}
+
+export interface ProviderDiscovery {
+  projects: ProviderResource[];
+  devices: ProviderResource[];
 }
 
 export interface ProbeDepth {
@@ -534,8 +568,9 @@ export interface DashboardResponse {
 // ── Crop Profile ──────────────────────────────────────────────────────────────
 
 export interface CropStage {
-  name: string;
+  key: string;
   name_pt?: string;
+  name_en?: string;
   start_doy: number;
   end_doy: number;
   kc: number;
@@ -728,6 +763,41 @@ export interface ProbeCalibrationRun {
   changed: boolean;        // effective bounds moved before→after
   applied: boolean;        // calibration is what the engine now uses
   cleared_customization: boolean; // the run overrode a prior manual soil setting
+}
+
+export interface CalibrationHistoryRun {
+  id: string;
+  sector_id: string;
+  observed_fc: number;
+  observed_refill: number;
+  method: string;
+  num_cycles: number;
+  consistency: number;
+  window_days: number;
+  computed_at: string;
+  source: string;
+  status: "candidate" | "applied" | "superseded";
+  previous_fc: number | null;
+  previous_refill: number | null;
+  applied_at: string | null;
+}
+
+export interface RecommendationOutcome {
+  id: string;
+  recommendation_id: string;
+  sector_id: string;
+  irrigation_event_id: string | null;
+  detected_event_id: string | null;
+  evaluated_at: string;
+  status: "executed" | "followed_skip" | "no_event";
+  recommended_depth_mm: number | null;
+  actual_applied_mm: number | null;
+  dose_error_mm: number | null;
+  dose_error_pct: number | null;
+  pre_irrigation_vwc: number | null;
+  post_irrigation_vwc: number | null;
+  probe_response_delta: number | null;
+  details: Record<string, unknown>;
 }
 
 // ── Flowmeter ─────────────────────────────────────────────────────────────────

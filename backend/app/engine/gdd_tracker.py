@@ -8,7 +8,7 @@ GDD = max(0, (Tmax + Tmin) / 2 - Tbase)
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,9 +49,11 @@ class GDDTracker:
     async def compute_accumulated_gdd(
         self, sector_id: str, db: AsyncSession, scp_stages: list[dict] | None = None
     ) -> GDDStatus | None:
-        from app.models import Plot, Sector, SectorCropProfile, WeatherObservation
+        from app.models import Plot, SectorCropProfile, WeatherObservation
 
-        sector = await db.get(Sector, sector_id)
+        from app.active_records import get_active_sector
+
+        sector = await get_active_sector(db, sector_id)
         if sector is None:
             return None
 
@@ -208,14 +210,14 @@ class GDDTracker:
     async def compute_gdd_for_all_sectors(
         self, farm_id: str, db: AsyncSession
     ) -> list[GDDStatus]:
-        from app.models import Plot, Sector
+        from app.active_records import active_plots_stmt, active_sectors_stmt
 
-        plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+        plots_result = await db.execute(active_plots_stmt(farm_id))
         plots = plots_result.scalars().all()
 
         results: list[GDDStatus] = []
         for plot in plots:
-            sectors_result = await db.execute(select(Sector).where(Sector.plot_id == plot.id))
+            sectors_result = await db.execute(active_sectors_stmt(plot.id))
             sectors = sectors_result.scalars().all()
             for sector in sectors:
                 try:

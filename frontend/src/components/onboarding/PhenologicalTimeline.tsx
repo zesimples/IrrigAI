@@ -39,13 +39,14 @@ export function PhenologicalTimeline({
         {stages.map((s) => {
           const left = ((s.start_doy - 1) / totalDays) * 100;
           const width = ((s.end_doy - s.start_doy + 1) / totalDays) * 100;
-          const active = currentStage === s.name;
+          const active = currentStage === s.key;
+          const label = s.name_pt ?? s.name_en ?? s.key;
           return (
             <button
-              key={s.name}
+              key={s.key}
               type="button"
-              title={`${s.name_pt ?? s.name}: ${doyToLabel(s.start_doy)} – ${doyToLabel(s.end_doy)}, Kc ${s.kc}`}
-              aria-label={`Seleccionar fase ${s.name_pt ?? s.name}`}
+              title={`${label}: ${doyToLabel(s.start_doy)} – ${doyToLabel(s.end_doy)}, Kc ${s.kc}`}
+              aria-label={`Seleccionar fase ${label}`}
               style={{ left: `${left}%`, width: `${width}%` }}
               className={cn(
                 "absolute top-0 h-full border-r border-white/60 transition-opacity focus-visible:z-10",
@@ -67,10 +68,11 @@ export function PhenologicalTimeline({
       {/* Stage cards */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {stages.map((s) => {
-          const active = currentStage === s.name;
+          const active = currentStage === s.key;
+          const label = s.name_pt ?? s.name_en ?? s.key;
           return (
             <button
-              key={s.name}
+              key={s.key}
               type="button"
               onClick={() => onSelect?.(s)}
               aria-pressed={active}
@@ -82,7 +84,7 @@ export function PhenologicalTimeline({
               )}
             >
               <p className="truncate text-xs font-semibold text-slate-900">
-                {s.name_pt ?? s.name}
+                {label}
               </p>
               <p className="mt-1 text-xs text-slate-500">
                 {doyToLabel(s.start_doy)} – {doyToLabel(s.end_doy)}

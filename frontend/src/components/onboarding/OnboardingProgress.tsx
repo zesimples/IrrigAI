@@ -5,6 +5,7 @@ export const ONBOARDING_STEPS = [
   { id: 2, label: "Talhão & Solo", description: "Tipo de solo e talhão" },
   { id: 3, label: "Sector & Cultura", description: "Cultura e fenologia" },
   { id: 4, label: "Rega", description: "Sistema de rega" },
+  { id: 5, label: "Dados", description: "Sondas e caudalímetros" },
 ] as const;
 
 interface OnboardingProgressProps {

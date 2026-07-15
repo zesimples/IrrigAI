@@ -185,9 +185,11 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
     missing_config: list[str] = []
 
     # --- Sector ---
-    sector = await db.get(Sector, sector_id)
+    from app.active_records import get_active_sector
+
+    sector = await get_active_sector(db, sector_id)
     if sector is None:
-        raise ValueError(f"Sector {sector_id} not found")
+        raise ValueError(f"Sector {sector_id} not found or archived")
 
     # --- Plot + soil ---
     plot = await db.get(Plot, sector.plot_id)
@@ -711,6 +713,9 @@ class RecommendationPipeline:
         do_irrigate, trigger_reason = trigger.should_irrigate(
             wb, ctx, fc_impact["rain_next_48h_mm"]
         )
+        physics_rain_skip = trigger.rain_skip_applies(
+            wb, ctx, fc_impact["rain_next_48h_mm"]
+        )
         log.append(f"Trigger: {'IRRIGATE' if do_irrigate else 'SKIP'} — {trigger_reason}")
 
         # Step 10: Dosage — always computed (dose-do-dia: a reserve day gets a
@@ -785,7 +790,7 @@ class RecommendationPipeline:
             requested_gross_mm=dose.requested_gross_mm if dose else 0.0,
             min_irrigation_mm=ctx.min_irrigation_mm,
             rain_skip=bool(fc_impact["rain_skip_recommended"])
-            or trigger.rain_skip_applies(wb, ctx, fc_impact["rain_next_48h_mm"]),
+            or physics_rain_skip,
         )
         dose_pres = resolve_dose_presentation(dose, dose_band, fingerprint, now)
         log.append(f"Dose: band={dose_band}, source={dose_pres.dose_source}")
@@ -841,6 +846,7 @@ class RecommendationPipeline:
             taw_mm=wb.taw_mm,
             rain_effective_mm=rain_effective,
             forecast_rain_next_48h=fc_impact["rain_next_48h_mm"],
+            rain_skip_applies=physics_rain_skip,
             defaults_used=ctx.defaults_used,
             missing_config=ctx.missing_config,
             stress_projection=stress_proj_dict,
@@ -880,19 +886,19 @@ class RecommendationPipeline:
         db: AsyncSession,
     ) -> list[EngineRecommendation]:
         """Run pipeline for all sectors of a farm. Continues past individual failures."""
-        from app.models import Farm, Plot
+        from app.active_records import active_plots_stmt, active_sectors_stmt, get_active_farm
 
-        farm = await db.get(Farm, farm_id)
+        farm = await get_active_farm(db, farm_id)
         if farm is None:
             return []
 
-        plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+        plots_result = await db.execute(active_plots_stmt(farm_id))
         plots = plots_result.scalars().all()
 
         results: list[EngineRecommendation] = []
         for plot in plots:
             sectors_result = await db.execute(
-                select(Sector).where(Sector.plot_id == plot.id)
+                active_sectors_stmt(plot.id)
             )
             sectors = sectors_result.scalars().all()
             for sector in sectors:

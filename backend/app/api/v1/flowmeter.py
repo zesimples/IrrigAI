@@ -6,7 +6,7 @@ from __future__ import annotations
 import json as _json
 from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func as sql_func
@@ -21,6 +21,7 @@ from app.schemas.flowmeter import (
     FlowmeterAnalysisRequest,
     FlowmeterAnalysisResponse,
     FlowmeterAnalysisStatistics,
+    FlowmeterCreate,
     FlowmeterCropStats,
     FlowmeterDashboardResponse,
     FlowmeterDeviationsResponse,
@@ -37,6 +38,12 @@ from app.schemas.flowmeter import (
 )
 
 router = APIRouter(tags=["flowmeter"])
+
+if TYPE_CHECKING:
+    from app.services.flowmeter_analytics import (
+        FarmFlowmeterAnalytics,
+        SectorFlowmeterAnalytics,
+    )
 
 
 def _build_farm_statistics(
@@ -89,6 +96,37 @@ async def _get_flowmeter_or_404(sector_id: str, db: AsyncSession) -> Flowmeter:
     if flowmeter is None:
         raise HTTPException(404, detail="No active flowmeter for this sector")
     return flowmeter
+
+
+@router.post("/sectors/{sector_id}/flowmeter", response_model=FlowmeterOut, status_code=201)
+async def create_sector_flowmeter(
+    sector_id: str,
+    body: FlowmeterCreate,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    """Map one provider flowmeter device to a sector during setup."""
+    await access.sector(sector_id)
+    existing = (
+        await db.execute(select(Flowmeter).where(Flowmeter.sector_id == sector_id))
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(409, detail="Sector already has a flowmeter")
+    device_in_use = (
+        await db.execute(
+            select(Flowmeter).where(
+                Flowmeter.external_device_id == body.external_device_id,
+                Flowmeter.is_active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if device_in_use is not None:
+        raise HTTPException(409, detail="Flowmeter device is already mapped")
+    flowmeter = Flowmeter(sector_id=sector_id, **body.model_dump())
+    db.add(flowmeter)
+    await db.commit()
+    await db.refresh(flowmeter)
+    return FlowmeterOut.model_validate(flowmeter)
 
 
 def _validate_date_range(since: datetime, until: datetime) -> None:

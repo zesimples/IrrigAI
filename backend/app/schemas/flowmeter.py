@@ -17,6 +17,12 @@ class FlowmeterOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FlowmeterCreate(BaseModel):
+    external_device_id: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=255)
+    serial_number: str | None = Field(None, max_length=255)
+
+
 class FlowmeterReadingPoint(BaseModel):
     timestamp: datetime
     value: float

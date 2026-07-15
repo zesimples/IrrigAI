@@ -3,6 +3,7 @@ import type {
   AITextResponse,
   AuditLog,
   AutoCalibrationResult,
+  CalibrationHistoryRun,
   ChatResult,
   ChatTurn,
   ProbeCalibrationRun,
@@ -32,6 +33,7 @@ import type {
   ProbeReadingsResponse,
   Recommendation,
   RecommendationDetail,
+  RecommendationOutcome,
   Sector,
   SectorCreate,
   SectorCropProfile,
@@ -134,6 +136,10 @@ export const farmsApi = {
   dashboard: (id: string) => get<DashboardResponse>(`/farms/${id}/dashboard`),
   generateRecommendations: (id: string) =>
     post<Recommendation[]>(`/farms/${id}/recommendations/generate`),
+  saveCredentials: (id: string, body: import("@/types").FarmCredentialsInput) =>
+    put<import("@/types").FarmCredentialsStatus>(`/farms/${id}/credentials`, body),
+  discoverProviderResources: (id: string) =>
+    get<import("@/types").ProviderDiscovery>(`/farms/${id}/provider-resources`),
 };
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
@@ -171,6 +177,10 @@ export const sectorsApi = {
   listAlerts: (id: string) =>
     get<PaginatedResponse<Alert>>(`/sectors/${id}/alerts`),
   stressProjection: (id: string) => get<StressProjection>(`/sectors/${id}/stress-projection`),
+  recommendationOutcomes: (id: string, page = 1) =>
+    get<PaginatedResponse<RecommendationOutcome>>(
+      `/sectors/${id}/recommendation-outcomes?page=${page}`,
+    ),
   cropProfile: (id: string) => get<SectorCropProfile>(`/sectors/${id}/crop-profile`),
   updateCropProfile: (id: string, body: Partial<SectorCropProfile>) =>
     put<SectorCropProfile>(`/sectors/${id}/crop-profile`, body),
@@ -183,6 +193,8 @@ export const sectorsApi = {
 export const probesApi = {
   list: (sectorId: string) => get<Probe[]>(`/sectors/${sectorId}/probes`),
   get: (id: string) => get<Probe>(`/probes/${id}`),
+  create: (sectorId: string, body: { external_id: string; serial_number?: string }) =>
+    post<Probe>(`/sectors/${sectorId}/probes`, body),
   interpret: (id: string) => post<{ interpretation: string }>(`/probes/${id}/interpret`),
   readings: (
     id: string,
@@ -297,7 +309,7 @@ export const irrigationApi = {
     get<PaginatedResponse<IrrigationEvent>>(`/sectors/${sectorId}/irrigation-events`),
   create: (
     sectorId: string,
-    body: { start_time: string; applied_mm?: number; duration_min?: number; source?: string; notes?: string },
+    body: { start_time: string; applied_mm?: number; duration_min?: number; source?: string; notes?: string; recommendation_id?: string },
   ) => post<IrrigationEvent>(`/sectors/${sectorId}/irrigation-events`, body),
 };
 
@@ -366,6 +378,10 @@ export const chatApi = {
 export const calibrationApi = {
   get: (sectorId: string) => get<AutoCalibrationResult>(`/sectors/${sectorId}/auto-calibration`),
   run: (sectorId: string) => post<ProbeCalibrationRun>(`/sectors/${sectorId}/auto-calibration/run`),
+  history: (sectorId: string) =>
+    get<CalibrationHistoryRun[]>(`/sectors/${sectorId}/calibration-runs`),
+  applyRun: (runId: string) =>
+    post<CalibrationHistoryRun>(`/calibration-runs/${runId}/apply`),
   accept: (sectorId: string) => post<{ accepted: boolean; preset_name_pt: string; preset_name_en: string }>(`/sectors/${sectorId}/auto-calibration/accept`),
   dismiss: (sectorId: string) => post<{ dismissed: boolean; dismissed_until: string }>(`/sectors/${sectorId}/auto-calibration/dismiss`),
 };
@@ -382,6 +398,10 @@ export const gddApi = {
 // ── Flowmeter ─────────────────────────────────────────────────────────────────
 
 export const flowmeterApi = {
+  create: (
+    sectorId: string,
+    body: { external_device_id: number; name: string; serial_number?: string },
+  ) => post<FlowmeterOut>(`/sectors/${sectorId}/flowmeter`, body),
   getSector: (sectorId: string) =>
     get<FlowmeterOut>(`/sectors/${sectorId}/flowmeter`),
 

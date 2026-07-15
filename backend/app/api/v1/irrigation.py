@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models import IrrigationEvent
 from app.schemas.common import PaginatedResponse
 from app.schemas.irrigation import IrrigationEventCreate, IrrigationEventOut, IrrigationEventUpdate
+from app.services.audit_service import IRRIGATION_LOGGED, audit
 
 router = APIRouter(tags=["irrigation"])
 
@@ -54,8 +55,26 @@ async def log_irrigation_event(
     db: AsyncSession = Depends(get_db),
 ):
     await access.sector(sector_id)
+    if body.recommendation_id:
+        recommendation = await access.recommendation(body.recommendation_id)
+        if str(recommendation.sector_id) != sector_id:
+            from fastapi import HTTPException
+
+            raise HTTPException(409, detail="Recommendation belongs to another sector")
     event = IrrigationEvent(sector_id=sector_id, **body.model_dump())
     db.add(event)
+    await db.flush()
+    await audit.log(
+        IRRIGATION_LOGGED,
+        "irrigation_event",
+        str(event.id),
+        db,
+        after_data={
+            "sector_id": sector_id,
+            "applied_mm": event.applied_mm,
+            "recommendation_id": event.recommendation_id,
+        },
+    )
     await db.commit()
     await db.refresh(event)
     return IrrigationEventOut.model_validate(event)

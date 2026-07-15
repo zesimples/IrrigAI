@@ -654,15 +654,17 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
     lookback_hours: how far back to fetch probe readings (default 2h for scheduler,
                     use a larger value for initial backfill).
     """
-    from datetime import timedelta
     from app.adapters.factory import get_probe_provider, get_weather_provider
     from app.config import get_settings
-    from app.models import Farm, FarmCredentials, Plot, Probe, Sector
+    from app.models import Farm, Probe
     from sqlalchemy.orm import selectinload
 
     settings = get_settings()
     farm_result = await db.execute(
-        select(Farm).where(Farm.id == farm_id).options(selectinload(Farm.credentials))
+        select(Farm).where(
+            Farm.id == farm_id,
+            Farm.is_archived.is_(False),
+        ).options(selectinload(Farm.credentials))
     )
     farm = farm_result.scalar_one_or_none()
     if farm is None:
@@ -677,9 +679,11 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
     probe_error: str | None = None
     probe_t0 = time.monotonic()
     try:
-        plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+        from app.active_records import active_plots_stmt, active_sectors_stmt
+
+        plots_result = await db.execute(active_plots_stmt(farm_id))
         for plot in plots_result.scalars().all():
-            sectors_result = await db.execute(select(Sector).where(Sector.plot_id == plot.id))
+            sectors_result = await db.execute(active_sectors_stmt(plot.id))
             for sector in sectors_result.scalars().all():
                 probes_result = await db.execute(select(Probe).where(Probe.sector_id == sector.id))
                 for probe in probes_result.scalars().all():
@@ -718,7 +722,9 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
     if farm.location_lat and farm.location_lon:
         try:
             # Determine whether any plots have per-plot weather config
-            all_plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+            from app.active_records import active_plots_stmt
+
+            all_plots_result = await db.execute(active_plots_stmt(farm_id))
             all_plots = all_plots_result.scalars().all()
             configured_plots = [
                 p for p in all_plots if p.weather_device_id or p.myirrigation_project_id
@@ -809,15 +815,11 @@ def ingest_probe_readings_sync(
     """Synchronous version using a sync SQLAlchemy session."""
     import asyncio
 
-    from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
-
     # Run synchronously via a thread-local event loop
     loop = asyncio.new_event_loop()
     try:
         # We can't reuse the sync session as async — delegate to sync SQL directly
         summary = IngestionSummary(probe_external_id=probe_external_id)
-
-        import asyncio as _asyncio
 
         readings: list[ProbeReadingDTO] = loop.run_until_complete(
             provider.fetch_readings(probe_external_id, since, until)

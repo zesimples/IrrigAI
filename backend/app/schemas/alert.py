@@ -9,6 +9,8 @@ class AlertOut(BaseModel):
     farm_id: str
     alert_type: str
     severity: str
+    source: str = "core"
+    rule_key: str | None = None
     title_pt: str
     title_en: str
     description_pt: str

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -55,7 +54,7 @@ def test_rain_skip_alert():
 
 
 def test_stale_probe_alert():
-    alert = _stale_probe_alert(SECTOR_NAME, 12.5, FARM_ID, SECTOR_ID)
+    alert = _stale_probe_alert(SECTOR_NAME, 12.5, FARM_ID, SECTOR_ID, "probe-1")
     assert alert.alert_type == AlertType.STALE_PROBE
     assert alert.severity == AlertSeverity.WARNING
     assert "12.5" in alert.description_pt
@@ -182,12 +181,43 @@ async def test_reconcile_different_type_not_resolved():
     )
 
     # Only stale probe in new alerts
-    new_alerts = [_stale_probe_alert(SECTOR_NAME, 8.0, FARM_ID, SECTOR_ID)]
+    existing_sp.source = "core"
+    existing_sp.rule_key = f"{AlertType.STALE_PROBE}:{SECTOR_ID}:probe-1"
+    new_alerts = [_stale_probe_alert(SECTOR_NAME, 8.0, FARM_ID, SECTOR_ID, "probe-1")]
     await engine.reconcile_alerts(FARM_ID, new_alerts, db)
 
     # Water stress should be auto-resolved, stale probe updated
     assert existing_ws.is_active is False
     assert existing_sp.is_active is True  # still active, was updated
+
+
+@pytest.mark.asyncio
+async def test_reconcile_never_resolves_alerts_owned_by_anomaly_detector():
+    engine = AlertEngine()
+    db = AsyncMock()
+    anomaly = Alert(
+        id="anomaly-1",
+        alert_type=AlertType.PROBE_ANOMALY,
+        sector_id=SECTOR_ID,
+        farm_id=FARM_ID,
+        severity=AlertSeverity.WARNING,
+        source="anomaly",
+        rule_key="flatline:probe-1:20",
+        title_pt="x",
+        title_en="x",
+        description_pt="x",
+        description_en="x",
+        is_active=True,
+    )
+    db.execute = AsyncMock(
+        return_value=MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[anomaly])))
+        )
+    )
+
+    await engine.reconcile_alerts(FARM_ID, [], db)
+
+    assert anomaly.is_active is True
 
 
 # ---------------------------------------------------------------------------

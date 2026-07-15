@@ -13,17 +13,15 @@ Alert reconciliation prevents flooding and auto-resolves fixed issues.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import AlertSeverity, AlertType
-from app.engine.pipeline import build_sector_context, build_weather_context
-from app.engine.probe_interpreter import interpret_probes
+from app.engine.pipeline import RecommendationPipeline, build_weather_context
 from app.engine.staleness import PROBE_VERY_STALE_H
-from app.engine.water_balance import build_water_balance
-from app.models import Alert, Farm, Plot, Probe, Sector, WeatherObservation
+from app.models import Alert, Probe, Sector, WeatherObservation
 from app.models.recommendation import Recommendation
 
 logger = logging.getLogger(__name__)
@@ -36,6 +34,8 @@ _STALE_WEATHER_HOURS = 24.0
 _WATER_STRESS_FRACTION = 0.80    # depletion / TAW
 _WATER_STRESS_CRITICAL = 0.90
 _LOW_CONFIDENCE_THRESHOLD = 0.50
+_OWNED_SOURCES = ("core", "flowmeter_deviation")
+_pipeline = RecommendationPipeline()
 
 
 # ---------------------------------------------------------------------------
@@ -52,10 +52,13 @@ def _make_alert(
     farm_id: str,
     sector_id: str | None = None,
     data: dict | None = None,
+    rule_key: str | None = None,
 ) -> Alert:
     return Alert(
         alert_type=alert_type,
         severity=severity,
+        source="core",
+        rule_key=rule_key or f"{alert_type}:{sector_id or farm_id}",
         title_pt=title_pt,
         title_en=title_en,
         description_pt=description_pt,
@@ -109,7 +112,9 @@ def _rain_skip_alert(sector_name: str, rain_mm: float, farm_id: str, sector_id: 
     )
 
 
-def _stale_probe_alert(sector_name: str, hours: float, farm_id: str, sector_id: str) -> Alert:
+def _stale_probe_alert(
+    sector_name: str, hours: float, farm_id: str, sector_id: str, probe_id: str
+) -> Alert:
     return _make_alert(
         alert_type=AlertType.STALE_PROBE,
         severity=AlertSeverity.WARNING,
@@ -119,7 +124,8 @@ def _stale_probe_alert(sector_name: str, hours: float, farm_id: str, sector_id: 
         description_en=f"Probe data is {hours:.1f}h old. Check probe connectivity.",
         farm_id=farm_id,
         sector_id=sector_id,
-        data={"hours_since_reading": hours},
+        data={"hours_since_reading": hours, "probe_id": probe_id},
+        rule_key=f"{AlertType.STALE_PROBE}:{sector_id}:{probe_id}",
     )
 
 
@@ -174,14 +180,16 @@ class AlertEngine:
 
     async def run_farm_alerts(self, farm_id: str, db: AsyncSession) -> list[Alert]:
         """Generate all alerts for a farm, reconcile with existing active alerts."""
-        farm = await db.get(Farm, farm_id)
+        from app.active_records import active_plots_stmt, active_sectors_stmt, get_active_farm
+
+        farm = await get_active_farm(db, farm_id)
         if farm is None:
             return []
 
         new_alerts: list[Alert] = []
 
         # Collect all sectors
-        plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+        plots_result = await db.execute(active_plots_stmt(farm_id))
         plots = plots_result.scalars().all()
 
         # Farm-level weather freshness
@@ -191,7 +199,7 @@ class AlertEngine:
 
         for plot in plots:
             sectors_result = await db.execute(
-                select(Sector).where(Sector.plot_id == plot.id)
+                active_sectors_stmt(plot.id)
             )
             for sector in sectors_result.scalars().all():
                 try:
@@ -216,48 +224,63 @@ class AlertEngine:
     ) -> list[Alert]:
         alerts: list[Alert] = []
 
-        # Load engine context for water balance
+        # Use the exact same deterministic state as recommendation generation.
+        # This includes probe weighting, calibrated soil bounds, the flowmeter-
+        # backed soil-water model, effective rainfall, and trigger strategy.
         try:
-            ctx = await build_sector_context(sector.id, db)
+            state = await _pipeline.run(
+                sector.id,
+                target_date=date.today(),
+                db=db,
+                farm_id=farm_id,
+            )
         except Exception:
-            logger.exception("Could not build sector context for %s", sector.id)
+            logger.exception("Could not build live engine state for %s", sector.id)
             return alerts
 
         # Missing config check
-        if ctx.missing_config:
-            alerts.append(_missing_config_alert(sector.name, ctx.missing_config, farm_id, sector.id))
+        if state.missing_config:
+            alerts.append(
+                _missing_config_alert(sector.name, state.missing_config, farm_id, sector.id)
+            )
 
-        # Water balance
-        try:
-            probes_snap = await interpret_probes(ctx, db)
-            wb = build_water_balance(ctx, probes_snap.rootzone.swc_current)
+        depletion_fraction = (
+            state.depletion_mm / state.taw_mm
+            if state.depletion_mm is not None and state.taw_mm
+            else 0.0
+        )
+        if depletion_fraction >= _WATER_STRESS_FRACTION:
+            alerts.append(
+                _water_stress_alert(
+                    sector.name, depletion_fraction * 100, farm_id, sector.id
+                )
+            )
 
-            depletion_fraction = wb.depletion_mm / wb.taw_mm if wb.taw_mm > 0 else 0.0
-
-            if depletion_fraction >= _WATER_STRESS_FRACTION:
-                depletion_pct = depletion_fraction * 100
-                alerts.append(_water_stress_alert(sector.name, depletion_pct, farm_id, sector.id))
-
-            # Over-irrigation: current SWC at or above FC
-            if wb.swc_current >= wb.fc * 0.98:
-                alerts.append(_over_irrigation_alert(sector.name, farm_id, sector.id))
-
-        except Exception:
-            logger.exception("Water balance check failed for sector %s", sector.id)
+        # Persistent saturation/over-irrigation is evaluated by the anomaly
+        # detector from raw readings. The water-balance state is capped at FC and
+        # therefore cannot honestly claim that the soil is above field capacity.
 
         # Probe data freshness
         freshness_alerts = await self._check_probe_freshness(sector, farm_id, db)
         alerts.extend(freshness_alerts)
 
         # Rain skip opportunity (needs weather)
-        rain_alert = await self._check_rain_skip(sector, farm_id, db)
-        if rain_alert:
-            alerts.append(rain_alert)
+        if state.rain_skip_applies:
+            alerts.append(
+                _rain_skip_alert(
+                    sector.name,
+                    state.forecast_rain_next_48h,
+                    farm_id,
+                    sector.id,
+                )
+            )
 
-        # Low confidence from latest recommendation
-        conf_alert = await self._check_low_confidence(sector, farm_id, db)
-        if conf_alert:
-            alerts.append(conf_alert)
+        if state.confidence.score < _LOW_CONFIDENCE_THRESHOLD:
+            alerts.append(
+                _low_confidence_alert(
+                    sector.name, state.confidence.score, farm_id, sector.id
+                )
+            )
 
         return alerts
 
@@ -273,14 +296,20 @@ class AlertEngine:
         alerts: list[Alert] = []
         for probe in probes:
             if probe.last_reading_at is None:
-                alerts.append(_stale_probe_alert(sector.name, 9999.0, farm_id, sector.id))
+                alerts.append(
+                    _stale_probe_alert(sector.name, 9999.0, farm_id, sector.id, str(probe.id))
+                )
             else:
                 ts = probe.last_reading_at
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=UTC)
                 hours_old = (now - ts).total_seconds() / 3600
                 if hours_old > _STALE_PROBE_HOURS:
-                    alerts.append(_stale_probe_alert(sector.name, hours_old, farm_id, sector.id))
+                    alerts.append(
+                        _stale_probe_alert(
+                            sector.name, hours_old, farm_id, sector.id, str(probe.id)
+                        )
+                    )
         return alerts
 
     async def _check_weather_freshness(self, farm_id: str, db: AsyncSession) -> Alert | None:
@@ -344,12 +373,22 @@ class AlertEngine:
         - If no match for new alert: create it
         """
         existing_result = await db.execute(
-            select(Alert).where(Alert.farm_id == farm_id, Alert.is_active.is_(True))
+            select(Alert).where(
+                Alert.farm_id == farm_id,
+                Alert.is_active.is_(True),
+                Alert.source.in_(_OWNED_SOURCES),
+            )
         )
         existing: list[Alert] = list(existing_result.scalars().all())
+        # Keep the ownership boundary defensive even when a test double or a
+        # future repository wrapper does not apply the SQL predicate.
+        existing = [a for a in existing if (a.source or "core") in _OWNED_SOURCES]
 
         def _key(a: Alert) -> tuple:
-            return (a.alert_type, a.sector_id)
+            return (
+                a.source or "core",
+                a.rule_key or f"{a.alert_type}:{a.sector_id or a.farm_id}",
+            )
 
         existing_map = {_key(a): a for a in existing}
         new_keys = {_key(a) for a in new_alerts}

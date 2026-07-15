@@ -45,6 +45,11 @@ def _make_alert(
     return Alert(
         alert_type=alert_type,
         severity=severity,
+        source="flowmeter_flow_rate",
+        rule_key=(
+            f"{alert_type}:{sector_id}:"
+            f"{data.get('event_start_time', 'unknown')}"
+        ),
         title_pt=title_pt,
         title_en=title_en,
         description_pt=description_pt,
@@ -187,7 +192,12 @@ class FlowmeterFlowRateAlertChecker:
             .join(Sector, Flowmeter.sector_id == Sector.id)
             .join(Plot, Sector.plot_id == Plot.id)
             .outerjoin(FlowmeterReference, FlowmeterReference.flowmeter_id == Flowmeter.id)
-            .where(Plot.farm_id == farm_id, Flowmeter.is_active.is_(True))
+            .where(
+                Plot.farm_id == farm_id,
+                Plot.is_archived.is_(False),
+                Sector.is_archived.is_(False),
+                Flowmeter.is_active.is_(True),
+            )
         )
         rows = fm_result.all()
 

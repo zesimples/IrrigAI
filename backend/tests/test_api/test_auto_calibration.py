@@ -16,6 +16,7 @@ from app.models import (
     Plot,
     Probe,
     ProbeCalibration,
+    ProbeCalibrationRun,
     ProbeDepth,
     ProbeReading,
     Sector,
@@ -144,6 +145,19 @@ async def test_run_calibration_is_idempotent_upsert(
     b2 = r2.json()
     assert b2["changed"] is False
     assert b2["previous_fc"] == pytest.approx(r1.json()["observed_fc"])
+
+    history_response = await client.get(
+        f"/api/v1/sectors/{sector_id}/calibration-runs"
+    )
+    assert history_response.status_code == 200
+    history = history_response.json()
+    assert len(history) == 2
+    assert {row["status"] for row in history} == {"applied", "superseded"}
+
+    rows = (await db.execute(
+        select(ProbeCalibrationRun).where(ProbeCalibrationRun.sector_id == sector_id)
+    )).scalars().all()
+    assert len(rows) == 2
 
 
 @pytest.mark.asyncio

@@ -5,15 +5,12 @@ and resolves stale alerts when anomalies are no longer detected.
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.anomaly.detector import AnomalyDetector
 from app.anomaly.types import Anomaly
-from app.models import Alert, Plot, Sector
-from app.models.base import new_uuid
+from app.models import Alert, Plot
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +42,9 @@ async def run_anomaly_detection(
 
     Returns the list of currently detected anomalies.
     """
-    sector = await db.get(Sector, sector_id)
+    from app.active_records import get_active_sector
+
+    sector = await get_active_sector(db, sector_id)
     if sector is None:
         return []
 
@@ -74,13 +73,15 @@ async def run_for_farm(
     lookback_hours: int = 72,
 ) -> list[Anomaly]:
     """Run detector for all sectors of a farm."""
-    plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+    from app.active_records import active_plots_stmt, active_sectors_stmt
+
+    plots_result = await db.execute(active_plots_stmt(farm_id))
     plots = plots_result.scalars().all()
 
     all_anomalies: list[Anomaly] = []
     for plot in plots:
         sectors_result = await db.execute(
-            select(Sector).where(Sector.plot_id == plot.id)
+            active_sectors_stmt(plot.id)
         )
         for sector in sectors_result.scalars().all():
             try:
@@ -122,6 +123,8 @@ async def _persist_if_new(
         farm_id=farm_id,
         alert_type=alert_type,
         severity=anomaly.severity,
+        source="anomaly",
+        rule_key=":".join(str(part) for part in anomaly.dedup_key()),
         title_pt=title_pt,
         title_en=title_en,
         description_pt=anomaly.description_pt,

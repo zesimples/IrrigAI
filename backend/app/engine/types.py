@@ -6,7 +6,6 @@ All agronomic inputs come from user-configured DB records — never hardcoded.
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from uuid import UUID
 
 
 @dataclass
@@ -188,6 +187,7 @@ class EngineRecommendation:
     taw_mm: float | None
     rain_effective_mm: float
     forecast_rain_next_48h: float
+    rain_skip_applies: bool
 
     # Provenance
     defaults_used: list[str]

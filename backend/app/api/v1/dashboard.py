@@ -181,9 +181,9 @@ async def get_dashboard(farm_id: str, access: Access, db: AsyncSession = Depends
         )
 
     # --- Load all sectors for this farm ---
-    plots = (
-        await db.execute(select(Plot).where(Plot.farm_id == farm_id))
-    ).scalars().all()
+    from app.active_records import active_plots_stmt
+
+    plots = (await db.execute(active_plots_stmt(farm_id))).scalars().all()
 
     plot_name_by_id: dict[str, str] = {p.id: p.name for p in plots}
     plot_ids = [p.id for p in plots]
@@ -196,6 +196,7 @@ async def get_dashboard(farm_id: str, access: Access, db: AsyncSession = Depends
                 select(Sector)
                 .where(
                     Sector.plot_id.in_(plot_ids),
+                    Sector.is_archived.is_(False),
                     exists().where(Probe.sector_id == Sector.id),
                 )
             )

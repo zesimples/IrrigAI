@@ -19,7 +19,7 @@ from app.engine.auto_calibration import (
     AutoCalibrationResult,
     AutoCalibrationService,
 )
-from app.models import Plot, ProbeCalibration, SectorCropProfile, SoilPreset
+from app.models import Plot, ProbeCalibration, ProbeCalibrationRun, SectorCropProfile, SoilPreset
 from app.services.audit_service import audit
 from app.services.probe_calibration_service import ProbeCalibrationService
 
@@ -100,6 +100,25 @@ class ProbeCalibrationOut(BaseModel):
     cleared_customization: bool = False
 
 
+class CalibrationHistoryOut(BaseModel):
+    id: str
+    sector_id: str
+    observed_fc: float
+    observed_refill: float
+    method: str
+    num_cycles: int
+    consistency: float
+    window_days: int
+    computed_at: datetime
+    source: str
+    status: str
+    previous_fc: float | None = None
+    previous_refill: float | None = None
+    applied_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/sectors/{sector_id}/auto-calibration", response_model=AutoCalibrationOut)
@@ -150,7 +169,12 @@ async def run_probe_calibration(
     # resolved before compute_and_save mutates the calibration row.
     before = await resolve_sector_soil_bounds(sector_id, db)
 
-    saved = await _calib_service.compute_and_save(sector_id, db)
+    saved = await _calib_service.compute_and_save(
+        sector_id,
+        db,
+        source="manual",
+        created_by_id=str(access.current_user.id),
+    )
     if saved is None:
         # Report the actual blocker (tension-only probe, too few VWC readings,
         # implausible envelope) rather than a generic "insufficient data".
@@ -212,6 +236,70 @@ async def run_probe_calibration(
         applied=after.source == "probe_calibrated",
         cleared_customization=cleared_customization,
     )
+
+
+@router.get(
+    "/sectors/{sector_id}/calibration-runs",
+    response_model=list[CalibrationHistoryOut],
+)
+async def list_calibration_runs(
+    sector_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    await access.sector(sector_id)
+    rows = (
+        await db.execute(
+            select(ProbeCalibrationRun)
+            .where(ProbeCalibrationRun.sector_id == sector_id)
+            .order_by(ProbeCalibrationRun.computed_at.desc())
+            .limit(100)
+        )
+    ).scalars().all()
+    return [CalibrationHistoryOut.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/calibration-runs/{run_id}/apply",
+    response_model=CalibrationHistoryOut,
+)
+async def apply_calibration_run(
+    run_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    run = await db.get(ProbeCalibrationRun, run_id)
+    if run is None:
+        raise HTTPException(404, detail="Calibration run not found")
+    await access.sector(str(run.sector_id))
+
+    before = (await db.execute(
+        select(ProbeCalibration).where(ProbeCalibration.sector_id == run.sector_id)
+    )).scalar_one_or_none()
+    scp = (await db.execute(
+        select(SectorCropProfile).where(SectorCropProfile.sector_id == run.sector_id)
+    )).scalar_one_or_none()
+    if scp and scp.is_customized:
+        scp.is_customized = False
+    await _calib_service.apply_run(run, db)
+    await audit.log(
+        "probe_calibration_run_applied",
+        "probe_calibration_run",
+        str(run.id),
+        db,
+        user_id=str(access.current_user.id),
+        before_data={
+            "observed_fc": before.observed_fc if before else None,
+            "observed_refill": before.observed_refill if before else None,
+        },
+        after_data={
+            "observed_fc": run.observed_fc,
+            "observed_refill": run.observed_refill,
+        },
+    )
+    await db.commit()
+    await db.refresh(run)
+    return CalibrationHistoryOut.model_validate(run)
 
 
 @router.post("/sectors/{sector_id}/auto-calibration/accept", response_model=dict)

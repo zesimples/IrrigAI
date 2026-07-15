@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Logo } from "@/components/ui/Logo";
-import { farmsApi, plotsApi, sectorsApi } from "@/lib/api";
+import { farmsApi, flowmeterApi, plotsApi, probesApi, sectorsApi } from "@/lib/api";
 import type { CropProfileTemplate, CropStage, Farm, Plot, Sector, SoilPreset } from "@/types";
 
 const TIMEZONES = [
@@ -38,6 +38,9 @@ export default function OnboardingPage() {
   const [farmName, setFarmName] = useState("");
   const [region, setRegion] = useState("");
   const [timezone, setTimezone] = useState("Europe/Lisbon");
+  const [latitude, setLatitude] = useState("");
+  const [longitude, setLongitude] = useState("");
+  const [elevation, setElevation] = useState("");
 
   // Step 2 — Plot & Soil
   const [plotName, setPlotName] = useState("");
@@ -48,13 +51,28 @@ export default function OnboardingPage() {
   const [cropTemplate, setCropTemplate] = useState<CropProfileTemplate | null>(null);
   const [currentStage, setCurrentStage] = useState<CropStage | null>(null);
   const [plantingYear, setPlantingYear] = useState("");
+  const [sectorArea, setSectorArea] = useState("");
+  const [rowSpacing, setRowSpacing] = useState("");
 
   // Step 4 — Irrigation system
   const [irrigationType, setIrrigationType] = useState("drip");
   const [emitterFlow, setEmitterFlow] = useState("");
+  const [emitterSpacing, setEmitterSpacing] = useState("");
   const [appRateMmH, setAppRateMmH] = useState("");
   const [efficiency, setEfficiency] = useState("0.90");
   const [distributionUniformity, setDistributionUniformity] = useState("0.90");
+
+  // Step 5 — Provider and device mappings (optional)
+  const [providerUsername, setProviderUsername] = useState("");
+  const [providerPassword, setProviderPassword] = useState("");
+  const [providerClientId, setProviderClientId] = useState("");
+  const [providerClientSecret, setProviderClientSecret] = useState("");
+  const [providerProjectId, setProviderProjectId] = useState("");
+  const [weatherDeviceId, setWeatherDeviceId] = useState("");
+  const [probeExternalId, setProbeExternalId] = useState("");
+  const [flowmeterDeviceId, setFlowmeterDeviceId] = useState("");
+  const [flowmeterName, setFlowmeterName] = useState("");
+  const [providerCheck, setProviderCheck] = useState<string | null>(null);
 
   // Created entities (used across steps)
   const [createdFarm, setCreatedFarm] = useState<Farm | null>(null);
@@ -71,12 +89,26 @@ export default function OnboardingPage() {
       setError("O nome da exploração é obrigatório.");
       return;
     }
+    const lat = parseFloat(latitude);
+    const lon = parseFloat(longitude);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) {
+      setError("Introduza latitude e longitude válidas para obter meteorologia local.");
+      return;
+    }
+    const elev = elevation ? parseFloat(elevation) : undefined;
+    if (elev != null && (!Number.isFinite(elev) || elev < -500 || elev > 9000)) {
+      setError("A altitude deve estar entre -500 e 9000 metros.");
+      return;
+    }
     setSaving(true);
     try {
       const farm = await farmsApi.create({
         name: farmName.trim(),
         region: region || undefined,
         timezone,
+        location_lat: lat,
+        location_lon: lon,
+        elevation_m: elev,
       });
       setCreatedFarm(farm);
       nextStep();
@@ -116,13 +148,25 @@ export default function OnboardingPage() {
       setError("Preencha o nome do sector e seleccione a cultura.");
       return;
     }
+    const area = parseFloat(sectorArea);
+    if (!Number.isFinite(area) || area <= 0) {
+      setError("A área do sector deve ser um número positivo.");
+      return;
+    }
+    const rows = rowSpacing ? parseFloat(rowSpacing) : undefined;
+    if (rows != null && (!Number.isFinite(rows) || rows <= 0)) {
+      setError("O espaçamento entre linhas deve ser positivo.");
+      return;
+    }
     setSaving(true);
     try {
       const sector = await sectorsApi.create(createdPlot.id, {
         name: sectorName.trim(),
         crop_type: cropTemplate.crop_type,
         planting_year: plantingYear ? parseInt(plantingYear, 10) : undefined,
-        current_phenological_stage: currentStage?.name,
+        area_ha: area,
+        row_spacing_m: rows,
+        current_phenological_stage: currentStage?.key,
       });
       // Apply crop profile from template
       await sectorsApi.resetCropProfile(sector.id, cropTemplate.id);
@@ -155,6 +199,13 @@ export default function OnboardingPage() {
         return;
       }
     }
+    if (emitterSpacing) {
+      const v = parseFloat(emitterSpacing);
+      if (isNaN(v) || v <= 0) {
+        setError("O espaçamento entre gotejadores deve ser um número positivo.");
+        return;
+      }
+    }
     if (appRateMmH) {
       const v = parseFloat(appRateMmH);
       if (isNaN(v) || v <= 0) {
@@ -162,19 +213,96 @@ export default function OnboardingPage() {
         return;
       }
     }
+    if (
+      irrigationType === "drip" &&
+      !appRateMmH &&
+      (!emitterFlow || !emitterSpacing || !rowSpacing)
+    ) {
+      setError("Para calcular a duração, indique a taxa de aplicação ou o caudal e os dois espaçamentos.");
+      return;
+    }
 
     setSaving(true);
     try {
       await sectorsApi.createIrrigationSystem(createdSector.id, {
         system_type: irrigationType as "drip" | "center_pivot" | "sprinkler" | "flood",
         emitter_flow_lph: emitterFlow ? parseFloat(emitterFlow) : undefined,
+        emitter_spacing_m: emitterSpacing ? parseFloat(emitterSpacing) : undefined,
         application_rate_mm_h: appRateMmH ? parseFloat(appRateMmH) : undefined,
         efficiency: effVal,
         distribution_uniformity: duVal,
       });
-      router.push(`/farms/${createdFarm.id}`);
+      nextStep();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao guardar sistema de rega");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function providerBody() {
+    return {
+      username: providerUsername.trim(),
+      password: providerPassword,
+      client_id: providerClientId.trim(),
+      client_secret: providerClientSecret,
+      project_id: providerProjectId.trim() || undefined,
+      weather_device_id: weatherDeviceId.trim() || undefined,
+    };
+  }
+
+  function validateProviderFields(): boolean {
+    const values = [providerUsername, providerPassword, providerClientId, providerClientSecret];
+    const any = values.some((value) => value.trim());
+    const all = values.every((value) => value.trim());
+    if (any && !all) {
+      setError("Preencha os quatro campos de acesso MyIrrigation ou deixe todos vazios.");
+      return false;
+    }
+    return true;
+  }
+
+  async function testProviderConnection() {
+    if (!createdFarm || !validateProviderFields() || !providerUsername.trim()) return;
+    setSaving(true);
+    setError(null);
+    setProviderCheck(null);
+    try {
+      await farmsApi.saveCredentials(createdFarm.id, providerBody());
+      const resources = await farmsApi.discoverProviderResources(createdFarm.id);
+      setProviderCheck(`Ligação validada: ${resources.projects.length} projecto(s) e ${resources.devices.length} dispositivo(s).`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Não foi possível validar o fornecedor.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveDataAndFinish(skipProvider = false) {
+    if (!createdFarm || !createdSector) return;
+    if (!skipProvider && !validateProviderFields()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      if (!skipProvider && providerUsername.trim()) {
+        await farmsApi.saveCredentials(createdFarm.id, providerBody());
+      }
+      if (!skipProvider && probeExternalId.trim()) {
+        await probesApi.create(createdSector.id, { external_id: probeExternalId.trim() });
+      }
+      if (!skipProvider && flowmeterDeviceId.trim()) {
+        const deviceId = Number(flowmeterDeviceId);
+        if (!Number.isInteger(deviceId) || deviceId <= 0) {
+          throw new Error("O ID do caudalímetro deve ser um número inteiro positivo.");
+        }
+        await flowmeterApi.create(createdSector.id, {
+          external_device_id: deviceId,
+          name: flowmeterName.trim() || `Caudalímetro ${deviceId}`,
+        });
+      }
+      router.push(`/farms/${createdFarm.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao guardar integração de dados.");
     } finally {
       setSaving(false);
     }
@@ -207,7 +335,7 @@ export default function OnboardingPage() {
           </p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Configure a sua exploração</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            Complete os quatro passos para criar a exploração, o talhão, o sector e o sistema de rega.
+            Complete os cinco passos para criar a exploração e ligar as fontes de dados.
           </p>
         </div>
 
@@ -246,6 +374,33 @@ export default function OnboardingPage() {
                 placeholder="ex. Alentejo"
                 hint="Opcional, mas útil para contexto operacional e validação manual."
               />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Input
+                  label="Latitude *"
+                  type="number"
+                  value={latitude}
+                  onChange={(e) => setLatitude(e.target.value)}
+                  placeholder="38.57"
+                  step="0.000001"
+                  hint="Necessária para meteorologia e ET₀."
+                />
+                <Input
+                  label="Longitude *"
+                  type="number"
+                  value={longitude}
+                  onChange={(e) => setLongitude(e.target.value)}
+                  placeholder="-7.91"
+                  step="0.000001"
+                />
+                <Input
+                  label="Altitude (m)"
+                  type="number"
+                  value={elevation}
+                  onChange={(e) => setElevation(e.target.value)}
+                  placeholder="220"
+                  step="1"
+                />
+              </div>
               <Select
                 label="Fuso horário"
                 value={timezone}
@@ -323,6 +478,28 @@ export default function OnboardingPage() {
                 inputMode="numeric"
                 hint="Opcional. Útil para relatórios e contexto técnico."
               />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Input
+                  label="Área do sector (ha) *"
+                  type="number"
+                  value={sectorArea}
+                  onChange={(e) => setSectorArea(e.target.value)}
+                  placeholder="ex. 12.5"
+                  step="0.01"
+                  min="0"
+                  hint="Usada para volumes e indicadores agregados."
+                />
+                <Input
+                  label="Espaçamento entre linhas (m)"
+                  type="number"
+                  value={rowSpacing}
+                  onChange={(e) => setRowSpacing(e.target.value)}
+                  placeholder="ex. 6.0"
+                  step="0.1"
+                  min="0"
+                  hint="Necessário para calcular a taxa de aplicação gota-a-gota."
+                />
+              </div>
               <CropTypeSelector
                 value={cropTemplate?.crop_type ?? null}
                 onChange={setCropTemplate}
@@ -330,7 +507,7 @@ export default function OnboardingPage() {
               {cropTemplate && (
                 <PhenologicalTimeline
                   stages={cropTemplate.stages}
-                  currentStage={currentStage?.name}
+                  currentStage={currentStage?.key}
                   onSelect={setCurrentStage}
                 />
               )}
@@ -362,27 +539,39 @@ export default function OnboardingPage() {
                 hint="Escolha o sistema que representa melhor o sector criado."
               />
               {(irrigationType === "drip") && (
-                <Input
-                  label="Caudal do gotejador (l/h)"
-                  type="number"
-                  value={emitterFlow}
-                  onChange={(e) => setEmitterFlow(e.target.value)}
-                  placeholder="ex. 2.0"
-                  step="0.1"
-                  inputMode="decimal"
-                  hint="Opcional. Melhora a estimativa de duração da rega."
-                />
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Input
+                    label="Caudal do gotejador (l/h)"
+                    type="number"
+                    value={emitterFlow}
+                    onChange={(e) => setEmitterFlow(e.target.value)}
+                    placeholder="ex. 2.0"
+                    step="0.1"
+                    inputMode="decimal"
+                    hint="Caudal nominal por emissor."
+                  />
+                  <Input
+                    label="Espaçamento entre gotejadores (m)"
+                    type="number"
+                    value={emitterSpacing}
+                    onChange={(e) => setEmitterSpacing(e.target.value)}
+                    placeholder="ex. 0.50"
+                    step="0.05"
+                    inputMode="decimal"
+                    hint="Distância entre emissores na linha."
+                  />
+                </div>
               )}
-              {(irrigationType === "sprinkler" || irrigationType === "center_pivot") && (
+              {(irrigationType === "sprinkler" || irrigationType === "center_pivot" || irrigationType === "drip") && (
                 <Input
-                  label="Taxa de aplicação (mm/h)"
+                  label={irrigationType === "drip" ? "Taxa de aplicação conhecida (mm/h) — opcional" : "Taxa de aplicação (mm/h)"}
                   type="number"
                   value={appRateMmH}
                   onChange={(e) => setAppRateMmH(e.target.value)}
                   placeholder="ex. 5.0"
                   step="0.5"
                   inputMode="decimal"
-                  hint="Opcional. Usado para calcular a duração da aplicação."
+                  hint={irrigationType === "drip" ? "Se preenchida, substitui o cálculo pela geometria dos gotejadores." : "Usada para calcular a duração da aplicação."}
                 />
               )}
               <Input
@@ -412,8 +601,72 @@ export default function OnboardingPage() {
                   ← Anterior
                 </Button>
                 <Button onClick={saveIrrigationAndFinish} loading={saving} className="w-full sm:w-auto">
-                  Concluir configuração
+                  Seguinte →
                 </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 5: Provider and devices */}
+          {step === 5 && (
+            <div className="space-y-5">
+              <div className="space-y-1">
+                <h2 className="text-xl font-semibold tracking-tight text-slate-950">Fornecedor e dispositivos</h2>
+                <p className="text-sm text-slate-500">
+                  Ligue a conta MyIrrigation e mapeie os dispositivos deste sector. As credenciais são cifradas no servidor e nunca são devolvidas pela API.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Input label="Utilizador" value={providerUsername} onChange={(e) => setProviderUsername(e.target.value)} autoComplete="username" />
+                <Input label="Palavra-passe" type="password" value={providerPassword} onChange={(e) => setProviderPassword(e.target.value)} autoComplete="new-password" />
+                <Input label="Client ID" value={providerClientId} onChange={(e) => setProviderClientId(e.target.value)} />
+                <Input label="Client secret" type="password" value={providerClientSecret} onChange={(e) => setProviderClientSecret(e.target.value)} autoComplete="off" />
+                <Input label="ID do projecto meteorológico" value={providerProjectId} onChange={(e) => setProviderProjectId(e.target.value)} placeholder="Opcional" />
+                <Input label="ID da estação meteorológica" value={weatherDeviceId} onChange={(e) => setWeatherDeviceId(e.target.value)} placeholder="Opcional" />
+              </div>
+              <div className="flex items-center gap-3">
+                <Button variant="secondary" onClick={testProviderConnection} loading={saving} disabled={!providerUsername.trim()}>
+                  Testar ligação e descobrir
+                </Button>
+                {providerCheck && <p className="text-sm font-medium text-emerald-700">{providerCheck}</p>}
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="mb-3 text-sm font-semibold text-slate-900">Mapeamento do sector criado</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Input
+                    label="ID externo da sonda"
+                    value={probeExternalId}
+                    onChange={(e) => setProbeExternalId(e.target.value)}
+                    placeholder="project_id/device_id"
+                    hint="Cria a sonda que alimentará a humidade do solo."
+                  />
+                  <Input
+                    label="ID numérico do caudalímetro"
+                    type="number"
+                    value={flowmeterDeviceId}
+                    onChange={(e) => setFlowmeterDeviceId(e.target.value)}
+                    placeholder="ex. 1597"
+                  />
+                  <Input
+                    label="Nome do caudalímetro"
+                    value={flowmeterName}
+                    onChange={(e) => setFlowmeterName(e.target.value)}
+                    placeholder="ex. Turno 4"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col-reverse justify-between gap-3 pt-2 sm:flex-row">
+                <Button variant="ghost" onClick={() => setStep(4)} className="w-full sm:w-auto">
+                  ← Anterior
+                </Button>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button variant="secondary" onClick={() => saveDataAndFinish(true)} disabled={saving}>
+                    Configurar mais tarde
+                  </Button>
+                  <Button onClick={() => saveDataAndFinish(false)} loading={saving}>
+                    Concluir configuração
+                  </Button>
+                </div>
               </div>
             </div>
           )}

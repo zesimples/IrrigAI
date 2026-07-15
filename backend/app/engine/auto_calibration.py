@@ -7,7 +7,7 @@ creates custom soil values.
 
 import logging
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -103,9 +103,11 @@ class AutoCalibrationService:
     async def analyze_sector(
         self, sector_id: str, db: AsyncSession
     ) -> AutoCalibrationResult | None:
-        from app.models import IrrigationEvent, Plot, Probe, ProbeDepth, ProbeReading, Sector, SectorCropProfile
+        from app.models import IrrigationEvent, Plot, Probe, ProbeDepth, ProbeReading, SectorCropProfile
 
-        sector = await db.get(Sector, sector_id)
+        from app.active_records import get_active_sector
+
+        sector = await get_active_sector(db, sector_id)
         if sector is None:
             return None
 
@@ -382,9 +384,11 @@ class AutoCalibrationService:
         there is too little data or the result fails plausibility guards (the
         caller then keeps the preset FC).
         """
-        from app.models import IrrigationEvent, Probe, ProbeDepth, ProbeReading, Sector
+        from app.models import IrrigationEvent, Probe, ProbeDepth, ProbeReading
 
-        sector = await db.get(Sector, sector_id)
+        from app.active_records import get_active_sector
+
+        sector = await get_active_sector(db, sector_id)
         if sector is None:
             return None
 

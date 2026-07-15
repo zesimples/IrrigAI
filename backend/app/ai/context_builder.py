@@ -335,13 +335,15 @@ class AssistantContextBuilder:
         }
 
         # All sectors under this farm
-        plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+        from app.active_records import active_plots_stmt, active_sectors_stmt
+
+        plots_result = await db.execute(active_plots_stmt(farm_id))
         plots = plots_result.scalars().all()
 
         sector_contexts: list[SectorAssistantContext] = []
         for plot in plots:
             sectors_result = await db.execute(
-                select(Sector).where(Sector.plot_id == plot.id)
+                active_sectors_stmt(plot.id)
             )
             for sector in sectors_result.scalars().all():
                 try:

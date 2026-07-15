@@ -9,6 +9,12 @@ must be eagerly loaded (via selectinload(Farm.credentials)) before passing
 the farm object here — lazy loading in async context raises MissingGreenlet.
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.adapters.irriwatch import IrriWatchAdapter
+    from app.adapters.myirrigation import MyIrrigationAdapter
+
 from app.adapters.base import ProbeDataProvider, WeatherDataProvider
 from app.adapters.mock_probe import MockProbeProvider
 from app.adapters.mock_weather import MockWeatherProvider
@@ -16,8 +22,8 @@ from app.config import Settings
 
 # Cache adapters by a full credential tuple so two farms with different client_ids
 # or project scopes never share an adapter instance (and its JWT token).
-_irriwatch_instance: "IrriWatchAdapter | None" = None  # type: ignore[name-defined]
-_myirrigation_cache: "dict[tuple, MyIrrigationAdapter]" = {}  # type: ignore[name-defined]
+_irriwatch_instance: "IrriWatchAdapter | None" = None
+_myirrigation_cache: "dict[tuple, MyIrrigationAdapter]" = {}
 
 
 def _get_irriwatch(config: Settings):
@@ -70,7 +76,9 @@ def _get_myirrigation(
     cache_key = (
         config.MYIRRIGATION_BASE_URL,
         resolved_username,
+        resolved_password,
         resolved_client_id,
+        resolved_client_secret,
         resolved_project_id,
         resolved_device_id,
     )

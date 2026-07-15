@@ -21,30 +21,27 @@ class ProbeCalibrationService:
     def __init__(self) -> None:
         self._calibrator = AutoCalibrationService()
 
-    async def compute_and_save(self, sector_id: str, db: AsyncSession):
-        from app.models.probe_calibration import ProbeCalibration
+    async def compute_and_record(
+        self,
+        sector_id: str,
+        db: AsyncSession,
+        *,
+        apply: bool,
+        source: str,
+        created_by_id: str | None = None,
+    ):
+        """Compute an immutable run and optionally promote it to active bounds."""
+        from app.models import ProbeCalibration, ProbeCalibrationRun
 
         result = await self._calibrator.compute_sector_calibration(sector_id, db)
         if result is None:
             return None
 
-        now = datetime.now(UTC)
         existing = (await db.execute(
             select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
         )).scalar_one_or_none()
-
-        if existing:
-            existing.observed_fc = result.observed_fc
-            existing.observed_refill = result.observed_refill
-            existing.method = result.method
-            existing.num_cycles = result.num_cycles
-            existing.consistency = result.consistency
-            existing.window_days = result.window_days
-            existing.computed_at = now
-            await db.flush()
-            return existing
-
-        row = ProbeCalibration(
+        now = datetime.now(UTC)
+        run = ProbeCalibrationRun(
             sector_id=sector_id,
             observed_fc=result.observed_fc,
             observed_refill=result.observed_refill,
@@ -53,8 +50,82 @@ class ProbeCalibrationService:
             consistency=result.consistency,
             window_days=result.window_days,
             computed_at=now,
+            source=source,
+            status="candidate",
+            previous_fc=existing.observed_fc if existing else None,
+            previous_refill=existing.observed_refill if existing else None,
+            created_by_id=created_by_id,
         )
-        db.add(row)
+        db.add(run)
+        await db.flush()
+
+        active = existing
+        if apply:
+            active = await self.apply_run(run, db)
+        return active, run
+
+    async def compute_and_save(
+        self,
+        sector_id: str,
+        db: AsyncSession,
+        *,
+        source: str = "manual",
+        created_by_id: str | None = None,
+    ):
+        recorded = await self.compute_and_record(
+            sector_id,
+            db,
+            apply=True,
+            source=source,
+            created_by_id=created_by_id,
+        )
+        if recorded is None:
+            return None
+        active, _run = recorded
+        return active
+
+    async def apply_run(self, run, db: AsyncSession):
+        """Promote a history row, superseding the previously applied run."""
+        from app.models import ProbeCalibration, ProbeCalibrationRun
+
+        now = datetime.now(UTC)
+        previously_applied = (await db.execute(
+            select(ProbeCalibrationRun).where(
+                ProbeCalibrationRun.sector_id == run.sector_id,
+                ProbeCalibrationRun.status == "applied",
+                ProbeCalibrationRun.id != run.id,
+            )
+        )).scalars().all()
+        for previous in previously_applied:
+            previous.status = "superseded"
+
+        existing = (await db.execute(
+            select(ProbeCalibration).where(ProbeCalibration.sector_id == run.sector_id)
+        )).scalar_one_or_none()
+
+        if existing:
+            row = existing
+            row.observed_fc = run.observed_fc
+            row.observed_refill = run.observed_refill
+            row.method = run.method
+            row.num_cycles = run.num_cycles
+            row.consistency = run.consistency
+            row.window_days = run.window_days
+            row.computed_at = run.computed_at
+        else:
+            row = ProbeCalibration(
+                sector_id=run.sector_id,
+                observed_fc=run.observed_fc,
+                observed_refill=run.observed_refill,
+                method=run.method,
+                num_cycles=run.num_cycles,
+                consistency=run.consistency,
+                window_days=run.window_days,
+                computed_at=run.computed_at,
+            )
+            db.add(row)
+        run.status = "applied"
+        run.applied_at = now
         await db.flush()
         return row
 
@@ -67,14 +138,20 @@ class ProbeCalibrationService:
 
         sectors = (await db.execute(
             select(Sector).join(Plot, Sector.plot_id == Plot.id)
-            .where(Plot.farm_id == farm_id)
+            .where(
+                Plot.farm_id == farm_id,
+                Plot.is_archived.is_(False),
+                Sector.is_archived.is_(False),
+            )
         )).scalars().all()
 
         calibrated = 0
         for sector in sectors:
             try:
-                saved = await self.compute_and_save(str(sector.id), db)
-                if saved is not None:
+                result = await self.compute_and_record(
+                    str(sector.id), db, apply=False, source="scheduled"
+                )
+                if result is not None:
                     calibrated += 1
             except Exception:
                 logger.exception("Probe calibration failed for sector %s", sector.id)

@@ -11,18 +11,26 @@
 #        -d YOUR_DOMAIN
 
 services:
+  db:
+    # Compose merges unique port entries across files.  An ordinary `ports: []`
+    # does not remove the development publication, so explicitly reset it.
+    ports: !reset []
+
+  redis:
+    ports: !reset []
+
   backend:
     environment:
       DEBUG: "false"
       LOG_LEVEL: INFO
     # No direct port exposure — all traffic goes through nginx
-    ports: []
+    ports: !reset []
 
   frontend:
     environment:
       NODE_ENV: production
       BACKEND_INTERNAL_URL: http://backend:8000
-    ports: []
+    ports: !reset []
 
   nginx:
     image: nginx:1.27-alpine

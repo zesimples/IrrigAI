@@ -21,8 +21,6 @@ from datetime import UTC, datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import select
-
 from app.heartbeat import record_heartbeat
 from app.job_lock import JobLock
 from app.metrics import scheduler_farm_failures_total, scheduler_job_runs_total
@@ -66,14 +64,14 @@ async def _run_per_farm_job(
             return
 
         from app.database import get_db
-        from app.models import Farm
+        from app.active_records import active_farms_stmt
 
         logger.info("Scheduler: %s at %s", job_name, datetime.now(UTC))
         farms_ok = 0
         farms_failed = 0
         try:
             async for db in get_db():
-                farms = (await db.execute(select(Farm))).scalars().all()
+                farms = (await db.execute(active_farms_stmt())).scalars().all()
                 for farm in farms:
                     try:
                         await handle_farm(farm, db)
@@ -130,9 +128,19 @@ async def _run_recommendation_generation() -> None:
 
 async def _run_data_ingestion() -> None:
     from app.services.ingestion import ingest_farm
+    from app.services.anomaly_service import run_for_farm
+    from app.services.recommendation_outcome_service import evaluate_recent_for_farm
 
     async def handle(farm, db) -> None:
         await ingest_farm(farm.id, db, lookback_hours=4)
+        anomalies = await run_for_farm(farm.id, db)
+        logger.info(
+            "Post-ingestion anomaly detection: farm=%s active=%d",
+            farm.id,
+            len(anomalies),
+        )
+        outcomes = await evaluate_recent_for_farm(farm.id, db)
+        logger.info("Recommendation outcomes: farm=%s evaluated=%d", farm.id, outcomes)
 
     await _run_per_farm_job(
         job_name="data_ingestion", lock_name="data_ingestion", ttl=900, handle_farm=handle
@@ -148,11 +156,12 @@ async def _run_flowmeter_ingestion() -> None:
         from app.alerts.flowmeter_flow_rate_alerts import FlowmeterFlowRateAlertChecker
         from app.database import get_db
         from app.metrics import flowmeter_device_ingestion_total
-        from app.models import Farm
+        from app.active_records import active_farms_stmt
         from app.services.flowmeter_ingestion import (
             FlowmeterIngestionService,
             classify_flowmeter_run,
         )
+        from app.services.recommendation_outcome_service import evaluate_recent_for_farm
 
         logger.info("Scheduler: flowmeter ingestion at %s", datetime.now(UTC))
         service = FlowmeterIngestionService()
@@ -163,13 +172,14 @@ async def _run_flowmeter_ingestion() -> None:
             devices_failed = 0
             farms_failed = 0
             async for db in get_db():
-                farms = (await db.execute(select(Farm))).scalars().all()
+                farms = (await db.execute(active_farms_stmt())).scalars().all()
                 for farm in farms:
                     try:
                         summary = await service.ingest_farm(farm.id, db)
                         total_inserted += summary.get("readings_inserted", 0)
                         devices_ok += summary.get("devices_succeeded", 0)
                         devices_failed += summary.get("devices_failed", 0)
+                        await evaluate_recent_for_farm(farm.id, db)
                     except Exception:
                         farms_failed += 1
                         scheduler_farm_failures_total.labels("flowmeter_ingestion").inc()
@@ -220,7 +230,7 @@ async def _run_recompute_probe_calibration() -> None:
     async def handle(farm, db) -> None:
         n = await svc.compute_all_for_farm(str(farm.id), db)
         await db.commit()
-        logger.info("Probe calibration: farm=%s calibrated %d sectors", farm.id, n)
+        logger.info("Probe calibration: farm=%s created %d candidate runs", farm.id, n)
 
     await _run_per_farm_job(
         job_name="probe_calibration",

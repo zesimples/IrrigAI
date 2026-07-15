@@ -81,6 +81,8 @@ test.describe("Onboarding", () => {
     // Fill farm name
     const farmInput = page.getByRole("textbox").first();
     await farmInput.fill(`E2E Farm ${Date.now()}`);
+    await page.getByLabel(/latitude/i).fill("38.57");
+    await page.getByLabel(/longitude/i).fill("-7.91");
 
     // Advance to next step
     const nextBtn = page.getByRole("button", { name: /seguinte|next|próximo/i });

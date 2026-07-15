@@ -13,13 +13,11 @@ from app.anomaly.rules import irrigation_rules, sensor_rules, weather_rules
 from app.anomaly.rules.sensor_rules import Reading
 from app.anomaly.types import Anomaly
 from app.models import (
-    Farm,
     IrrigationEvent,
     Plot,
     Probe,
     ProbeDepth,
     ProbeReading,
-    Sector,
     WeatherObservation,
 )
 
@@ -48,7 +46,9 @@ class AnomalyDetector:
         probes = probes_result.scalars().all()
 
         # --- Load soil context for FC (needed for saturation check) ---
-        sector = await db.get(Sector, sector_id)
+        from app.active_records import get_active_sector
+
+        sector = await get_active_sector(db, sector_id)
         plot = await db.get(Plot, sector.plot_id) if sector else None
         fc = (plot.field_capacity if plot and plot.field_capacity is not None else 0.28)
 
@@ -167,12 +167,14 @@ class AnomalyDetector:
         since = datetime.now(UTC) - timedelta(hours=lookback_hours)
         anomalies: list[Anomaly] = []
 
-        plots_result = await db.execute(select(Plot).where(Plot.farm_id == farm_id))
+        from app.active_records import active_plots_stmt, active_sectors_stmt
+
+        plots_result = await db.execute(active_plots_stmt(farm_id))
         plots = plots_result.scalars().all()
 
         for plot in plots:
             sectors_result = await db.execute(
-                select(Sector).where(Sector.plot_id == plot.id)
+                active_sectors_stmt(plot.id)
             )
             for sector in sectors_result.scalars().all():
                 try:
@@ -194,7 +196,6 @@ class AnomalyDetector:
         obs = obs_result.scalar_one_or_none()
         if obs and obs.rainfall_mm and obs.rainfall_mm >= 5.0:
             # Build per-depth readings for weather check across all farm probes
-            all_sectors = [s for plot in plots for s in []]  # just skip for MVP
             _ = weather_rules.detect_rainfall_mismatch(
                 probe_readings_by_depth={},
                 rainfall_mm=obs.rainfall_mm,

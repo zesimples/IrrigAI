@@ -13,6 +13,7 @@ class Alert(Base, TimestampMixin):
     __tablename__ = "alert"
     __table_args__ = (
         Index("ix_alert_is_active", "is_active"),
+        Index("ix_alert_reconciliation", "farm_id", "source", "rule_key", "is_active"),
     )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
@@ -21,6 +22,10 @@ class Alert(Base, TimestampMixin):
 
     alert_type: Mapped[AlertType] = mapped_column(String(50), nullable=False)
     severity: Mapped[AlertSeverity] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="core", server_default="core", index=True
+    )
+    rule_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
     title_pt: Mapped[str] = mapped_column(String(500), nullable=False)
     title_en: Mapped[str] = mapped_column(String(500), nullable=False)

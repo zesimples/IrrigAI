@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access import Access
 from app.database import get_db
 from app.limiter import limiter
-from app.models import Probe, Recommendation, RecommendationReason
+from app.models import Probe, Recommendation, RecommendationOutcome, RecommendationReason
 from app.models.sector_override import SectorOverride
 from app.schemas.common import PaginatedResponse
 from app.schemas.recommendation import (
@@ -19,6 +19,7 @@ from app.schemas.recommendation import (
     RejectRequest,
     StressProjectionOut,
 )
+from app.schemas.recommendation_outcome import RecommendationOutcomeOut
 from app.services.audit_service import (
     OVERRIDE_CREATED,
     RECOMMENDATION_ACCEPTED,
@@ -29,6 +30,39 @@ from app.services.audit_service import (
 from app.services.recommendation_service import generate_for_farm, generate_recommendation
 
 router = APIRouter(tags=["recommendations"])
+
+
+@router.get(
+    "/sectors/{sector_id}/recommendation-outcomes",
+    response_model=PaginatedResponse[RecommendationOutcomeOut],
+)
+async def list_recommendation_outcomes(
+    sector_id: str,
+    access: Access,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    await access.sector(sector_id)
+    base = select(RecommendationOutcome).where(
+        RecommendationOutcome.sector_id == sector_id
+    )
+    total = (
+        await db.execute(select(func.count()).select_from(base.subquery()))
+    ).scalar_one()
+    rows = (
+        await db.execute(
+            base.order_by(RecommendationOutcome.evaluated_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+    return PaginatedResponse(
+        items=[RecommendationOutcomeOut.model_validate(row) for row in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/sectors/{sector_id}/recommendations", response_model=PaginatedResponse[RecommendationOut])
