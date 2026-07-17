@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useFarmDashboard } from "@/hooks/useFarmDashboard";
 import { AppHeader } from "@/components/ui/AppHeader";
@@ -15,7 +15,7 @@ import { NumericStrip } from "@/components/dashboard/editorial/NumericStrip";
 import { SectorGrid } from "@/components/dashboard/editorial/SectorGrid";
 import type { ProviderSyncStatus } from "@/types";
 import { FarmTabBar } from "@/components/ui/FarmTabBar";
-import { legacyDoseBand } from "@/lib/dose";
+import { generationSuccessMessage, legacyDoseBand } from "@/lib/dose";
 import { resolvePlotWeather } from "@/lib/weather";
 
 interface Props {
@@ -75,14 +75,23 @@ export default function FarmDashboardPage({ params }: Props) {
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [generateSuccess, setGenerateSuccess] = useState<string | null>(null);
   const [activePlotId, setActivePlotId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!generateSuccess) return;
+    const t = setTimeout(() => setGenerateSuccess(null), 8000);
+    return () => clearTimeout(t);
+  }, [generateSuccess]);
 
   async function generateAll() {
     setGenerating(true);
     setGenerateError(null);
+    setGenerateSuccess(null);
     try {
-      await farmsApi.generateRecommendations(farmId);
+      const recs = await farmsApi.generateRecommendations(farmId);
       await refetch();
+      setGenerateSuccess(generationSuccessMessage(recs.length));
     } catch (e) {
       setGenerateError(e instanceof Error ? e.message : "Erro ao gerar recomendações.");
     } finally {
@@ -180,7 +189,11 @@ export default function FarmDashboardPage({ params }: Props) {
               aria-busy={generating}
               className="inline-flex items-center gap-2 rounded-full border border-rule bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:opacity-85 disabled:opacity-50 transition-opacity"
             >
-              <span className="h-1.5 w-1.5 rounded-full bg-terra" />
+              {generating ? (
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <span className="h-1.5 w-1.5 rounded-full bg-terra" />
+              )}
               {generating ? "A gerar…" : "Gerar plano de rega"}
             </button>
           </>
@@ -191,6 +204,16 @@ export default function FarmDashboardPage({ params }: Props) {
         <div className="mx-4 mt-3 sm:mx-8 lg:mx-11 rounded-md border border-terra/30 bg-terra-bg px-4 py-3 text-[13px] text-terra flex items-center justify-between">
           <span>{generateError}</span>
           <button onClick={() => setGenerateError(null)} className="ml-3 text-terra/60 hover:text-terra">×</button>
+        </div>
+      )}
+
+      {generateSuccess && (
+        <div
+          role="status"
+          className="mx-4 mt-3 sm:mx-8 lg:mx-11 rounded-md border border-olive/30 bg-olive/10 px-4 py-3 text-[13px] text-olive flex items-center justify-between"
+        >
+          <span>{generateSuccess}</span>
+          <button onClick={() => setGenerateSuccess(null)} className="ml-3 text-olive/60 hover:text-olive">×</button>
         </div>
       )}
 

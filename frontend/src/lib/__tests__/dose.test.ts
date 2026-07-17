@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { DOSE_BAND_LABELS, doseHeadline, formatRuntime, legacyDoseBand } from "@/lib/dose";
+import {
+  DOSE_BAND_LABELS,
+  doseHeadline,
+  formatRuntime,
+  generationSuccessMessage,
+  legacyDoseBand,
+} from "@/lib/dose";
+
+describe("generationSuccessMessage", () => {
+  it("reports the sector count in the plural", () =>
+    expect(generationSuccessMessage(5)).toBe(
+      "Plano de rega atualizado — 5 sectores avaliados."
+    ));
+  it("uses the singular for one sector", () =>
+    expect(generationSuccessMessage(1)).toBe(
+      "Plano de rega atualizado — 1 sector avaliado."
+    ));
+  it("handles zero sectors honestly", () =>
+    expect(generationSuccessMessage(0)).toBe(
+      "Nenhum sector para avaliar."
+    ));
+});
 
 describe("formatRuntime", () => {
   it("formats minutes only", () => expect(formatRuntime(45)).toBe("45 min"));

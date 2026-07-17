@@ -30,6 +30,13 @@ export function legacyDoseBand(action: string | null): DoseBand {
   return action === "irrigate" ? "normal" : "pode_saltar";
 }
 
+/** Confirmation shown after "Gerar plano de rega" completes. */
+export function generationSuccessMessage(sectorCount: number): string {
+  if (sectorCount === 0) return "Nenhum sector para avaliar.";
+  const noun = sectorCount === 1 ? "1 sector avaliado" : `${sectorCount} sectores avaliados`;
+  return `Plano de rega atualizado — ${noun}.`;
+}
+
 export interface DoseHeadlineInput {
   doseBand: DoseBand;
   doseSource: DoseSource | null;

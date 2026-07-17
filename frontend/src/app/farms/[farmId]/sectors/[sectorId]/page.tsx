@@ -272,7 +272,7 @@ export default function SectorDetailPage({ params }: Props) {
               aria-busy={generating}
               className="inline-flex items-center gap-2 rounded-full border border-rule bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:opacity-85 disabled:opacity-50 transition-opacity"
             >
-              <Zap className="h-3.5 w-3.5" />
+              {generating ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
               <span className="hidden sm:inline">{generating ? "A gerar…" : "Gerar recomendação"}</span>
             </button>
           </div>
@@ -443,7 +443,7 @@ export default function SectorDetailPage({ params }: Props) {
                     disabled={generating}
                     className="inline-flex items-center gap-2 rounded-full bg-ink text-paper px-5 py-2.5 text-[13px] font-medium hover:opacity-85 disabled:opacity-50 transition-opacity"
                   >
-                    <Zap className="h-3.5 w-3.5" />
+                    {generating ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
                     {generating ? "A gerar…" : "Gerar recomendação"}
                   </button>
                 </div>
