@@ -1,32 +1,36 @@
 import type { Metadata } from "next";
-import { DM_Sans, Fraunces, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "@/styles/globals.css";
 import { ToastProvider } from "@/hooks/useToast";
 import { Toaster } from "@/components/ui/Toaster";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+// Self-hosted (src/app/fonts/) so `next build` never fetches from Google —
+// production hosts can't reach fonts.gstatic.com at image-build time.
+// dm-sans/fraunces/jetbrains-mono are variable fonts: one file per family.
+const dmSans = localFont({
+  src: "./fonts/dm-sans.woff2",
+  weight: "400 500",
   variable: "--font-dm-sans",
 });
 
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const fraunces = localFont({
+  src: "./fonts/fraunces.woff2",
+  weight: "400 600",
   variable: "--font-fraunces",
 });
 
-const instrumentSerif = Instrument_Serif({
-  subsets: ["latin"],
-  weight: "400",
-  style: ["normal", "italic"],
+const instrumentSerif = localFont({
+  src: [
+    { path: "./fonts/instrument-serif-400.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/instrument-serif-400-italic.woff2", weight: "400", style: "italic" },
+  ],
   variable: "--font-instrument",
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const jetbrainsMono = localFont({
+  src: "./fonts/jetbrains-mono.woff2",
+  weight: "400 600",
   variable: "--font-jetbrains",
 });
 
