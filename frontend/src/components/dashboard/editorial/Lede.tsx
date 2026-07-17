@@ -2,6 +2,8 @@ import type { SectorSummary, WeatherToday } from "@/types";
 import { CROP_LABELS } from "@/lib/cropConfig";
 import { legacyDoseBand } from "@/lib/dose";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface LedeProps {
   farmName: string;
   region: string | null;
@@ -92,9 +94,9 @@ export function Lede({ farmName, region, sectors, weather, plotName }: LedeProps
     ["Máx / Mín", weather.temperature_max_c != null && weather.temperature_min_c != null
       ? `${Math.round(weather.temperature_max_c)}° / ${Math.round(weather.temperature_min_c)}°C`
       : "—"],
-    ["ET₀", weather.et0_mm != null ? `${weather.et0_mm.toFixed(1)} mm` : "—"],
-    ["Chuva hoje", weather.rainfall_mm != null ? `${weather.rainfall_mm.toFixed(1)} mm` : "0 mm"],
-    ["Previsão 48h", `${weather.forecast_rain_next_48h_mm.toFixed(1)} mm`],
+    ["ET₀", weather.et0_mm != null ? `${formatDecimal(weather.et0_mm, 1)} mm` : "—"],
+    ["Chuva hoje", weather.rainfall_mm != null ? `${formatDecimal(weather.rainfall_mm, 1)} mm` : "0 mm"],
+    ["Previsão 48h", `${formatDecimal(weather.forecast_rain_next_48h_mm, 1)} mm`],
     ["Vento", weather.wind_speed_kmh != null ? `${Math.round(weather.wind_speed_kmh)} km/h` : "—"],
     ["Hum. rel.", weather.humidity_pct != null ? `${Math.round(weather.humidity_pct)}%` : "—"],
   ];

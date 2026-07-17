@@ -9,6 +9,8 @@ import { CROP_LABELS } from "@/lib/cropConfig";
 import { legacyDoseBand } from "@/lib/dose";
 import type { Farm, DashboardResponse } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getGreeting(): string {
@@ -83,7 +85,7 @@ function deriveFarmData(farm: Farm, dashboard: DashboardResponse | null): FarmDa
 
   const et0 = dashboard.weather_today?.et0_mm ?? null;
   const verdictWhy = et0 != null
-    ? `ET₀ ${et0.toFixed(1)} mm hoje`
+    ? `ET₀ ${formatDecimal(et0, 1)} mm hoje`
     : "";
 
   const depletions = ss.map((s) => s.depletion_pct).filter((d): d is number => d != null);
@@ -339,7 +341,7 @@ export default function Home() {
           {/* KPI strip */}
           <div className="flex flex-wrap gap-x-7 gap-y-4 mt-9 pt-[18px] border-t border-rule-soft">
             {[
-              { label: "ET₀ médio hoje", value: avgEt0 != null ? avgEt0.toFixed(1) : "—", unit: avgEt0 != null ? "mm" : null },
+              { label: "ET₀ médio hoje", value: avgEt0 != null ? formatDecimal(avgEt0, 1) : "—", unit: avgEt0 != null ? "mm" : null },
               { label: "Explorações",    value: String(farmData.length),                    unit: null },
               { label: "Rega reforçada hoje",   value: String(ledeCount),                          unit: ledeCount > 0 ? "sectores" : null },
             ].map(({ label, value, unit }) => (

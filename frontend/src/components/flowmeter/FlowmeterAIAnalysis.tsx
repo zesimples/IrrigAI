@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { flowmeterApi } from "@/lib/api";
+import { formatDecimal } from "@/lib/utils";
 import type { FlowmeterAnalysisResponse } from "@/types";
 
 type Period = "7d" | "30d" | "season";
@@ -187,7 +188,7 @@ export function FlowmeterAIAnalysis({ farmId, period }: Props) {
             <span>Tendência <strong style={{ color: '#2a2520' }}>{trendIcon(data.statistics.trend)}</strong></span>
             {Object.entries(data.statistics.by_crop).map(([crop, s]) => (
               <span key={crop}>
-                {crop === 'almond' ? 'Amendoal' : 'Olival'} <strong style={{ color: '#2a2520' }}>{s.avg_per_sector.toFixed(1)}/sector</strong>
+                {crop === 'almond' ? 'Amendoal' : 'Olival'} <strong style={{ color: '#2a2520' }}>{formatDecimal(s.avg_per_sector, 1)}/sector</strong>
               </span>
             ))}
             <button

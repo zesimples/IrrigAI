@@ -1,5 +1,7 @@
 import type { DoseBand, DoseSource } from "@/types";
 
+import { formatDecimal } from "./utils";
+
 export const DOSE_BAND_LABELS: Record<DoseBand, string> = {
   reforcada: "Rega reforçada",
   normal: "Rega normal",
@@ -52,7 +54,7 @@ export function doseHeadline(d: DoseHeadlineInput): string {
   if (d.doseSource === "probe_learned" && d.habitualFactor != null) {
     const est =
       d.estimatedRuntimeMin != null ? ` (~${formatRuntime(d.estimatedRuntimeMin)}, estimado)` : "";
-    return `≈${d.habitualFactor.toFixed(1)}× a rega habitual${est}`;
+    return `≈${formatDecimal(d.habitualFactor, 1)}× a rega habitual${est}`;
   }
   if (d.depthMm != null) return `Aplicar ${d.depthMm.toFixed(0)} mm hoje`;
   return DOSE_BAND_LABELS[d.doseBand];

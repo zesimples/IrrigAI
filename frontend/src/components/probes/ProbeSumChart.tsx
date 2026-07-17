@@ -14,6 +14,8 @@ import {
 import { format } from "date-fns";
 import type { ProbeDetectedEvent, ReferenceLines } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface RootzonePoint {
   timestamp: string;
   vwc: number;
@@ -168,7 +170,7 @@ export function ProbeSumChart({
                 strokeWidth={hovered ? 2 : 1}
                 strokeOpacity={hovered ? 1 : 0.6}
                 label={{
-                  value: event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : `+${(event.delta_vwc * 100).toFixed(1)}%`,
+                  value: event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : `+${formatDecimal((event.delta_vwc * 100), 1)}%`,
                   fontSize: hovered ? 11 : 10,
                   fontWeight: hovered ? 600 : 400,
                   fill: color,
@@ -194,7 +196,7 @@ export function ProbeSumChart({
           />
           <Tooltip
             formatter={(value: number) => [
-              `${value.toFixed(1)}%`,
+              `${formatDecimal(value, 1)}%`,
               "Zona radicular (média ponderada)",
             ]}
             labelFormatter={(label: number) => format(new Date(label), "dd/MM/yyyy HH:mm")}
@@ -218,7 +220,7 @@ export function ProbeSumChart({
             Humidade atual · zona radicular
           </p>
           <p className="mt-0.5 font-mono text-[14px] font-medium text-ink tabular-nums">
-            {latest.vwcPct.toFixed(1)}%
+            {formatDecimal(latest.vwcPct, 1)}%
           </p>
         </div>
         <div className="rounded-md border border-rule-soft bg-card px-3 py-2">
@@ -226,7 +228,7 @@ export function ProbeSumChart({
             Água disponível
           </p>
           <p className="mt-0.5 font-mono text-[14px] font-medium text-olive tabular-nums">
-            {latest.availablePct == null ? "—" : `${latest.availablePct.toFixed(1)}%`}
+            {latest.availablePct == null ? "—" : `${formatDecimal(latest.availablePct, 1)}%`}
           </p>
         </div>
         <div className="rounded-md border border-rule-soft bg-card px-3 py-2">
@@ -234,7 +236,7 @@ export function ProbeSumChart({
             Depleção da sonda
           </p>
           <p className="mt-0.5 font-mono text-[14px] font-medium text-terra tabular-nums">
-            {latest.depletionPct == null ? "—" : `${latest.depletionPct.toFixed(1)}%`}
+            {latest.depletionPct == null ? "—" : `${formatDecimal(latest.depletionPct, 1)}%`}
           </p>
         </div>
       </div>
@@ -251,7 +253,7 @@ export function ProbeSumChart({
         </span>
         {fcPct != null && (
           <span className="ml-auto font-mono text-[10px] text-ink-3">
-            CC: {fcPct.toFixed(1)}% · PMP: {pwpPct?.toFixed(1) ?? "—"}%
+            CC: {formatDecimal(fcPct, 1)}% · PMP: {(pwpPct != null ? formatDecimal(pwpPct, 1) : undefined) ?? "—"}%
           </span>
         )}
       </div>

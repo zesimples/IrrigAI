@@ -45,6 +45,7 @@ from app.models import (
     SectorCropProfile,
     WeatherObservation,
 )
+from app.utils.format_pt import fmt_pt
 
 logger = logging.getLogger(__name__)
 
@@ -935,7 +936,7 @@ def _build_reasons(
     reasons.append(ReasonEntry(
         order=next_order(),
         category="water_balance",
-        message_pt=f"O solo tem {remaining_pct}% da água disponível — faltam {wb.depletion_mm:.1f} mm para reabastecer (capacidade total {wb.taw_mm:.0f} mm)",
+        message_pt=f"O solo tem {remaining_pct}% da água disponível — faltam {fmt_pt(wb.depletion_mm)} mm para reabastecer (capacidade total {wb.taw_mm:.0f} mm)",
         message_en=f"Soil has {remaining_pct}% of available water — {wb.depletion_mm:.1f} mm deficit to refill (total capacity {wb.taw_mm:.0f} mm)",
         data_key="depletion_mm",
         data_value=str(wb.depletion_mm),
@@ -945,7 +946,7 @@ def _build_reasons(
         reasons.append(ReasonEntry(
             order=next_order(),
             category="evapotranspiration",
-            message_pt=f"A cultura está a consumir cerca de {etc_val:.1f} mm de água por dia (condições atmosféricas hoje: {et0_val:.1f} mm)",
+            message_pt=f"A cultura está a consumir cerca de {fmt_pt(etc_val)} mm de água por dia (condições atmosféricas hoje: {fmt_pt(et0_val)} mm)",
             message_en=f"Crop is using about {etc_val:.1f} mm of water per day (atmospheric demand today: {et0_val:.1f} mm)",
             data_key="etc_mm",
             data_value=str(etc_val),

@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { flowmeterApi } from "@/lib/api";
 import { FlowmeterSectorAIAnalysis } from "./FlowmeterSectorAIAnalysis";
+import { formatDecimal } from "@/lib/utils";
 import type {
   FlowmeterReadingPoint,
   FlowmeterReferenceOut,
@@ -159,7 +160,7 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
                 const ts = payload?.[0]?.payload?.ts;
                 return ts ? fmtTooltipLabel(ts, resolvedInterval) : label;
               }}
-              formatter={(v: number) => [`${v.toFixed(2)} m³/ha`, "Consumo"]}
+              formatter={(v: number) => [`${formatDecimal(v, 2)} m³/ha`, "Consumo"]}
             />
             <Bar dataKey="value" fill="#6b9e3a" radius={[2, 2, 0, 0]} maxBarSize={24} />
             {reference && reference.reference_rate_m3_ha !== null && (
@@ -200,7 +201,7 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
                   strokeWidth={1.5}
                   strokeOpacity={0.6}
                   label={{
-                    value: `Ref: ${reference.reference_rate_m3_ha.toFixed(2)} m³/ha`,
+                    value: `Ref: ${formatDecimal(reference.reference_rate_m3_ha, 2)} m³/ha`,
                     position: "insideTopLeft",
                     fontSize: 9,
                     fill: "#4a8c4a",
@@ -227,7 +228,7 @@ export function FlowmeterSectorDetail({ sectorId, period }: Props) {
             <div key={ev.id} className="grid grid-cols-4 gap-2 text-sm text-ink-2 py-1 border-t border-rule-soft">
               <span>{fmtEventDate(ev.start_time)}</span>
               <span>{fmtDuration(ev.duration_minutes)}</span>
-              <span className="font-semibold">{ev.total_m3_ha.toFixed(1)} m³/ha</span>
+              <span className="font-semibold">{formatDecimal(ev.total_m3_ha, 1)} m³/ha</span>
               <span className="text-ink-3">—</span>
             </div>
           ))}

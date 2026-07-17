@@ -3,6 +3,8 @@
 import { useState } from "react";
 import type { FlowmeterReferenceOut } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface Props {
   reference: FlowmeterReferenceOut | null | undefined;
   /** Optional: deviation_pct of the latest event vs reference (pre-computed or null) */
@@ -22,7 +24,7 @@ export function FlowmeterReferenceStatusDot({ reference, latestDeviationPct, sec
     if (latestDeviationPct !== null && latestDeviationPct !== undefined && Math.abs(latestDeviationPct) > (reference.tolerance_pct ?? 5)) {
       dotColor = "#b84a2a"; // amber/red = deviation
       const sign = latestDeviationPct > 0 ? "+" : "";
-      label = `${sign}${latestDeviationPct.toFixed(1)}%`;
+      label = `${sign}${formatDecimal(latestDeviationPct, 1)}%`;
     } else if (latestDeviationPct !== null && latestDeviationPct !== undefined) {
       dotColor = "#4a8c4a"; // green = OK
     } else {
@@ -104,14 +106,14 @@ export function FlowmeterReferenceStatusDot({ reference, latestDeviationPct, sec
               {refRate != null && (
                 <>
                   <dt style={{ fontSize: 11.5, color: "#8a7f74", fontFamily: "var(--font-dm-sans, system-ui)" }}>Referência</dt>
-                  <dd style={{ fontSize: 13, color: "#2a2520", fontFamily: "var(--font-fraunces)", fontWeight: 600, margin: 0 }}>{refRate.toFixed(2)} m³/ha</dd>
+                  <dd style={{ fontSize: 13, color: "#2a2520", fontFamily: "var(--font-fraunces)", fontWeight: 600, margin: 0 }}>{formatDecimal(refRate, 2)} m³/ha</dd>
 
                   <dt style={{ fontSize: 11.5, color: "#8a7f74", fontFamily: "var(--font-dm-sans, system-ui)" }}>Tolerância</dt>
                   <dd style={{ fontSize: 11.5, color: "#2a2520", fontFamily: "var(--font-jetbrains, ui-monospace)", margin: 0 }}>±{reference!.tolerance_pct}%</dd>
 
                   <dt style={{ fontSize: 11.5, color: "#8a7f74", fontFamily: "var(--font-dm-sans, system-ui)" }}>Limites</dt>
                   <dd style={{ fontSize: 11.5, color: "#2a2520", fontFamily: "var(--font-jetbrains, ui-monospace)", margin: 0 }}>
-                    {reference!.lower_limit_m3_ha?.toFixed(2)} – {reference!.upper_limit_m3_ha?.toFixed(2)}
+                    {(reference!.lower_limit_m3_ha != null ? formatDecimal(reference!.lower_limit_m3_ha, 2) : undefined)} – {(reference!.upper_limit_m3_ha != null ? formatDecimal(reference!.upper_limit_m3_ha, 2) : undefined)}
                   </dd>
 
                   <dt style={{ fontSize: 11.5, color: "#8a7f74", fontFamily: "var(--font-dm-sans, system-ui)" }}>Baseado em</dt>
@@ -133,7 +135,7 @@ export function FlowmeterReferenceStatusDot({ reference, latestDeviationPct, sec
                 color: "#b84a2a",
                 fontFamily: "var(--font-dm-sans, system-ui)",
               }}>
-                Último evento: {latestDeviationPct > 0 ? "+" : ""}{latestDeviationPct.toFixed(1)}% vs referência
+                Último evento: {latestDeviationPct > 0 ? "+" : ""}{formatDecimal(latestDeviationPct, 1)}% vs referência
               </div>
             )}
 

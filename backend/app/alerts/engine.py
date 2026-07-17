@@ -23,6 +23,7 @@ from app.engine.pipeline import RecommendationPipeline, build_weather_context
 from app.engine.staleness import PROBE_VERY_STALE_H
 from app.models import Alert, Probe, Sector, WeatherObservation
 from app.models.recommendation import Recommendation
+from app.utils.format_pt import fmt_pt
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ def _stale_probe_alert(
         severity=AlertSeverity.WARNING,
         title_pt=f"Dados de sonda desactualizados: {sector_name}",
         title_en=f"Stale probe data: {sector_name}",
-        description_pt=f"Os dados da sonda têm {hours:.1f}h. Verifique a conectividade da sonda.",
+        description_pt=f"Os dados da sonda têm {fmt_pt(hours)}h. Verifique a conectividade da sonda.",
         description_en=f"Probe data is {hours:.1f}h old. Check probe connectivity.",
         farm_id=farm_id,
         sector_id=sector_id,
@@ -135,7 +136,7 @@ def _stale_weather_alert(hours: float, farm_id: str) -> Alert:
         severity=AlertSeverity.INFO,
         title_pt="Dados meteorológicos desactualizados",
         title_en="Stale weather data",
-        description_pt=f"Os dados meteorológicos têm {hours:.1f}h. As recomendações podem ser menos precisas.",
+        description_pt=f"Os dados meteorológicos têm {fmt_pt(hours)}h. As recomendações podem ser menos precisas.",
         description_en=f"Weather data is {hours:.1f}h old. Recommendations may be less accurate.",
         farm_id=farm_id,
         data={"hours_since_obs": hours},

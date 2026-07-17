@@ -10,6 +10,7 @@ actually covers the remaining deficit — not based on a hardcoded mm threshold.
 
 from app.engine.types import SectorContext
 from app.engine.water_balance import WaterBalanceResult
+from app.utils.format_pt import fmt_pt
 
 # Minimum effective rain that justifies a skip (mm) — prevents skipping for
 # inconsequential drizzle even when depletion is already near zero.
@@ -71,15 +72,18 @@ def should_irrigate(
         effective_rain = forecast_rain_next_48h * ctx.rainfall_effectiveness
         return False, (
             f"Chuva prevista de {forecast_rain_next_48h:.0f} mm nas próximas 48h "
-            f"({effective_rain:.1f} mm efetivos) cobre o défice atual — não vale a pena regar agora"
+            f"({fmt_pt(effective_rain)} mm efetivos) cobre o défice atual — não vale a pena regar agora"
         )
 
     if dr >= effective_threshold:
         pct_depleted = dr / wb.taw_mm * 100 if wb.taw_mm > 0 else 0
         return True, (
             f"O solo já perdeu {pct_depleted:.0f}% da água disponível "
-            f"({dr:.1f} mm em falta) — chegou a hora de regar"
+            f"({fmt_pt(dr)} mm em falta) — chegou a hora de regar"
         )
 
     remaining = effective_threshold - dr
-    return False, f"O solo ainda tem reserva suficiente — faltam {remaining:.1f} mm para atingir o ponto de rega"
+    return False, (
+        f"O solo ainda tem reserva suficiente — faltam {fmt_pt(remaining)} mm "
+        "para atingir o ponto de rega"
+    )

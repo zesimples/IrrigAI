@@ -11,6 +11,8 @@ import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { sectorsApi, probesApi, waterEventsApi } from "@/lib/api";
 import type { ProbeDetectedEvent, ReferenceLines } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface ProbeReadingsInlineProps {
   probeId: string;
   externalId: string;
@@ -290,10 +292,10 @@ export function ProbeReadingsInline({
                 ) : (
                   <>
                     <span className="font-mono text-[11.5px] font-medium text-olive">
-                      CC {activeRefLines.field_capacity != null ? `${(activeRefLines.field_capacity * 100).toFixed(1)}%` : "—"}
+                      CC {activeRefLines.field_capacity != null ? `${formatDecimal((activeRefLines.field_capacity * 100), 1)}%` : "—"}
                     </span>
                     <span className="font-mono text-[11.5px] font-medium text-terra">
-                      PMP {activeRefLines.wilting_point != null ? `${(activeRefLines.wilting_point * 100).toFixed(1)}%` : "—"}
+                      PMP {activeRefLines.wilting_point != null ? `${formatDecimal((activeRefLines.wilting_point * 100), 1)}%` : "—"}
                     </span>
                     {saved && (
                       <span className="font-mono text-[11px] text-olive">Guardado ✓</span>
@@ -353,10 +355,10 @@ export function ProbeReadingsInline({
                             {d.depth_cm} cm
                           </td>
                           <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-[13px] text-ink">
-                            {last != null ? `${(last * 100).toFixed(1)}%` : "—"}
+                            {last != null ? `${formatDecimal((last * 100), 1)}%` : "—"}
                           </td>
                           <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-[13px] text-ink-2">
-                            {vwcs.length > 0 ? `${(min * 100).toFixed(1)}% / ${(max * 100).toFixed(1)}%` : "—"}
+                            {vwcs.length > 0 ? `${formatDecimal((min * 100), 1)}% / ${formatDecimal((max * 100), 1)}%` : "—"}
                           </td>
                         </tr>
                       );
@@ -526,9 +528,9 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
                       )}
                     </div>
                     <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
-                      {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {(event.delta_vwc * 100).toFixed(1)}%.
-                      {event.rainfall_mm != null ? ` Chuva: ${event.rainfall_mm.toFixed(1)} mm.` : ""}
-                      {event.irrigation_mm != null ? ` Rega: ${event.irrigation_mm.toFixed(1)} mm.` : ""}
+                      {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {formatDecimal((event.delta_vwc * 100), 1)}%.
+                      {event.rainfall_mm != null ? ` Chuva: ${formatDecimal(event.rainfall_mm, 1)} mm.` : ""}
+                      {event.irrigation_mm != null ? ` Rega: ${formatDecimal(event.irrigation_mm, 1)} mm.` : ""}
                     </p>
                     {event.status !== "confirmed" && event.status !== "rejected" && (
                       <div className="mt-2 flex flex-wrap gap-2">

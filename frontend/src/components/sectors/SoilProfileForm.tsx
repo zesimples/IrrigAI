@@ -5,6 +5,8 @@ import { catalogApi, sectorsApi } from "@/lib/api";
 import type { SoilPreset } from "@/types";
 import { CheckCircle } from "lucide-react";
 
+import { formatDecimal } from "@/lib/utils";
+
 // ─── Editorial sub-components (self-contained) ────────────────────────────────
 
 function FieldWrapper({
@@ -85,7 +87,7 @@ function RainCorrectionSlider({
     <div>
       <div className="flex items-baseline justify-between mb-1.5">
         <span className={`font-serif text-[24px] font-medium tracking-[-0.02em] ${tintClass}`}>
-          ×{value.toFixed(2)}
+          ×{formatDecimal(value, 2)}
         </span>
         <span className="font-mono text-[10px] tracking-[0.08em] uppercase text-ink-3">
           {label}
@@ -253,7 +255,7 @@ export function SoilProfileForm({
             {currentRainfallEffectiveness != null && (
               <Row
                 label="Eficácia da chuva"
-                value={`×${currentRainfallEffectiveness.toFixed(2)}`}
+                value={`×${formatDecimal(currentRainfallEffectiveness, 2)}`}
               />
             )}
           </div>

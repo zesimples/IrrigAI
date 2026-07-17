@@ -32,6 +32,8 @@ import type { RecommendationDetail as Rec, SectorCropProfile, StressProjection }
 import type { Confidence } from "@/components/dashboard/editorial/ConfidenceDots";
 import { CROP_LABELS, STAGE_LABELS } from "@/lib/cropConfig";
 
+import { formatDecimal } from "@/lib/utils";
+
 // Map ConfidenceLevel to Confidence (editorial)
 function toConfidence(level: string | null, probeHealth?: string): Confidence {
   if (probeHealth === "no_probes" || probeHealth === "no_readings") return "sem-sonda";
@@ -403,19 +405,19 @@ export default function SectorDetailPage({ params }: Props) {
                 />
                 <KpiCell
                   label="Água em falta"
-                  value={depletionMm != null ? depletionMm.toFixed(1) : "—"}
+                  value={depletionMm != null ? formatDecimal(depletionMm, 1) : "—"}
                   unit={depletionMm != null ? "mm" : undefined}
                   sub="até reabastecer"
                 />
                 <KpiCell
                   label="ET₀ hoje"
-                  value={et0 != null ? et0.toFixed(2) : "—"}
+                  value={et0 != null ? formatDecimal(et0, 2) : "—"}
                   unit={et0 != null ? "mm/dia" : undefined}
-                  sub={etc != null ? `consumo ≈ ${etc.toFixed(1)}` : undefined}
+                  sub={etc != null ? `consumo ≈ ${formatDecimal(etc, 1)}` : undefined}
                 />
                 <KpiCell
                   label="Margem rega"
-                  value={marginMm != null ? marginMm.toFixed(1) : "—"}
+                  value={marginMm != null ? formatDecimal(marginMm, 1) : "—"}
                   unit={marginMm != null ? "mm" : undefined}
                   sub="para o ponto de rega"
                 />
@@ -535,7 +537,7 @@ export default function SectorDetailPage({ params }: Props) {
                     },
                     {
                       label: "ET₀",
-                      value: et0 != null ? `${et0.toFixed(2)} mm/dia` : "—",
+                      value: et0 != null ? `${formatDecimal(et0, 2)} mm/dia` : "—",
                       color: "text-ink",
                     },
                     {

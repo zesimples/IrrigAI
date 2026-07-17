@@ -5,6 +5,8 @@ import { WifiOff } from "lucide-react";
 import type { ConfidenceLevel, RecommendationAction, SectorSummary } from "@/types";
 import { CROP_LABELS, STAGE_LABELS } from "@/lib/cropConfig";
 
+import { formatDecimal } from "@/lib/utils";
+
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const ACTION_LABELS: Record<RecommendationAction, string> = {
@@ -103,7 +105,7 @@ export function SectorCard({ sector, farmId }: SectorCardProps) {
         <div className="flex items-baseline gap-5 mb-3">
           <div>
             <span className="font-display text-[28px] font-[500] leading-none text-irrigai-text tracking-[-0.03em]">
-              {sector.irrigation_depth_mm.toFixed(1)}
+              {formatDecimal(sector.irrigation_depth_mm, 1)}
             </span>
             <span className="ml-1 text-[11px] text-irrigai-text-muted">mm</span>
           </div>
@@ -123,7 +125,7 @@ export function SectorCard({ sector, farmId }: SectorCardProps) {
       ) : action === "reduce" ? (
         <p className="mb-3 text-[12px] text-irrigai-text-muted leading-relaxed">
           {sector.irrigation_depth_mm != null
-            ? `Reduzir para ${sector.irrigation_depth_mm.toFixed(1)} mm.`
+            ? `Reduzir para ${formatDecimal(sector.irrigation_depth_mm, 1)} mm.`
             : "Reduzir dose habitual."}
         </p>
       ) : action === "defer" ? (

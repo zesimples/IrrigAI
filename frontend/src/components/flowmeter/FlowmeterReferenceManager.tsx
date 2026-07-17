@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import { flowmeterApi } from "@/lib/api";
 import type { FlowmeterReferenceOut } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface Props {
   references: FlowmeterReferenceOut[];
   onUpdated: (ref: FlowmeterReferenceOut) => void;
@@ -151,7 +153,7 @@ export function FlowmeterReferenceManager({ references, onUpdated }: Props) {
                 />
               ) : hasRef ? (
                 <span style={{ fontFamily: "var(--font-fraunces)", fontSize: 14, fontWeight: 600, color: "#2a2520" }}>
-                  {ref.reference_rate_m3_ha!.toFixed(2)}
+                  {formatDecimal(ref.reference_rate_m3_ha!, 2)}
                   <span style={{ fontFamily: "var(--font-jetbrains, ui-monospace)", fontSize: 9.5, color: "#8a7f74", marginLeft: 3 }}>m³/ha</span>
                   {ref.is_manual_override && (
                     <span style={{ marginLeft: 5, fontSize: 9, color: "#c9a34a", fontFamily: "var(--font-jetbrains, ui-monospace)" }}>manual</span>
@@ -169,12 +171,12 @@ export function FlowmeterReferenceManager({ references, onUpdated }: Props) {
 
             {/* Limite inf. */}
             <div style={{ fontFamily: "var(--font-jetbrains, ui-monospace)", fontSize: 12, color: "#5a5048" }}>
-              {ref.lower_limit_m3_ha?.toFixed(2) ?? "—"}
+              {(ref.lower_limit_m3_ha != null ? formatDecimal(ref.lower_limit_m3_ha, 2) : undefined) ?? "—"}
             </div>
 
             {/* Limite sup. */}
             <div style={{ fontFamily: "var(--font-jetbrains, ui-monospace)", fontSize: 12, color: "#5a5048" }}>
-              {ref.upper_limit_m3_ha?.toFixed(2) ?? "—"}
+              {(ref.upper_limit_m3_ha != null ? formatDecimal(ref.upper_limit_m3_ha, 2) : undefined) ?? "—"}
             </div>
 
             {/* Estado */}

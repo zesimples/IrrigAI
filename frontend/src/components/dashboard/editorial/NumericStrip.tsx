@@ -1,3 +1,5 @@
+import { formatDecimal } from "@/lib/utils";
+
 interface NumericStripProps {
   totalSectors: number;
   toIrrigate: number;
@@ -11,7 +13,7 @@ export function NumericStrip({ totalSectors, toIrrigate, noAction, forecastRain4
     { label: "Rega reforçada hoje", value: toIrrigate,  color: toIrrigate > 0 ? "text-terra" : "text-ink" },
     { label: "Sem rega reforçada",  value: noAction,    color: noAction > 0   ? "text-olive" : "text-ink" },
     { label: "Próxima reavaliação", value: "+48 h" },
-    { label: "Água prevista",       value: `${forecastRain48h.toFixed(1)} mm` },
+    { label: "Água prevista",       value: `${formatDecimal(forecastRain48h, 1)} mm` },
   ];
 
   return (

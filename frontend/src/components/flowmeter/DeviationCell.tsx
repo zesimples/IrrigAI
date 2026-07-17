@@ -1,6 +1,8 @@
 // frontend/src/components/flowmeter/DeviationCell.tsx
 import { DeviationMeter } from './DeviationMeter';
 
+import { formatDecimal } from "@/lib/utils";
+
 interface DeviationCellProps {
   deviation: number | null;
   status?: "normal" | "info" | "warning" | "insufficient_data" | "insufficient_peer_data";
@@ -35,7 +37,7 @@ export function DeviationCell({ deviation, status, threshold = 5 }: DeviationCel
         <DeviationMeter pct={deviation} threshold={threshold} tone={tone} />
         <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 3, minWidth: 54, justifyContent: 'flex-end' }}>
           <span style={{ fontFamily: 'var(--font-fraunces)', fontSize: 15, fontWeight: 500, color: isInfo ? tone : '#5a5048', letterSpacing: '-0.01em' }}>
-            {sign}{abs.toFixed(1)}
+            {sign}{formatDecimal(abs, 1)}
           </span>
           <span style={{ fontFamily: 'var(--font-jetbrains, ui-monospace)', fontSize: 10, color: '#8a7f74' }}>%</span>
         </span>
@@ -72,7 +74,7 @@ export function DeviationCell({ deviation, status, threshold = 5 }: DeviationCel
         }} />
         <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 2 }}>
           <span style={{ fontFamily: 'var(--font-fraunces)', fontSize: 17, fontWeight: 600, color: tone, letterSpacing: '-0.015em', lineHeight: 1 }}>
-            {sign}{abs.toFixed(1)}
+            {sign}{formatDecimal(abs, 1)}
           </span>
           <span style={{ fontFamily: 'var(--font-jetbrains, ui-monospace)', fontSize: 10.5, color: tone, fontWeight: 600 }}>%</span>
         </span>

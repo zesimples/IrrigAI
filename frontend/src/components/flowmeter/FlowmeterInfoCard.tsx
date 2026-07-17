@@ -4,6 +4,8 @@ import Link from "next/link";
 import { flowmeterApi, ApiError } from "@/lib/api";
 import type { IrrigationEventOut } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface Props { sectorId: string; farmId: string; }
 
 export function FlowmeterInfoCard({ sectorId, farmId }: Props) {
@@ -30,7 +32,7 @@ export function FlowmeterInfoCard({ sectorId, farmId }: Props) {
         <p className="text-sm text-ink-2">
           Última rega <span className="font-semibold text-ink-1">{date}</span>
           {" · "}
-          <span className="font-semibold text-ink-1">{lastEvent.total_m3_ha.toFixed(1)} m³/ha</span>
+          <span className="font-semibold text-ink-1">{formatDecimal(lastEvent.total_m3_ha, 1)} m³/ha</span>
         </p>
       </div>
       <Link href={`/farms/${farmId}/caudalimetros`} className="text-sm font-medium text-blue-600 whitespace-nowrap hover:underline">

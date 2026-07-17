@@ -8,6 +8,8 @@ import { recommendationsApi } from "@/lib/api";
 import { X } from "lucide-react";
 import type { RecommendationDetail } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface OverrideModalProps {
   rec: RecommendationDetail;
   onClose: () => void;
@@ -89,7 +91,7 @@ export function OverrideModal({ rec, onClose, onSuccess }: OverrideModalProps) {
             <div>
               <p className="text-xs text-slate-400">Dose</p>
               <p className="font-medium">
-                {rec.irrigation_depth_mm != null ? `${rec.irrigation_depth_mm.toFixed(1)} mm` : "—"}
+                {rec.irrigation_depth_mm != null ? `${formatDecimal(rec.irrigation_depth_mm, 1)} mm` : "—"}
               </p>
             </div>
             <div>

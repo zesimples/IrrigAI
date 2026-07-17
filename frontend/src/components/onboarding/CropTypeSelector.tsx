@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@/lib/utils";
+import { cn, formatDecimal } from "@/lib/utils";
 import { useCropProfileTemplates } from "@/hooks/useCatalog";
 import type { CropProfileTemplate } from "@/types";
 
@@ -60,10 +60,11 @@ export function CropTypeSelector({ value, onChange }: CropTypeSelectorProps) {
             <p className="mt-1 text-xs text-slate-500">
               MAD {(t.mad * 100).toFixed(0)}% · Kc médio{" "}
               {t.stages.length > 0
-                ? (
+                ? formatDecimal(
                     t.stages.reduce((s, st) => s + (st as { kc: number }).kc, 0) /
-                    t.stages.length
-                  ).toFixed(2)
+                      t.stages.length,
+                    2,
+                  )
                 : "—"}
             </p>
           </button>

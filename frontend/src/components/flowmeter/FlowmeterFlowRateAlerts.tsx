@@ -2,6 +2,8 @@
 
 import type { FlowmeterFlowRateAlert } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface Props {
   alerts: FlowmeterFlowRateAlert[];
   loading: boolean;
@@ -28,9 +30,9 @@ function AlertRow({ alert }: { alert: FlowmeterFlowRateAlert }) {
 
   const deviationLabel =
     isHigh && alert.data?.deviation_pct
-      ? `Caudal ${alert.data.deviation_pct > 0 ? "+" : ""}${alert.data.deviation_pct.toFixed(1)}% vs ref. ${alert.data.reference_rate_m3_ha?.toFixed(2)} m³/ha`
+      ? `Caudal ${alert.data.deviation_pct > 0 ? "+" : ""}${formatDecimal(alert.data.deviation_pct, 1)}% vs ref. ${(alert.data.reference_rate_m3_ha != null ? formatDecimal(alert.data.reference_rate_m3_ha, 2) : undefined)} m³/ha`
       : isLow && alert.data?.deviation_pct
-      ? `Caudal ${alert.data.deviation_pct.toFixed(1)}% vs ref. ${alert.data.reference_rate_m3_ha?.toFixed(2)} m³/ha`
+      ? `Caudal ${formatDecimal(alert.data.deviation_pct, 1)}% vs ref. ${(alert.data.reference_rate_m3_ha != null ? formatDecimal(alert.data.reference_rate_m3_ha, 2) : undefined)} m³/ha`
       : alert.data?.zero_count
       ? `${alert.data.zero_count} leitura(s) a zero`
       : "";

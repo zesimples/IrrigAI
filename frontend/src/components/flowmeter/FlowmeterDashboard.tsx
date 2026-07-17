@@ -8,6 +8,8 @@ import { FlowmeterAIAnalysis } from "./FlowmeterAIAnalysis";
 import { FlowmeterFlowRateAlerts } from "./FlowmeterFlowRateAlerts";
 import { FlowmeterReferenceManager } from "./FlowmeterReferenceManager";
 
+import { formatDecimal } from "@/lib/utils";
+
 type Period = "7d" | "30d" | "season";
 
 interface Props {
@@ -154,7 +156,7 @@ export function FlowmeterDashboard({ farmId }: Props) {
                     {stats.avgPerRega && ` O consumo médio por rega situou-se em `}
                     {stats.avgPerRega && (
                       <strong style={{ color: '#2a2520', fontWeight: 600 }}>
-                        {stats.avgPerRega.toFixed(1)} m³/ha
+                        {formatDecimal(stats.avgPerRega, 1)} m³/ha
                       </strong>
                     )}
                     {stats.avgPerRega && '.'}
@@ -220,7 +222,7 @@ export function FlowmeterDashboard({ farmId }: Props) {
               { k: `Total ${periodShort}`, v: data.total_m3_ha.toLocaleString('pt-PT', { maximumFractionDigits: 0 }), u: 'm³/ha', sub: 'todas as culturas', tint: '#2a2520', bar: undefined },
               { k: 'Amendoal', v: stats.almondTotal.toLocaleString('pt-PT', { maximumFractionDigits: 0 }), u: 'm³/ha', sub: `${stats.almondSectors} sectores activos`, tint: '#b84a2a', bar: data.total_m3_ha > 0 ? stats.almondTotal / data.total_m3_ha : 0 },
               { k: 'Olival', v: stats.oliveTotal.toLocaleString('pt-PT', { maximumFractionDigits: 0 }), u: 'm³/ha', sub: `${stats.oliveSectors} sectores activos`, tint: '#6b8f4e', bar: data.total_m3_ha > 0 ? stats.oliveTotal / data.total_m3_ha : 0 },
-              { k: 'Regas totais', v: String(stats.totalRegas), u: undefined, sub: stats.avgPerRega ? `dose média ${stats.avgPerRega.toFixed(1)} m³` : 'sem regas', tint: '#2a2520', bar: undefined },
+              { k: 'Regas totais', v: String(stats.totalRegas), u: undefined, sub: stats.avgPerRega ? `dose média ${formatDecimal(stats.avgPerRega, 1)} m³` : 'sem regas', tint: '#2a2520', bar: undefined },
               { k: 'Caudalímetros sem dados', v: String(stats.semDados), u: `de ${data.sectors.length}`, sub: 'verificar comunicação', tint: '#c9a34a', bar: undefined },
             ].map((m, i) => (
               <div key={m.k} style={{ padding: '14px 18px', borderLeft: i === 0 ? 'none' : '1px solid #e8e0d0' }}>

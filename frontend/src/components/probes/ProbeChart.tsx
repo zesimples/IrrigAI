@@ -14,6 +14,8 @@ import {
 import { format } from "date-fns";
 import type { DepthReadings, ProbeDetectedEvent, ReferenceLines } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 const DEPTH_COLORS = [
   "#059669", // emerald-600
   "#0284c7", // sky-600
@@ -105,7 +107,7 @@ export function ProbeChart({
         />
         <Tooltip
           formatter={(value: number, name: string) => [
-            `${(value * 100).toFixed(1)}%`,
+            `${formatDecimal((value * 100), 1)}%`,
             name === "rootzone" ? "Zona radicular (média)" : name.replace("d_", "") + " cm",
           ]}
           labelFormatter={(label: number) =>
@@ -146,7 +148,7 @@ export function ProbeChart({
               strokeWidth={hovered ? 2 : 1}
               strokeOpacity={hovered ? 1 : 0.6}
               label={{
-                value: event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : `+${(event.delta_vwc * 100).toFixed(1)}%`,
+                value: event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : `+${formatDecimal((event.delta_vwc * 100), 1)}%`,
                 fontSize: hovered ? 11 : 10,
                 fontWeight: hovered ? 600 : 400,
                 fill: color,

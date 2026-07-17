@@ -2,8 +2,9 @@
 
 from datetime import datetime
 
-from app.anomaly.types import Anomaly
 from app.anomaly.rules.sensor_rules import Reading
+from app.anomaly.types import Anomaly
+from app.utils.format_pt import fmt_pt
 
 RAIN_MISMATCH_THRESHOLD_MM = 5.0   # station reports >5mm but probes don't respond
 RAIN_RESPONSE_DELTA = 0.02          # m³/m³ increase expected from rainfall
@@ -57,7 +58,7 @@ def detect_rainfall_mismatch(
                 depth_cm=None,
                 detected_at=rain_observed_at,
                 description_pt=(
-                    f"Estação meteorológica registou {rainfall_mm:.1f}mm de chuva mas "
+                    f"Estação meteorológica registou {fmt_pt(rainfall_mm)}mm de chuva mas "
                     f"nenhum sensor respondeu em {RAIN_RESPONSE_WINDOW_H:.0f}h"
                 ),
                 description_en=(

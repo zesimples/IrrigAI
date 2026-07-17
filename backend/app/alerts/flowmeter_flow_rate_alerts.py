@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import AlertSeverity, AlertType
 from app.models.alert import Alert
+from app.utils.format_pt import fmt_pt
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +105,8 @@ class FlowmeterFlowRateAlertChecker:
                 title_pt=f"Caudal elevado: {sector_name}",
                 title_en=f"High flow rate: {sector_name}",
                 description_pt=(
-                    f"{sector_name}: caudal estável de {stable_rate:.2f} m³/ha — "
-                    f"{deviation_pct:.1f}% acima da referência ({ref_rate:.2f} m³/ha)."
+                    f"{sector_name}: caudal estável de {fmt_pt(stable_rate, 2)} m³/ha — "
+                    f"{fmt_pt(deviation_pct)}% acima da referência ({fmt_pt(ref_rate, 2)} m³/ha)."
                 ),
                 description_en=(
                     f"{sector_name}: stable flow rate {stable_rate:.2f} m³/ha — "
@@ -122,8 +123,8 @@ class FlowmeterFlowRateAlertChecker:
                 title_pt=f"Caudal reduzido: {sector_name}",
                 title_en=f"Low flow rate: {sector_name}",
                 description_pt=(
-                    f"{sector_name}: caudal estável de {stable_rate:.2f} m³/ha — "
-                    f"{abs(deviation_pct):.1f}% abaixo da referência ({ref_rate:.2f} m³/ha)."
+                    f"{sector_name}: caudal estável de {fmt_pt(stable_rate, 2)} m³/ha — "
+                    f"{fmt_pt(abs(deviation_pct))}% abaixo da referência ({fmt_pt(ref_rate, 2)} m³/ha)."
                 ),
                 description_en=(
                     f"{sector_name}: stable flow rate {stable_rate:.2f} m³/ha — "

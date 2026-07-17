@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { flowmeterApi } from "@/lib/api";
 import type { FlowmeterDeviationsResponse } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface Props {
   farmId: string;
   embedded?: boolean;
@@ -85,10 +87,10 @@ export function FlowmeterDeviationWarnings({ farmId, embedded = false }: Props) 
                   }
                 >
                   {s.direction === "above" ? "▲ +" : "▼ −"}
-                  {Math.abs(s.deviation_pct ?? 0).toFixed(1)}%
+                  {formatDecimal(Math.abs(s.deviation_pct ?? 0), 1)}%
                 </span>
                 <span className="text-ink-4">
-                  {s.sector_avg_m3ha?.toFixed(1)} m³/ha/rega
+                  {(s.sector_avg_m3ha != null ? formatDecimal(s.sector_avg_m3ha, 1) : undefined)} m³/ha/rega
                 </span>
               </div>
             </div>
@@ -123,7 +125,7 @@ export function FlowmeterDeviationWarnings({ farmId, embedded = false }: Props) 
             {Object.entries(data.crop_averages)
               .map(
                 ([crop, avg]) =>
-                  `${crop === "almond" ? "Amendoal" : crop === "olive" ? "Olival" : crop} ${avg.toFixed(1)} m³/ha`,
+                  `${crop === "almond" ? "Amendoal" : crop === "olive" ? "Olival" : crop} ${formatDecimal(avg, 1)} m³/ha`,
               )
               .join(" · ")}
           </span>

@@ -1,5 +1,7 @@
 import type { WeatherToday } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface WeatherWidgetProps {
   weather: WeatherToday;
 }
@@ -77,14 +79,14 @@ export function WeatherWidget({ weather }: WeatherWidgetProps) {
       : "—";
 
   const et0Value =
-    weather.et0_mm != null ? `${weather.et0_mm.toFixed(1)} mm` : "—";
+    weather.et0_mm != null ? `${formatDecimal(weather.et0_mm, 1)} mm` : "—";
 
   const rainValue =
     weather.rainfall_mm != null && weather.rainfall_mm > 0
-      ? `${weather.rainfall_mm.toFixed(1)} mm`
+      ? `${formatDecimal(weather.rainfall_mm, 1)} mm`
       : "0 mm";
 
-  const forecastValue = `${weather.forecast_rain_next_48h_mm.toFixed(1)} mm`;
+  const forecastValue = `${formatDecimal(weather.forecast_rain_next_48h_mm, 1)} mm`;
   const probSub =
     weather.forecast_rain_probability != null
       ? `${

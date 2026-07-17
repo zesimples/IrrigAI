@@ -57,7 +57,7 @@ def test_stale_probe_alert():
     alert = _stale_probe_alert(SECTOR_NAME, 12.5, FARM_ID, SECTOR_ID, "probe-1")
     assert alert.alert_type == AlertType.STALE_PROBE
     assert alert.severity == AlertSeverity.WARNING
-    assert "12.5" in alert.description_pt
+    assert "12,5" in alert.description_pt  # pt-PT comma decimal
 
 
 def test_stale_weather_alert():

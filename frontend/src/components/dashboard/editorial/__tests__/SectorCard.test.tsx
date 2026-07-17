@@ -29,7 +29,7 @@ describe("EditorialSectorCard dose-do-dia", () => {
         farmId="f1"
       />
     );
-    expect(screen.getByText(/1\.3× a rega habitual/)).toBeInTheDocument();
+    expect(screen.getByText(/1,3× a rega habitual/)).toBeInTheDocument();
   });
 
   it("falls back to legacy band for old recommendations", () => {

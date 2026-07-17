@@ -36,13 +36,13 @@ describe("doseHeadline", () => {
     expect(doseHeadline({
       ...base, doseBand: "normal", doseSource: "probe_learned",
       habitualFactor: 1.3, estimatedRuntimeMin: 155,
-    })).toBe("≈1.3× a rega habitual (~2h35, estimado)");
+    })).toBe("≈1,3× a rega habitual (~2h35, estimado)");
   });
 
   it("probe_learned without estimate", () => {
     expect(doseHeadline({
       ...base, doseBand: "normal", doseSource: "probe_learned", habitualFactor: 0.5,
-    })).toBe("≈0.5× a rega habitual");
+    })).toBe("≈0,5× a rega habitual");
   });
 
   it("mm_only", () => {

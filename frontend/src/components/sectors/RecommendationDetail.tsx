@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { OverrideModal } from "@/components/overrides/OverrideModal";
 import { recommendationsApi } from "@/lib/api";
 import { DOSE_BAND_LABELS, doseHeadline, legacyDoseBand } from "@/lib/dose";
+import { formatDecimal } from "@/lib/utils";
 import type {
   ConfidenceLevel,
   DoseBand,
@@ -211,16 +212,16 @@ export function RecommendationDetail({ rec, onUpdate, hideHeader }: Recommendati
             </p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {rec.inputs_snapshot.et0_mm != null && (
-                <DataCell label="Evapotranspiração" value={`${rec.inputs_snapshot.et0_mm.toFixed(2)} mm/dia`} />
+                <DataCell label="Evapotranspiração" value={`${formatDecimal(rec.inputs_snapshot.et0_mm, 2)} mm/dia`} />
               )}
               {rec.inputs_snapshot.depletion_mm != null && (
-                <DataCell label="Água em falta" value={`${rec.inputs_snapshot.depletion_mm.toFixed(1)} mm`} />
+                <DataCell label="Água em falta" value={`${formatDecimal(rec.inputs_snapshot.depletion_mm, 1)} mm`} />
               )}
               {rec.inputs_snapshot.taw_mm != null && (
                 <DataCell label="Água disponível" value={`${rec.inputs_snapshot.taw_mm.toFixed(0)} mm`} />
               )}
               {rec.inputs_snapshot.kc != null && (
-                <DataCell label="Factor da cultura" value={rec.inputs_snapshot.kc.toFixed(2)} />
+                <DataCell label="Factor da cultura" value={formatDecimal(rec.inputs_snapshot.kc, 2)} />
               )}
             </div>
           </div>
@@ -322,7 +323,7 @@ export function RecommendationDetail({ rec, onUpdate, hideHeader }: Recommendati
                     minute: "2-digit",
                   })}
                   {rec.override_by &&
-                    ` · Dose ajustada para ${rec.irrigation_depth_mm?.toFixed(1)} mm`}
+                    ` · Dose ajustada para ${(rec.irrigation_depth_mm != null ? formatDecimal(rec.irrigation_depth_mm, 1) : undefined)} mm`}
                 </p>
               )}
             </div>

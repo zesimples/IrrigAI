@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type { FlowmeterDeviationSector, FlowmeterReferenceOut, FlowmeterSectorDashboard } from "@/types";
 import { FlowmeterSectorRow } from "./FlowmeterSectorRow";
 
+import { formatDecimal } from "@/lib/utils";
+
 type SortKey = "name" | "last_irrigation" | "total" | "events";
 type CropFilter = "all" | "almond" | "olive";
 
@@ -54,12 +56,12 @@ export function FlowmeterSectorTable({ sectors, period, farmId: _farmId, deviati
   function groupAvg(list: FlowmeterSectorDashboard[], crop: string) {
     const avg = cropAverages[crop];
     if (avg == null) return null;
-    return avg.toFixed(1);
+    return formatDecimal(avg, 1);
   }
 
   // Group total
   function groupTotal(list: FlowmeterSectorDashboard[]) {
-    return list.reduce((s, r) => s + r.total_m3_ha, 0).toFixed(1);
+    return formatDecimal(list.reduce((s, r) => s + r.total_m3_ha, 0), 1);
   }
 
   const noData = sectors.filter((s) => s.num_events === 0).length;

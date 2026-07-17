@@ -1,6 +1,8 @@
 // frontend/src/components/flowmeter/FlowmeterSparkline.tsx
 import type { SectorDailyBreakdown } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface FlowmeterSparklineProps {
   data: SectorDailyBreakdown[];
 }
@@ -34,7 +36,7 @@ export function FlowmeterSparkline({ data }: FlowmeterSparklineProps) {
         return (
           <div
             key={i}
-            title={`${d.date}: ${d.m3_ha.toFixed(1)} m³/ha`}
+            title={`${d.date}: ${formatDecimal(d.m3_ha, 1)} m³/ha`}
             style={{
               flex: 1,
               height: h,

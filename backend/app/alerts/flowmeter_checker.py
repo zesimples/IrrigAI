@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import AlertSeverity, AlertType
 from app.models.alert import Alert
+from app.utils.format_pt import fmt_pt
 
 logger = logging.getLogger(__name__)
 
@@ -375,10 +376,10 @@ class FlowmeterAlertChecker:
                     title_pt=f"Desvio de dotação: {sector.sector_name}",
                     title_en=f"Irrigation-dose deviation: {sector.sector_name}",
                     description_pt=(
-                        f"{sector.sector_name} aplica tipicamente {sector.typical_dose:.1f} m³/ha "
-                        f"por rega, {abs(evaluation.deviation_pct):.1f}% {direction_pt} da mediana "
-                        f"dos sectores comparáveis ({evaluation.crop_baseline:.1f} m³/ha; "
-                        f"diferença de {abs(evaluation.absolute_delta_m3ha):.1f} m³/ha)."
+                        f"{sector.sector_name} aplica tipicamente {fmt_pt(sector.typical_dose)} m³/ha "
+                        f"por rega, {fmt_pt(abs(evaluation.deviation_pct))}% {direction_pt} da mediana "
+                        f"dos sectores comparáveis ({fmt_pt(evaluation.crop_baseline)} m³/ha; "
+                        f"diferença de {fmt_pt(abs(evaluation.absolute_delta_m3ha))} m³/ha)."
                     ),
                     description_en=(
                         f"{sector.sector_name} typically applies {sector.typical_dose:.1f} m³/ha "

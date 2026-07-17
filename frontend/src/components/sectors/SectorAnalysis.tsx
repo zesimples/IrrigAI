@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { chatApi } from "@/lib/api";
 
+import { formatDecimal } from "@/lib/utils";
+
 // ─── Audio ───────────────────────────────────────────────────────────────────
 
 function playResultChime() {
@@ -409,7 +411,7 @@ export function SectorAnalysis({
           <p className="font-serif italic text-[13.5px] text-ink-2 leading-[1.5] flex-1 min-w-0">
             Vou cruzar isto com{" "}
             <strong className="not-italic font-semibold text-ink">
-              {et0Mm != null ? `${et0Mm.toFixed(1)} mm` : "dados actuais"}
+              {et0Mm != null ? `${formatDecimal(et0Mm, 1)} mm` : "dados actuais"}
             </strong>{" "}
             de ET₀ de hoje
             {probeExternalId && (

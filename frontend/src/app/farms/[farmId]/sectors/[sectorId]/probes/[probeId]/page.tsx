@@ -13,6 +13,8 @@ import { CROP_LABELS } from "@/lib/cropConfig";
 import { probesApi, waterEventsApi } from "@/lib/api";
 import type { ProbeDetectedEvent } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface Props {
   params: { farmId: string; sectorId: string; probeId: string };
 }
@@ -171,11 +173,11 @@ export default function ProbeDetailPage({ params }: Props) {
                             {d.readings.length}
                           </td>
                           <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums font-medium text-slate-800">
-                            {last != null ? `${(last * 100).toFixed(1)}%` : "—"}
+                            {last != null ? `${formatDecimal((last * 100), 1)}%` : "—"}
                           </td>
                           <td className="whitespace-nowrap px-5 py-3 text-right tabular-nums text-slate-500">
                             {vwcs.length > 0
-                              ? `${(min * 100).toFixed(1)}% / ${(max * 100).toFixed(1)}%`
+                              ? `${formatDecimal((min * 100), 1)}% / ${formatDecimal((max * 100), 1)}%`
                               : "—"}
                           </td>
                         </tr>
@@ -254,9 +256,9 @@ function DetectedEvents({
               )}
             </div>
             <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
-              {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {(event.delta_vwc * 100).toFixed(1)}%.
-              {event.rainfall_mm != null ? ` Chuva: ${event.rainfall_mm.toFixed(1)} mm.` : ""}
-              {event.irrigation_mm != null ? ` Rega: ${event.irrigation_mm.toFixed(1)} mm.` : ""}
+              {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {formatDecimal((event.delta_vwc * 100), 1)}%.
+              {event.rainfall_mm != null ? ` Chuva: ${formatDecimal(event.rainfall_mm, 1)} mm.` : ""}
+              {event.irrigation_mm != null ? ` Rega: ${formatDecimal(event.irrigation_mm, 1)} mm.` : ""}
             </p>
             {canModerate && event.status !== "confirmed" && event.status !== "rejected" && (
               <div className="mt-2 flex flex-wrap gap-2">

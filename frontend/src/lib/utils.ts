@@ -5,9 +5,18 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Format a number for pt-PT display: comma decimal separator, no grouping */
+export function formatDecimal(value: number, digits = 1): string {
+  return value.toLocaleString("pt-PT", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+    useGrouping: false,
+  });
+}
+
 /** Format a number as mm with 1 decimal place */
 export function formatMm(value: number): string {
-  return `${value.toFixed(1)} mm`;
+  return `${formatDecimal(value, 1)} mm`;
 }
 
 /** Format a confidence score (0–1) as a percentage */

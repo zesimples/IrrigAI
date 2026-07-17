@@ -8,6 +8,8 @@ import { DeviationCell } from "./DeviationCell";
 import { FlowmeterReferenceStatusDot } from "./FlowmeterReferenceStatusDot";
 import type { FlowmeterReferenceOut } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 interface Props {
   sector: FlowmeterSectorDashboard;
   period: "7d" | "30d" | "season";
@@ -100,7 +102,7 @@ export function FlowmeterSectorRow({ sector, period, deviation, reference, onRec
           {sector.last_event_m3_ha != null ? (
             <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5 }}>
               <span style={{ fontFamily: 'var(--font-fraunces)', fontSize: 16, fontWeight: 600, color: '#2a2520', letterSpacing: '-0.01em' }}>
-                {sector.last_event_m3_ha.toFixed(1)}
+                {formatDecimal(sector.last_event_m3_ha, 1)}
               </span>
               <span style={{ fontFamily: 'var(--font-jetbrains, ui-monospace)', fontSize: 10, color: '#8a7f74' }}>m³/ha</span>
             </span>
@@ -114,7 +116,7 @@ export function FlowmeterSectorRow({ sector, period, deviation, reference, onRec
           {sector.total_m3_ha > 0 ? (
             <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5 }}>
               <span style={{ fontFamily: 'var(--font-fraunces)', fontSize: 16, fontWeight: 500, color: '#2a2520', letterSpacing: '-0.01em' }}>
-                {sector.total_m3_ha.toFixed(1)}
+                {formatDecimal(sector.total_m3_ha, 1)}
               </span>
               <span style={{ fontFamily: 'var(--font-jetbrains, ui-monospace)', fontSize: 10, color: '#8a7f74' }}>m³/ha</span>
             </span>

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { flowmeterApi } from "@/lib/api";
 import type { FlowmeterSectorAnalysisResponse } from "@/types";
 
+import { formatDecimal } from "@/lib/utils";
+
 type Period = "7d" | "30d" | "season";
 
 const PERIOD_DAYS: Record<Period, number> = {
@@ -131,14 +133,14 @@ export function FlowmeterSectorAIAnalysis({ sectorId, period }: Props) {
                 <span>
                   Média/evento:{" "}
                   <strong className="text-ink-1">
-                    {data.statistics.avg_m3_ha_per_event.toFixed(1)} m³/ha
+                    {formatDecimal(data.statistics.avg_m3_ha_per_event, 1)} m³/ha
                   </strong>
                 </span>
                 {data.statistics.avg_interval_days != null && (
                   <span>
                     Intervalo:{" "}
                     <strong className="text-ink-1">
-                      {data.statistics.avg_interval_days.toFixed(1)} dias
+                      {formatDecimal(data.statistics.avg_interval_days, 1)} dias
                     </strong>
                   </span>
                 )}
@@ -164,7 +166,7 @@ export function FlowmeterSectorAIAnalysis({ sectorId, period }: Props) {
                       }
                     >
                       {data.statistics.vs_crop_avg_pct >= 0 ? "+" : ""}
-                      {data.statistics.vs_crop_avg_pct.toFixed(1)}%
+                      {formatDecimal(data.statistics.vs_crop_avg_pct, 1)}%
                     </strong>
                   </span>
                 )}
