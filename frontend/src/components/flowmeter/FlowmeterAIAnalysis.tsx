@@ -68,7 +68,7 @@ export function FlowmeterAIAnalysis({ farmId, period }: Props) {
           color: '#4a6a36',
           letterSpacing: '0.16em',
           textTransform: 'uppercase',
-        }}>Análise de consumo · IA</span>
+        }}>Explicação com IA · consumo</span>
       </div>
 
       {/* Prompt text + button (pre-analysis) */}

@@ -93,13 +93,31 @@ describe("ProbeReadingsInline", () => {
 
     fireEvent.click(screen.getByText("P-1"));
 
-    expect(screen.getByText("Diagnóstico da sonda")).toBeInTheDocument();
+    expect(screen.getByText("Explicação com IA · sonda")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Analisa o perfil de humidade por profundidade, a tendência recente e a resposta a regas.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("Interpretação de padrões")).not.toBeInTheDocument();
+  });
+
+  it("formats editable soil bounds with pt-PT decimal commas", () => {
+    mockData = baseData;
+    render(
+      <ProbeReadingsInline
+        probeId="probe-1"
+        externalId="P-1"
+        href="/probes/probe-1"
+        sectorId="sector-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByText("P-1"));
+    fireEvent.click(screen.getByText("Editar"));
+
+    expect(screen.getByLabelText("CC")).toHaveValue("30,0");
+    expect(screen.getByLabelText("PMP")).toHaveValue("15,0");
   });
 
   it("renders the rootzone line and hint in the depths view when rootzone_swc is present", () => {

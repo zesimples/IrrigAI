@@ -5,11 +5,14 @@ Integration tests (with a real DB) should use the fixtures in tests/fixtures/.
 """
 
 import json
-from dataclasses import asdict
+from types import SimpleNamespace
 
-import pytest
-
-from app.ai.context_builder import AssistantContextBuilder, FarmAssistantContext, SectorAssistantContext
+from app.ai.context_builder import (
+    AssistantContextBuilder,
+    FarmAssistantContext,
+    SectorAssistantContext,
+    _recommendation_snapshot_context,
+)
 
 
 def _make_sector_ctx(**overrides) -> SectorAssistantContext:
@@ -23,7 +26,9 @@ def _make_sector_ctx(**overrides) -> SectorAssistantContext:
         config_status={"soil": "configured", "irrigation_system": "missing", "phenological_stage": "configured"},
         defaults_used=["Kc=0.65 (stage average)"],
         missing_config=["irrigation system not configured"],
+        recommendation_id="rec-001",
         recommendation_action="irrigate",
+        recommendation_is_accepted=None,
         irrigation_depth_mm=18.5,
         runtime_minutes=None,
         confidence_score=0.72,
@@ -33,6 +38,17 @@ def _make_sector_ctx(**overrides) -> SectorAssistantContext:
         rootzone_taw_mm=90.0,
         rootzone_raw_mm=54.0,
         rootzone_swc=0.22,
+        today_etc_mm=3.4,
+        rainfall_effective_mm=0.0,
+        rain_skip_applies=False,
+        swc_source="probe_weighted",
+        swc_model=None,
+        fc_calibration=None,
+        dose_band="normal",
+        dose_source="configured",
+        dose_presentation={"habitual_factor": 1.0},
+        stress_projection={"urgency": "none"},
+        confidence_penalties=[],
         today_et0_mm=4.1,
         today_temp_max_c=28.0,
         rainfall_last_24h_mm=0.0,
@@ -129,3 +145,29 @@ def test_to_json_handles_none_values():
     parsed = json.loads(json_str)
     assert parsed["variety"] is None
     assert parsed["recommendation_action"] is None
+
+
+def test_recommendation_snapshot_context_passes_through_engine_fields():
+    snapshot = {
+        "etc_mm": 3.4,
+        "rain_effective_mm": 1.2,
+        "rain_skip_applies": True,
+        "swc_source": "probe_weighted",
+        "swc_model": {"seed_kind": "rain_anchor"},
+        "fc_calibration": {"method": "envelope"},
+        "dose_band": "normal",
+        "dose_source": "probe_learned",
+        "dose_presentation": {"habitual_factor": 0.9},
+        "stress_projection": {"urgency": "low"},
+    }
+    rec = SimpleNamespace(
+        inputs_snapshot=snapshot,
+        computation_log={"confidence_penalties": ["weather_stale"]},
+    )
+
+    context = _recommendation_snapshot_context(rec)
+
+    assert context == {
+        **snapshot,
+        "confidence_penalties": ["weather_stale"],
+    }

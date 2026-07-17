@@ -154,7 +154,7 @@ TOOL_SPECS: list[dict] = [
         "type": "function",
         "function": {
             "name": "propose_run_calibration",
-            "description": "Propõe correr a Calibração AI do setor (NÃO executa).",
+            "description": "Propõe correr a calibração inteligente do setor (NÃO executa).",
             "parameters": {
                 "type": "object",
                 "properties": {"sector_id": {"type": "string"}},
@@ -183,14 +183,20 @@ async def execute_tool(
         if name == "get_farm_overview":
             return await _get_farm_overview(_resolve(args, scope, "farm_id"), access, db)
         if name == "get_sector_status":
-            return await _get_sector_status(_resolve(args, scope, "sector_id"), access, db)
+            return await _get_sector_status(
+                _resolve(args, scope, "sector_id"), access, db, scope
+            )
         if name == "get_probe_readings":
             return await _get_probe_readings(
-                _resolve(args, scope, "sector_id"), args.get("window_hours", 72), access, db
+                _resolve(args, scope, "sector_id"),
+                args.get("window_hours", 72),
+                access,
+                db,
+                scope,
             )
         if name == "get_water_events":
             return await _get_water_events(
-                _resolve(args, scope, "sector_id"), args.get("days", 14), access, db
+                _resolve(args, scope, "sector_id"), args.get("days", 14), access, db, scope
             )
         if name == "get_weather":
             return await _get_weather(_resolve(args, scope, "farm_id"), access, db)
@@ -221,16 +227,26 @@ async def _get_farm_overview(farm_id, access, db) -> dict:
     return {"farm": ctx.farm_name, "sectors": sectors, "active_alerts": ctx.total_active_alerts}
 
 
-async def _get_sector_status(sector_id, access, db) -> dict:
+async def _require_sector_scope(sector_id, access, scope) -> None:
+    if scope.farm_id:
+        await access.sector_in_farm(sector_id, scope.farm_id)
+    else:
+        await access.sector(sector_id)
+
+
+async def _get_sector_status(sector_id, access, db, scope) -> dict:
     if not sector_id:
         return {"error": "missing_sector_id"}
-    await access.sector(sector_id)
+    await _require_sector_scope(sector_id, access, scope)
     s = await AssistantContextBuilder().build_sector_context(sector_id, db)
     return {
         "sector_id": s.sector_id,
         "name": s.sector_name,
         "crop_type": s.crop_type,
+        "recommendation_id": s.recommendation_id,
         "action": s.recommendation_action,
+        "generated_at": s.generated_at,
+        "is_accepted": s.recommendation_is_accepted,
         "irrigation_depth_mm": s.irrigation_depth_mm,
         "depletion_mm": s.rootzone_depletion_mm,
         "taw_mm": s.rootzone_taw_mm,
@@ -242,20 +258,20 @@ async def _get_sector_status(sector_id, access, db) -> dict:
     }
 
 
-async def _get_probe_readings(sector_id, window_hours, access, db) -> dict:
+async def _get_probe_readings(sector_id, window_hours, access, db, scope) -> dict:
     if not sector_id:
         return {"error": "missing_sector_id"}
-    await access.sector(sector_id)
+    await _require_sector_scope(sector_id, access, scope)
     ctx = await build_sector_change_context(sector_id, db, window_hours=window_hours)
     if ctx.get("error"):
         return {"error": ctx["error"]}
     return {"window_hours": ctx.get("window_hours"), "probe_changes": ctx.get("probe_changes", [])}
 
 
-async def _get_water_events(sector_id, days, access, db) -> dict:
+async def _get_water_events(sector_id, days, access, db, scope) -> dict:
     if not sector_id:
         return {"error": "missing_sector_id"}
-    await access.sector(sector_id)
+    await _require_sector_scope(sector_id, access, scope)
     return {"water_events": await get_sector_water_events(sector_id, db, days=days)}
 
 
@@ -302,7 +318,7 @@ async def _propose(name, args, access, db, scope) -> dict:
         sector_id = args.get("sector_id") or scope.sector_id
         if not sector_id:
             return {"error": "missing_sector_id"}
-        await access.sector(sector_id)
+        await _require_sector_scope(sector_id, access, scope)
         if name == "propose_regenerate_recommendation":
             action = ProposedAction(
                 type="regenerate_recommendation",
@@ -312,7 +328,7 @@ async def _propose(name, args, access, db, scope) -> dict:
         else:  # propose_run_calibration
             action = ProposedAction(
                 type="run_calibration",
-                summary="Correr a Calibração AI do setor.",
+                summary="Correr a calibração inteligente do setor.",
                 sector_id=sector_id,
             )
     return {"proposed_action": action.model_dump(), "status": "awaiting_confirmation"}

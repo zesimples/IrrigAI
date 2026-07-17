@@ -272,17 +272,34 @@ class MockChatClient:
         max_tokens: int = 700,
         temperature: float = 0.2,
     ) -> LLMToolResponse:
-        # If a tool result is already present, produce the final prose answer.
-        if any(m.get("role") == "tool" for m in messages):
-            return LLMToolResponse(
-                content="Registei a proposta. Confirma na aplicação para a aplicar.",
-                tool_calls=[],
-            )
         last_user = ""
         for m in reversed(messages):
             if m.get("role") == "user":
                 last_user = (m.get("content") or "").lower()
                 break
+        tool_messages = [m for m in messages if m.get("role") == "tool"]
+        if tool_messages:
+            try:
+                last_tool_result = _json.loads(tool_messages[-1].get("content") or "{}")
+            except _json.JSONDecodeError:
+                last_tool_result = {}
+            if "proposed_action" in last_tool_result:
+                return LLMToolResponse(
+                    content="Registei a proposta. Confirma na aplicação para a aplicar.",
+                    tool_calls=[],
+                )
+            if "aceita" in last_user and last_tool_result.get("recommendation_id"):
+                return LLMToolResponse(content=None, tool_calls=[
+                    LLMToolCall(
+                        id="mock-2",
+                        name="propose_accept_recommendation",
+                        arguments={"recommendation_id": last_tool_result["recommendation_id"]},
+                    )
+                ])
+            return LLMToolResponse(
+                content="Consultei os dados disponíveis para responder ao pedido.",
+                tool_calls=[],
+            )
         if "recalibr" in last_user or "calibra" in last_user:
             return LLMToolResponse(content=None, tool_calls=[
                 LLMToolCall(id="mock-1", name="propose_run_calibration", arguments={})
@@ -291,10 +308,9 @@ class MockChatClient:
             return LLMToolResponse(content=None, tool_calls=[
                 LLMToolCall(id="mock-1", name="propose_regenerate_recommendation", arguments={})
             ])
-        if "aceitar" in last_user:
+        if "aceita" in last_user:
             return LLMToolResponse(content=None, tool_calls=[
-                LLMToolCall(id="mock-1", name="propose_accept_recommendation",
-                            arguments={"recommendation_id": "rec-mock"})
+                LLMToolCall(id="mock-1", name="get_sector_status", arguments={})
             ])
         if "substitu" in last_user or "override" in last_user or "regar" in last_user:
             m = _re.search(r"(\d+(?:\.\d+)?)\s*mm", last_user)

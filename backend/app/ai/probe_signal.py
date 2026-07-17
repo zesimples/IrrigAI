@@ -12,8 +12,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.engine.pipeline import resolve_sector_soil_bounds
 from app.models import (
+    DetectedWaterEvent,
     IrrigationEvent,
+    IrrigationEventDetected,
     Plot,
     Probe,
     ProbeDepth,
@@ -43,13 +46,23 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
     soil_texture: str | None = None
     field_capacity: float | None = None
     wilting_point: float | None = None
+    soil_bounds: dict | None = None
     root_depth_cm: int | None = None
     if sector:
         plot = await db.get(Plot, sector.plot_id)
         if plot:
             soil_texture = plot.soil_texture
-            field_capacity = plot.field_capacity
-            wilting_point = plot.wilting_point
+        bounds = await resolve_sector_soil_bounds(sector.id, db, plot=plot)
+        field_capacity = bounds.fc
+        wilting_point = bounds.pwp
+        calibration_meta = bounds.calibration or {}
+        soil_bounds = {
+            "field_capacity": bounds.fc,
+            "wilting_point": bounds.pwp,
+            "source": bounds.source,
+            "stale": bool(calibration_meta.get("stale", False)),
+            "computed_at": calibration_meta.get("computed_at"),
+        }
         # root depth from crop profile
         cp_result = await db.execute(
             select(SectorCropProfile).where(SectorCropProfile.sector_id == probe.sector_id)
@@ -103,7 +116,55 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         .order_by(IrrigationEvent.start_time)
     )
     irrigation_events = events_result.scalars().all()
-    last_event = max(irrigation_events, key=lambda e: e.start_time) if irrigation_events else None
+    last_event_at: datetime | None = None
+    last_event_applied_mm: float | None = None
+    last_event_source: str | None = None
+    irrigation_event_count = 0
+
+    if irrigation_events:
+        last_manual = max(irrigation_events, key=lambda event: event.start_time)
+        last_event_at = last_manual.start_time
+        last_event_applied_mm = last_manual.applied_mm
+        last_event_source = "manual"
+        irrigation_event_count = len(irrigation_events)
+    else:
+        probe_events = (
+            await db.execute(
+                select(DetectedWaterEvent)
+                .where(
+                    DetectedWaterEvent.sector_id == probe.sector_id,
+                    DetectedWaterEvent.timestamp >= window_start,
+                    DetectedWaterEvent.kind == "irrigation",
+                    DetectedWaterEvent.status.in_(("active", "confirmed")),
+                )
+                .order_by(DetectedWaterEvent.timestamp)
+            )
+        ).scalars().all()
+        if probe_events:
+            last_probe_event = max(probe_events, key=lambda event: event.timestamp)
+            last_event_at = last_probe_event.timestamp
+            last_event_applied_mm = last_probe_event.irrigation_mm
+            last_event_source = "probe_detected"
+            irrigation_event_count = len(probe_events)
+        else:
+            flowmeter_events = (
+                await db.execute(
+                    select(IrrigationEventDetected)
+                    .where(
+                        IrrigationEventDetected.sector_id == probe.sector_id,
+                        IrrigationEventDetected.start_time >= window_start,
+                    )
+                    .order_by(IrrigationEventDetected.start_time)
+                )
+            ).scalars().all()
+            if flowmeter_events:
+                last_flowmeter_event = max(
+                    flowmeter_events, key=lambda event: event.start_time
+                )
+                last_event_at = last_flowmeter_event.start_time
+                last_event_applied_mm = round(last_flowmeter_event.total_m3_ha / 10.0, 3)
+                last_event_source = "flowmeter_detected"
+                irrigation_event_count = len(flowmeter_events)
 
     # Depths and readings
     depths_result = await db.execute(
@@ -166,8 +227,12 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         # Post-irrigation response
         post_irrig_delta: float | None = None
         hours_to_peak: float | None = None
-        if last_event is not None:
-            evt_ts = last_event.start_time.replace(tzinfo=UTC) if last_event.start_time.tzinfo is None else last_event.start_time
+        if last_event_at is not None:
+            evt_ts = (
+                last_event_at.replace(tzinfo=UTC)
+                if last_event_at.tzinfo is None
+                else last_event_at
+            )
             vwc_at_event = _nearest_value(vwc_series, evt_ts)
             post_window = [(t, v) for t, v in vwc_series if evt_ts <= t <= evt_ts + timedelta(hours=12)]
             if post_window and vwc_at_event is not None:
@@ -260,10 +325,12 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         "sector_id": probe.sector_id,
         "sector_name": sector_name,
         "soil_texture": soil_texture,
+        "soil_bounds": soil_bounds,
         "root_depth_cm": root_depth_cm,
         "analysis_window_hours": _ANALYSIS_HOURS,
-        "n_irrigation_events_in_window": len(irrigation_events),
-        "last_irrigation_applied_mm": last_event.applied_mm if last_event else None,
+        "n_irrigation_events_in_window": irrigation_event_count,
+        "last_irrigation_applied_mm": last_event_applied_mm,
+        "last_irrigation_event_source": last_event_source,
         "latest_recommendation": latest_recommendation,
         "depths": depth_stats,
         "cross_depth_signals": cross_depth,

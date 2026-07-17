@@ -340,9 +340,12 @@ FORMATO DA RESPOSTA ESTRUTURADA — obrigatório:
   valor do contexto vier em inglês (p.ex. "No sector crop profile attached"),
   traduz para português — nunca copies texto em inglês para a resposta.
 - Em "evidence", cada "source" tem de ser um caminho REAL do contexto fornecido.
-  Usa as chaves canónicas: water_balance, recommendation_history, weather.forecast,
-  probe_signal, probe_summary.latest_readings, water_events, alert, known_limitations.
-  NÃO inventes caminhos (não uses, p.ex., "sectors.recommendation_action").
+  Cita o caminho exacto até ao valor usado, incluindo índices quando atravessas listas
+  (p.ex. "sectors[0].recommendation_action"). Podes usar, apenas quando existirem,
+  caminhos como water_balance.depletion_mm, weather.forecast,
+  probe_summary.latest_readings[0].vwc, probe_signal.depths[0].tendencia,
+  recommendation_history[0].action, water_events[0].kind, alert.severity ou
+  known_limitations[0]. NÃO inventes caminhos nem omitas índices de listas.
 - NÃO calcules valores novos; interpreta apenas os dados já fornecidos.
 """
 

@@ -164,7 +164,7 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
       <div className="flex items-center justify-between rounded-t-[1.75rem] bg-emerald-700 px-4 py-3">
         <div>
           <p className="text-sm font-semibold text-white">Assistente IrrigAI</p>
-          <p className="text-xs text-emerald-200">Powered by GPT-4o</p>
+          <p className="text-xs text-emerald-200">Dados da exploração em contexto</p>
         </div>
         <button
           onClick={onClose}

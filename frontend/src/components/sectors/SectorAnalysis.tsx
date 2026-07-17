@@ -183,7 +183,7 @@ function AssistantResult({
             <div className="flex items-center gap-2 mb-1">
               <span className="h-2 w-2 rounded-full bg-olive" />
               <span className="font-mono text-[10.5px] tracking-[0.16em] uppercase text-[#4a6a36] font-medium">
-                Análise do assistente
+                Explicação com IA
               </span>
             </div>
             {timeLabel && (
@@ -326,7 +326,7 @@ export function SectorAnalysis({
           <div className="flex items-center gap-2 mb-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-terra" />
             <span className="font-mono text-[10.5px] tracking-[0.16em] uppercase text-terra">
-              Análise com assistente IA
+              Explicação com IA
             </span>
           </div>
           <h2

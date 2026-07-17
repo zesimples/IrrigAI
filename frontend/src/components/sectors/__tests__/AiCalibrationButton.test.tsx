@@ -27,9 +27,11 @@ describe("AiCalibrationButton", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the Calibração AI button", () => {
+  it("renders the honest deterministic calibration label", () => {
     render(<AiCalibrationButton sectorId="s1" />);
-    expect(screen.getByRole("button", { name: /Calibração AI/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Calibração inteligente/i }),
+    ).toBeInTheDocument();
   });
 
   it("is disabled with a tooltip and does not call the API when unavailable", () => {

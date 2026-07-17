@@ -83,15 +83,15 @@ export function ProbeReadingsInline({
   function startEdit() {
     const fc = activeRefLines.field_capacity;
     const wp = activeRefLines.wilting_point;
-    setCcInput(fc != null ? (fc * 100).toFixed(1) : "");
-    setPmpInput(wp != null ? (wp * 100).toFixed(1) : "");
+    setCcInput(fc != null ? formatDecimal(fc * 100, 1) : "");
+    setPmpInput(wp != null ? formatDecimal(wp * 100, 1) : "");
     setSaved(false);
     setEditing(true);
   }
 
   async function handleSave() {
-    const cc = parseFloat(ccInput);
-    const pmp = parseFloat(pmpInput);
+    const cc = Number.parseFloat(ccInput.replace(",", "."));
+    const pmp = Number.parseFloat(pmpInput.replace(",", "."));
     if (isNaN(cc) || isNaN(pmp) || cc <= 0 || pmp <= 0 || pmp >= cc) return;
     setSaving(true);
     try {
@@ -246,9 +246,16 @@ export function ProbeReadingsInline({
                 {editing ? (
                   <>
                     <div className="flex items-center gap-1.5">
-                      <label className="font-mono text-[11px] font-medium text-olive min-w-[28px]">CC</label>
+                      <label
+                        htmlFor={`probe-${probeId}-cc`}
+                        className="font-mono text-[11px] font-medium text-olive min-w-[28px]"
+                      >
+                        CC
+                      </label>
                       <input
-                        type="number"
+                        id={`probe-${probeId}-cc`}
+                        type="text"
+                        inputMode="decimal"
                         value={ccInput}
                         onChange={(e) => setCcInput(e.target.value)}
                         step="0.1"
@@ -259,9 +266,16 @@ export function ProbeReadingsInline({
                       <span className="font-mono text-[11px] text-ink-3">%</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <label className="font-mono text-[11px] font-medium text-terra min-w-[36px]">PMP</label>
+                      <label
+                        htmlFor={`probe-${probeId}-pmp`}
+                        className="font-mono text-[11px] font-medium text-terra min-w-[36px]"
+                      >
+                        PMP
+                      </label>
                       <input
-                        type="number"
+                        id={`probe-${probeId}-pmp`}
+                        type="text"
+                        inputMode="decimal"
                         value={pmpInput}
                         onChange={(e) => setPmpInput(e.target.value)}
                         step="0.1"
@@ -384,7 +398,7 @@ export function ProbeReadingsInline({
                 <div className="flex items-center gap-2">
                   <ScanLine className="h-3.5 w-3.5 text-ink-3" />
                   <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
-                    Diagnóstico da sonda
+                    Explicação com IA · sonda
                   </span>
                 </div>
                 <button

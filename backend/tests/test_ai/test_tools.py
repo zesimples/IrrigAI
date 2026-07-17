@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -22,13 +23,52 @@ def test_tool_specs_shape():
 @pytest.mark.asyncio
 async def test_read_tool_access_denied_returns_error():
     access = AsyncMock()
-    access.sector.side_effect = HTTPException(status_code=404)
+    access.sector_in_farm.side_effect = HTTPException(status_code=404)
     db = AsyncMock()
     out = await execute_tool(
         "get_sector_status", {"sector_id": "foreign"},
         access=access, db=db, scope=ToolScope(farm_id="f1", sector_id=None),
     )
     assert out == {"error": "not_found_or_forbidden"}
+
+
+@pytest.mark.asyncio
+async def test_sector_status_returns_actionable_recommendation_identity(monkeypatch):
+    context = SimpleNamespace(
+        sector_id="sec-1",
+        sector_name="Norte",
+        crop_type="olive",
+        recommendation_id="rec-123",
+        recommendation_action="irrigate",
+        recommendation_is_accepted=None,
+        irrigation_depth_mm=12.0,
+        rootzone_depletion_mm=20.0,
+        rootzone_taw_mm=80.0,
+        confidence_level="high",
+        source_confidence="fresh",
+        data_quality_explanation="Leituras atuais.",
+        reasons=[],
+        active_alerts=[],
+        generated_at="2026-07-17T08:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        "app.ai.tools.AssistantContextBuilder.build_sector_context",
+        AsyncMock(return_value=context),
+    )
+    access = AsyncMock()
+
+    out = await execute_tool(
+        "get_sector_status",
+        {},
+        access=access,
+        db=AsyncMock(),
+        scope=ToolScope(farm_id="farm-1", sector_id="sec-1"),
+    )
+
+    access.sector_in_farm.assert_awaited_once_with("sec-1", "farm-1")
+    assert out["recommendation_id"] == "rec-123"
+    assert out["generated_at"] == "2026-07-17T08:00:00+00:00"
+    assert out["is_accepted"] is None
 
 
 @pytest.mark.asyncio

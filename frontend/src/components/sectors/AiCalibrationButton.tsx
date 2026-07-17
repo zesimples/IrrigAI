@@ -20,9 +20,9 @@ interface Props {
 }
 
 /**
- * Manually triggers deterministic probe calibration for a sector. The label says
- * "AI Calibration" for the user, but the work is deterministic Python on the
- * backend (no LLM decides soil parameters). On success it refreshes the
+ * Manually triggers deterministic probe calibration for a sector. The work is
+ * deterministic Python on the backend (no LLM decides soil parameters). On
+ * success it refreshes the
  * recommendation so the recalculated depletion reflects the new bounds.
  */
 export function AiCalibrationButton({
@@ -88,7 +88,9 @@ export function AiCalibrationButton({
       }
     >
       <SlidersHorizontal className="h-3.5 w-3.5" />
-      <span className="hidden sm:inline">{running ? "A calibrar…" : "Calibração AI"}</span>
+      <span className="hidden sm:inline">
+        {running ? "A calibrar…" : "Calibração inteligente"}
+      </span>
     </button>
   );
 }

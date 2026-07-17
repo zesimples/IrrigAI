@@ -105,7 +105,7 @@ async def farm_chat(
     """Conversational chat with memory + tools about the farm or a specific sector."""
     await access.farm(farm_id)
     if body.sector_id:
-        await access.sector(body.sector_id)
+        await access.sector_in_farm(body.sector_id, farm_id)
     try:
         result = await agent.run(
             farm_id=farm_id,

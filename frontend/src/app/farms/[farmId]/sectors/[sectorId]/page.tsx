@@ -314,7 +314,7 @@ export default function SectorDetailPage({ params }: Props) {
           {/* Right: AI lede — desktop only */}
           <aside className="hidden lg:block max-w-[480px] border-l border-rule-soft pl-8">
             <p className="font-mono text-[10px] tracking-[0.16em] uppercase text-terra mb-1.5">
-              Recomendação da IA
+              Recomendação IrrigAI
             </p>
             <p
               className="font-serif text-[20px] font-normal leading-[1.35] tracking-[-0.01em] text-ink"
@@ -339,7 +339,7 @@ export default function SectorDetailPage({ params }: Props) {
         {rec && (
           <div className="mt-4 pt-4 border-t border-rule-soft lg:hidden">
             <p className="font-mono text-[10px] tracking-[0.16em] uppercase text-terra mb-1.5">
-              Recomendação da IA
+              Recomendação IrrigAI
             </p>
             <p
               className="font-serif text-[17px] font-normal leading-[1.4] tracking-[-0.01em] text-ink"

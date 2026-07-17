@@ -76,6 +76,23 @@ class AccessController:
             self._not_found("Sector")
         return sector
 
+    async def sector_in_farm(self, sector_id: str, farm_id: str) -> Sector:
+        """Resolve an owned sector while locking it to the requested farm scope."""
+        stmt = (
+            select(Sector)
+            .join(Plot, Sector.plot_id == Plot.id)
+            .join(Farm, Plot.farm_id == Farm.id)
+            .where(
+                Sector.id == sector_id,
+                Plot.farm_id == farm_id,
+                self._owned_filter(),
+            )
+        )
+        sector = (await self.db.execute(stmt)).scalar_one_or_none()
+        if sector is None:
+            self._not_found("Sector")
+        return sector
+
     async def probe(self, probe_id: str) -> Probe:
         stmt = (
             select(Probe)

@@ -20,6 +20,7 @@ describe("ChatPanel", () => {
   it("sends history with the message", async () => {
     (chatApi.chat as any).mockResolvedValue({ reply: "olá!", proposed_action: null });
     render(<ChatPanel farmId="f1" onClose={() => {}} />);
+    expect(screen.queryByText(/Powered by GPT-4o/i)).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "primeira" } });
     fireEvent.click(screen.getByLabelText("Enviar"));
     await waitFor(() => expect(chatApi.chat).toHaveBeenCalledWith("f1", "primeira", undefined, []));
@@ -28,13 +29,13 @@ describe("ChatPanel", () => {
   it("renders a confirm card and dispatches on confirm", async () => {
     (chatApi.chat as any).mockResolvedValue({
       reply: "Proponho calibrar.",
-      proposed_action: { type: "run_calibration", summary: "Correr a Calibração AI.", sector_id: "sec-9", params: {} },
+      proposed_action: { type: "run_calibration", summary: "Correr a calibração inteligente.", sector_id: "sec-9", params: {} },
     });
     (calibrationApi.run as any).mockResolvedValue({});
     render(<ChatPanel farmId="f1" sectorId="sec-9" onClose={() => {}} />);
     fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "recalibrar" } });
     fireEvent.click(screen.getByLabelText("Enviar"));
-    await screen.findByText("Correr a Calibração AI.");
+    await screen.findByText("Correr a calibração inteligente.");
     fireEvent.click(screen.getByText("Confirmar"));
     await waitFor(() => expect(calibrationApi.run).toHaveBeenCalledWith("sec-9"));
   });

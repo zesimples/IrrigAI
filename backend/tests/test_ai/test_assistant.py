@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -92,7 +91,9 @@ def _sector_ctx(**overrides) -> SectorAssistantContext:
         config_status={"soil": "configured", "irrigation_system": "missing"},
         defaults_used=["Kc=0.65"],
         missing_config=["irrigation system not configured"],
+        recommendation_id="rec-001",
         recommendation_action="irrigate",
+        recommendation_is_accepted=None,
         irrigation_depth_mm=18.5,
         runtime_minutes=None,
         confidence_score=0.72,
@@ -102,6 +103,17 @@ def _sector_ctx(**overrides) -> SectorAssistantContext:
         rootzone_taw_mm=90.0,
         rootzone_raw_mm=54.0,
         rootzone_swc=0.22,
+        today_etc_mm=3.4,
+        rainfall_effective_mm=0.0,
+        rain_skip_applies=False,
+        swc_source="probe_weighted",
+        swc_model=None,
+        fc_calibration=None,
+        dose_band="normal",
+        dose_source="configured",
+        dose_presentation={"habitual_factor": 1.0},
+        stress_projection={"urgency": "none"},
+        confidence_penalties=[],
         today_et0_mm=4.1,
         today_temp_max_c=28.0,
         rainfall_last_24h_mm=0.0,

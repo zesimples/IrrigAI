@@ -80,7 +80,7 @@ export function FlowmeterSectorAIAnalysis({ sectorId, period }: Props) {
         onClick={() => setCollapsed(!collapsed)}
       >
         <span className="text-xs font-semibold text-ink-3 uppercase tracking-wide">
-          📊 Análise AI do Setor
+          Explicação com IA · setor
         </span>
         <span className="text-ink-3 text-xs">{collapsed ? "▶" : "▼"}</span>
       </div>

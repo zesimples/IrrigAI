@@ -33,7 +33,7 @@ export function SectorDiagnosisCard({ sectorId }: Props) {
         <div className="flex items-center gap-2">
           <Microscope className="h-4 w-4 text-irrigai-text-hint" />
           <p className="text-[12px] font-medium uppercase tracking-[0.05em] text-irrigai-text-hint">
-            Diagnóstico Agronómico
+            Explicação com IA · diagnóstico agronómico
           </p>
         </div>
         <Button

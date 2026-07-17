@@ -8,11 +8,16 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.ai.context_builder import build_structured_agronomic_context
+from app.ai.probe_signal import compute_probe_signal_stats
 from app.config import get_settings
 from app.engine.auto_calibration import AutoCalibrationService
 from app.engine.pipeline import build_sector_context
 from app.models import (
+    DetectedWaterEvent,
     Farm,
+    Flowmeter,
+    IrrigationEventDetected,
     Plot,
     Probe,
     ProbeCalibration,
@@ -187,6 +192,161 @@ async def test_resolve_sector_soil_bounds_matches_engine(db: AsyncSession):
     assert bounds.source == "probe_calibrated"
     assert bounds.fc == 0.46          # calibrated, not preset SCP 0.16 / plot 0.16
     assert bounds.pwp == 0.30         # refill as lower bound
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_ai_context_uses_calibrated_soil_bounds_with_provenance(db: AsyncSession):
+    sector_id = await _make_pinned_sector(db, vwc=0.44)
+    db.add(
+        SectorCropProfile(
+            sector_id=sector_id,
+            crop_type="almond",
+            mad=0.5,
+            root_depth_mature_m=0.6,
+            root_depth_young_m=0.3,
+            field_capacity=0.16,
+            wilting_point=0.07,
+            stages=[],
+        )
+    )
+    db.add(
+        ProbeCalibration(
+            sector_id=sector_id,
+            observed_fc=0.46,
+            observed_refill=0.30,
+            method="envelope",
+            num_cycles=0,
+            consistency=0.5,
+            window_days=60,
+            computed_at=datetime.now(UTC),
+        )
+    )
+    await db.flush()
+    latest_reading = (
+        await db.execute(
+            select(ProbeReading)
+            .join(ProbeDepth, ProbeReading.probe_depth_id == ProbeDepth.id)
+            .join(Probe, ProbeDepth.probe_id == Probe.id)
+            .where(Probe.sector_id == sector_id)
+            .order_by(ProbeReading.timestamp.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    latest_reading.raw_value = 0.12
+    latest_reading.calibrated_value = 0.451
+    await db.flush()
+
+    context = await build_structured_agronomic_context(sector_id, db)
+
+    assert context["soil"]["field_capacity"] == 0.46
+    assert context["soil"]["wilting_point"] == 0.30
+    assert context["soil"]["provenance"]["source"] == "probe_calibrated"
+    assert context["soil"]["provenance"]["stale"] is False
+    assert context["soil"]["provenance"]["computed_at"] is not None
+    latest = context["probe_summary"]["latest_readings"][0]
+    assert latest["vwc"] == 0.451
+    assert latest["latest_reading_at"] is not None
+    assert context["probe_summary"]["live"]["depths"] == context["probe_summary"][
+        "latest_readings"
+    ]
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_probe_signal_moisture_label_uses_calibrated_bounds(db: AsyncSession):
+    sector_id = await _make_pinned_sector(db, vwc=0.44)
+    db.add(
+        ProbeCalibration(
+            sector_id=sector_id,
+            observed_fc=0.46,
+            observed_refill=0.30,
+            method="envelope",
+            num_cycles=0,
+            consistency=0.5,
+            window_days=60,
+            computed_at=datetime.now(UTC),
+        )
+    )
+    await db.flush()
+    probe = (
+        await db.execute(select(Probe).where(Probe.sector_id == sector_id))
+    ).scalar_one()
+
+    stats = await compute_probe_signal_stats(probe.id, db)
+
+    assert stats["soil_bounds"]["source"] == "probe_calibrated"
+    assert stats["depths"][0]["humidade_actual"] == "humidade elevada"
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_probe_signal_uses_confirmed_probe_detected_irrigation(db: AsyncSession):
+    sector_id = await _make_pinned_sector(db, vwc=0.44)
+    probe = (
+        await db.execute(select(Probe).where(Probe.sector_id == sector_id))
+    ).scalar_one()
+    event_at = datetime.now(UTC) - timedelta(hours=12)
+    db.add(
+        DetectedWaterEvent(
+            probe_id=probe.id,
+            sector_id=sector_id,
+            timestamp=event_at,
+            kind="irrigation",
+            confidence="high",
+            status="confirmed",
+            depths_cm=[20],
+            delta_vwc=0.04,
+            irrigation_mm=8.0,
+            message="test",
+        )
+    )
+    await db.flush()
+
+    stats = await compute_probe_signal_stats(probe.id, db)
+
+    assert stats["n_irrigation_events_in_window"] == 1
+    assert stats["last_irrigation_event_source"] == "probe_detected"
+    assert stats["last_irrigation_applied_mm"] == 8.0
+    assert stats["depths"][0]["resposta_rega"] is not None
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_probe_signal_uses_flowmeter_detected_irrigation(db: AsyncSession):
+    sector_id = await _make_pinned_sector(db, vwc=0.44)
+    probe = (
+        await db.execute(select(Probe).where(Probe.sector_id == sector_id))
+    ).scalar_one()
+    flowmeter = Flowmeter(
+        sector_id=sector_id,
+        external_device_id=991122,
+        name="Test flowmeter",
+    )
+    db.add(flowmeter)
+    await db.flush()
+    event_at = datetime.now(UTC) - timedelta(hours=12)
+    db.add(
+        IrrigationEventDetected(
+            flowmeter_id=flowmeter.id,
+            sector_id=sector_id,
+            start_time=event_at,
+            end_time=event_at + timedelta(hours=1),
+            duration_minutes=60.0,
+            total_m3_ha=80.0,
+            peak_m3_ha=20.0,
+            num_readings=4,
+            date=event_at.date(),
+        )
+    )
+    await db.flush()
+
+    stats = await compute_probe_signal_stats(probe.id, db)
+
+    assert stats["n_irrigation_events_in_window"] == 1
+    assert stats["last_irrigation_event_source"] == "flowmeter_detected"
+    assert stats["last_irrigation_applied_mm"] == 8.0
+    assert stats["depths"][0]["resposta_rega"] is not None
     await db.rollback()
 
 

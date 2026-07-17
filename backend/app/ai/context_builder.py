@@ -18,8 +18,11 @@ from app.engine.pipeline import (
     build_irrigation_context,
     build_sector_context,
     build_weather_context,
+    resolve_sector_soil_bounds,
+    resolve_weather_plot_id,
 )
 from app.engine.probe_interpreter import interpret_probes
+from app.engine.types import SectorContext
 from app.models import (
     Alert,
     DetectedWaterEvent,
@@ -37,6 +40,7 @@ from app.models import (
     WeatherForecast,
     WeatherObservation,
 )
+from app.utils.format_pt import fmt_pt
 
 # ---------------------------------------------------------------------------
 # Context dataclasses
@@ -58,7 +62,9 @@ class SectorAssistantContext:
     missing_config: list[str]
 
     # Latest recommendation
+    recommendation_id: str | None
     recommendation_action: str | None
+    recommendation_is_accepted: bool | None
     irrigation_depth_mm: float | None
     runtime_minutes: float | None
     confidence_score: float | None
@@ -70,6 +76,17 @@ class SectorAssistantContext:
     rootzone_taw_mm: float | None
     rootzone_raw_mm: float | None
     rootzone_swc: float | None
+    today_etc_mm: float | None
+    rainfall_effective_mm: float | None
+    rain_skip_applies: bool | None
+    swc_source: str | None
+    swc_model: dict | None
+    fc_calibration: dict | None
+    dose_band: str | None
+    dose_source: str | None
+    dose_presentation: dict | None
+    stress_projection: dict | None
+    confidence_penalties: list | dict | None
 
     # Weather
     today_et0_mm: float | None
@@ -139,7 +156,7 @@ def _source_confidence_and_explanation(probe_live: dict | None) -> tuple[str, st
     if h > 6:
         return (
             "stale",
-            f"Última leitura da sonda há {h:.1f}h — o estado actual do solo pode "
+            f"Última leitura da sonda há {fmt_pt(h)}h — o estado actual do solo pode "
             f"ter mudado entretanto.",
         )
 
@@ -148,11 +165,56 @@ def _source_confidence_and_explanation(probe_live: dict | None) -> tuple[str, st
         mins = round(h * 60)
         time_str = f"há {mins} min"
     else:
-        time_str = f"há {h:.1f}h"
+        time_str = f"há {fmt_pt(h)}h"
     return (
         "fresh",
         f"Dados da sonda actuais ({time_str}) — leitura directa do estado hídrico do solo.",
     )
+
+
+async def build_canonical_probe_state(
+    eng_ctx: SectorContext,
+    db: AsyncSession,
+) -> dict | None:
+    """Build the single live probe representation used by every AI context path."""
+    snapshot = await interpret_probes(eng_ctx, db)
+    rootzone = snapshot.rootzone
+    if not rootzone.has_data:
+        return None
+
+    depths: list[dict] = []
+    for depth in rootzone.depth_statuses:
+        latest = depth.readings[-1] if depth.readings else None
+        depths.append(
+            {
+                "depth_cm": depth.depth_cm,
+                "vwc": round(depth.latest_vwc, 4) if depth.latest_vwc is not None else None,
+                "latest_reading_at": latest.timestamp.isoformat() if latest else None,
+                "hours_since_reading": (
+                    round(depth.hours_since_last, 1)
+                    if depth.hours_since_last is not None
+                    else None
+                ),
+                "quality": depth.quality,
+                "quality_flag": latest.quality_flag if latest else None,
+            }
+        )
+
+    return {
+        "probe_ids": list(snapshot.probe_ids),
+        "swc_weighted_avg": (
+            round(rootzone.swc_current, 4) if rootzone.swc_current is not None else None
+        ),
+        "swc_source": rootzone.swc_source,
+        "hours_since_any_reading": (
+            round(rootzone.hours_since_any_reading, 1)
+            if rootzone.hours_since_any_reading is not None
+            else None
+        ),
+        "all_depths_ok": rootzone.all_depths_ok,
+        "depths": depths,
+        "anomalies": snapshot.anomalies_detected,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +283,7 @@ class AssistantContextBuilder:
             temp_max = snap.get("temperature_max_c")
             rain_24h = snap.get("rainfall_mm", 0.0)
             rain_48h = snap.get("forecast_rain_next_48h", 0.0)
+        snapshot_context = _recommendation_snapshot_context(rec) if rec else {}
 
         # Irrigation history
         irrig_ctx = await build_irrigation_context(sector_id, db)
@@ -241,30 +304,9 @@ class AssistantContextBuilder:
             for a in alerts_result.scalars().all()
         ]
 
-        # Live probe snapshot — independent of recommendation age
-        probe_snapshot = await interpret_probes(eng_ctx, db)
-        rz = probe_snapshot.rootzone
-        probe_live: dict | None = None
-        # Populated below; used by _source_confidence_and_explanation afterwards
-        if rz.has_data:
-            depths_info = [
-                {
-                    "depth_cm": d.depth_cm,
-                    "vwc": round(d.latest_vwc, 3) if d.latest_vwc is not None else None,
-                    "hours_since_reading": round(d.hours_since_last, 1) if d.hours_since_last is not None else None,
-                    "quality": d.quality,
-                }
-                for d in rz.depth_statuses
-                if d.latest_vwc is not None
-            ]
-            probe_live = {
-                "swc_weighted_avg": round(rz.swc_current, 3) if rz.swc_current is not None else None,
-                "swc_source": rz.swc_source,
-                "hours_since_any_reading": round(rz.hours_since_any_reading, 1) if rz.hours_since_any_reading is not None else None,
-                "all_depths_ok": rz.all_depths_ok,
-                "depths": depths_info,
-                "anomalies": probe_snapshot.anomalies_detected,
-            }
+        # Live probe snapshot — independent of recommendation age and shared with
+        # the extended structured agronomic context.
+        probe_live = await build_canonical_probe_state(eng_ctx, db)
 
         src_conf, dqe = _source_confidence_and_explanation(probe_live)
 
@@ -278,7 +320,9 @@ class AssistantContextBuilder:
             config_status=config_status,
             defaults_used=eng_ctx.defaults_used,
             missing_config=eng_ctx.missing_config,
+            recommendation_id=rec.id if rec else None,
             recommendation_action=rec.action if rec else None,
+            recommendation_is_accepted=rec.is_accepted if rec else None,
             # Only expose depth/runtime when action is actually "irrigate" —
             # a non-zero depth on a "no_irrigation" decision confuses the LLM.
             irrigation_depth_mm=(
@@ -298,6 +342,17 @@ class AssistantContextBuilder:
             rootzone_taw_mm=taw_mm,
             rootzone_raw_mm=raw_mm,
             rootzone_swc=swc,
+            today_etc_mm=snapshot_context.get("etc_mm"),
+            rainfall_effective_mm=snapshot_context.get("rain_effective_mm"),
+            rain_skip_applies=snapshot_context.get("rain_skip_applies"),
+            swc_source=snapshot_context.get("swc_source"),
+            swc_model=snapshot_context.get("swc_model"),
+            fc_calibration=snapshot_context.get("fc_calibration"),
+            dose_band=snapshot_context.get("dose_band"),
+            dose_source=snapshot_context.get("dose_source"),
+            dose_presentation=snapshot_context.get("dose_presentation"),
+            stress_projection=snapshot_context.get("stress_projection"),
+            confidence_penalties=snapshot_context.get("confidence_penalties"),
             today_et0_mm=et0_mm,
             today_temp_max_c=temp_max,
             rainfall_last_24h_mm=rain_24h or 0.0,
@@ -518,21 +573,60 @@ async def get_sector_water_balance(sector_id: str, db: AsyncSession) -> dict:
         "dose_band": snap.get("dose_band"),
         "dose_source": snap.get("dose_source"),
         "dose_presentation": snap.get("dose_presentation"),
+        **_recommendation_snapshot_context(rec),
+    }
+
+
+def _recommendation_snapshot_context(rec: Recommendation) -> dict:
+    """Fields persisted by the engine that the AI must pass through unchanged."""
+    snap = rec.inputs_snapshot or {}
+    computation_log = rec.computation_log or {}
+    keys = (
+        "etc_mm",
+        "rain_effective_mm",
+        "rain_skip_applies",
+        "swc_source",
+        "swc_model",
+        "fc_calibration",
+        "dose_band",
+        "dose_source",
+        "dose_presentation",
+        "stress_projection",
+    )
+    return {
+        **{key: snap.get(key) for key in keys},
+        "confidence_penalties": computation_log.get("confidence_penalties"),
     }
 
 
 async def get_weather_summary(
-    farm_id: str, db: AsyncSession, obs_days: int = 7, fc_days: int = 3
+    farm_id: str,
+    db: AsyncSession,
+    obs_days: int = 7,
+    fc_days: int = 3,
+    plot_id: str | None = None,
 ) -> dict:
-    """Recent observations + short-term forecast for a farm."""
+    """Recent observations + short-term forecast in the engine-resolved scope."""
     now = datetime.now(UTC)
     obs_since = now - timedelta(days=obs_days)
+    weather_plot_id = await resolve_weather_plot_id(farm_id, db, plot_id)
+    obs_scope = (
+        WeatherObservation.plot_id == weather_plot_id
+        if weather_plot_id is not None
+        else WeatherObservation.plot_id.is_(None)
+    )
+    forecast_scope = (
+        WeatherForecast.plot_id == weather_plot_id
+        if weather_plot_id is not None
+        else WeatherForecast.plot_id.is_(None)
+    )
     obs = (
         await db.execute(
             select(WeatherObservation)
             .where(
                 WeatherObservation.farm_id == farm_id,
                 WeatherObservation.timestamp >= obs_since,
+                obs_scope,
             )
             .order_by(WeatherObservation.timestamp.desc())
             .limit(obs_days * 4)
@@ -541,7 +635,7 @@ async def get_weather_summary(
     fc = (
         await db.execute(
             select(WeatherForecast)
-            .where(WeatherForecast.farm_id == farm_id)
+            .where(WeatherForecast.farm_id == farm_id, forecast_scope)
             .order_by(WeatherForecast.forecast_date)
             .limit(fc_days)
         )
@@ -614,6 +708,13 @@ async def build_structured_agronomic_context(
 
     plot = await db.get(Plot, sector.plot_id) if sector.plot_id else None
     farm = await db.get(Farm, plot.farm_id) if plot else None
+    soil_bounds = await resolve_sector_soil_bounds(sector_id, db, plot=plot)
+    calibration_meta = soil_bounds.calibration or {}
+    soil_provenance = {
+        "source": soil_bounds.source,
+        "stale": bool(calibration_meta.get("stale", False)),
+        "computed_at": calibration_meta.get("computed_at"),
+    }
 
     crop_profile = (
         await db.execute(
@@ -631,39 +732,32 @@ async def build_structured_agronomic_context(
         await db.execute(select(Probe).where(Probe.sector_id == sector_id))
     ).scalars().all()
     probe_diagnostics: list[dict] = []
-    latest_readings: list[dict] = []
     for probe in probes:
         diag = await get_probe_diagnostics(probe.id, db)
         probe_diagnostics.append(diag)
-        # Pull the latest VWC reading per depth for the last 48h
-        for d in diag.get("depths", []):
-            if d.get("last_reading_at") is None:
-                continue
-            latest_readings.append({
-                "probe_id": probe.id,
-                "probe_external_id": probe.external_id,
-                "depth_cm": d["depth_cm"],
-                "last_reading_at": d["last_reading_at"],
-                "quality_flag": d["last_quality_flag"],
-                "data_status": d["data_status"],
-            })
+
+    engine_context = await build_sector_context(sector_id, db)
+    probe_live = await build_canonical_probe_state(engine_context, db)
+    latest_readings = probe_live.get("depths", []) if probe_live else []
 
     water_events = await get_sector_water_events(sector_id, db, days=14)
-    weather = await get_weather_summary(farm.id if farm else "", db) if farm else {
+    weather = await get_weather_summary(
+        farm.id,
+        db,
+        plot_id=plot.id if plot else None,
+    ) if farm else {
         "recent_observations": [], "forecast": []
     }
     water_balance = await get_sector_water_balance(sector_id, db)
     recs = await get_recommendation_history(sector_id, db)
 
     # Data quality scoring across all probes
-    fresh_depths = sum(
-        1 for d in probe_diagnostics for x in d.get("depths", [])
-        if x.get("data_status") == "ok"
-    )
-    total_depths = sum(len(d.get("depths", [])) for d in probe_diagnostics)
+    fresh_depths = sum(1 for depth in latest_readings if depth.get("quality") == "ok")
+    total_depths = len(latest_readings)
     stale_depths = sum(
-        1 for d in probe_diagnostics for x in d.get("depths", [])
-        if x.get("data_status") in ("stale", "no_data")
+        1
+        for depth in latest_readings
+        if depth.get("quality") in ("stale", "missing", "needs_vwc_calibration")
     )
 
     known_limitations: list[str] = []
@@ -727,10 +821,11 @@ async def build_structured_agronomic_context(
         ),
         "soil": (
             {
-                "field_capacity": plot.field_capacity,
-                "wilting_point": plot.wilting_point,
+                "field_capacity": soil_bounds.fc,
+                "wilting_point": soil_bounds.pwp,
                 "soil_texture": plot.soil_texture,
                 "stone_content_pct": plot.stone_content_pct,
+                "provenance": soil_provenance,
             }
             if plot else None
         ),
@@ -745,6 +840,7 @@ async def build_structured_agronomic_context(
             if irrigation_system else None
         ),
         "probe_summary": {
+            "live": probe_live,
             "data_quality": {
                 "fresh_depths": fresh_depths,
                 "stale_depths": stale_depths,

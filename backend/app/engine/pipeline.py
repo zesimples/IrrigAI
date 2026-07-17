@@ -351,6 +351,63 @@ async def build_sector_context(sector_id: str, db: AsyncSession) -> SectorContex
 # Weather context builder
 # ---------------------------------------------------------------------------
 
+async def resolve_weather_plot_id(
+    farm_id: str,
+    db: AsyncSession,
+    plot_id: str | None = None,
+) -> str | None:
+    """Resolve the weather row scope shared by engine and AI consumers.
+
+    An explicit plot uses its own rows when either observations or forecasts exist,
+    otherwise it falls back to farm-level rows. Farm-level callers keep farm rows
+    when present and otherwise use the plot with the most recent observation.
+    """
+    from app.models import WeatherForecast
+
+    if plot_id is not None:
+        plot_obs = await db.execute(
+            select(WeatherObservation.id)
+            .where(
+                WeatherObservation.farm_id == farm_id,
+                WeatherObservation.plot_id == plot_id,
+            )
+            .limit(1)
+        )
+        plot_forecast = await db.execute(
+            select(WeatherForecast.id)
+            .where(
+                WeatherForecast.farm_id == farm_id,
+                WeatherForecast.plot_id == plot_id,
+            )
+            .limit(1)
+        )
+        if (
+            plot_obs.scalar_one_or_none() is not None
+            or plot_forecast.scalar_one_or_none() is not None
+        ):
+            return plot_id
+        return None
+
+    farm_observation = await db.execute(
+        select(WeatherObservation.id)
+        .where(
+            WeatherObservation.farm_id == farm_id,
+            WeatherObservation.plot_id.is_(None),
+        )
+        .limit(1)
+    )
+    if farm_observation.scalar_one_or_none() is not None:
+        return None
+
+    representative = await db.execute(
+        select(WeatherObservation.plot_id)
+        .where(WeatherObservation.farm_id == farm_id)
+        .order_by(WeatherObservation.timestamp.desc())
+        .limit(1)
+    )
+    return representative.scalar_one_or_none()
+
+
 async def build_weather_context(
     farm_id: str,
     db: AsyncSession,
@@ -373,32 +430,7 @@ async def build_weather_context(
     lon = farm.location_lon if farm else None
     elevation_m = (farm.elevation_m or 0.0) if farm else 0.0
 
-    # Resolve working plot_id for the farm-level caller (plot_id is None) case.
-    # Step 3: when no plot_id is given AND no IS NULL rows exist, use the plot of the
-    # farm's most-recent WeatherObservation (representative-plot fallback).  Existing
-    # farms that have IS NULL rows are byte-for-byte unchanged — step 3 only fires when
-    # the existence check finds zero IS NULL rows.
-    working_plot_id = plot_id
-    if plot_id is None:
-        null_check = await db.execute(
-            select(WeatherObservation.id)
-            .where(
-                WeatherObservation.farm_id == farm_id,
-                WeatherObservation.plot_id.is_(None),
-            )
-            .limit(1)
-        )
-        has_null_rows = null_check.scalar_one_or_none() is not None
-        if not has_null_rows:
-            rep_result = await db.execute(
-                select(WeatherObservation.plot_id)
-                .where(WeatherObservation.farm_id == farm_id)
-                .order_by(WeatherObservation.timestamp.desc())
-                .limit(1)
-            )
-            rep_plot_id = rep_result.scalar_one_or_none()
-            if rep_plot_id is not None:
-                working_plot_id = rep_plot_id
+    working_plot_id = await resolve_weather_plot_id(farm_id, db, plot_id)
 
     # Build the plot predicate: exact-match when working_plot_id given, IS NULL otherwise.
     if working_plot_id:
@@ -425,27 +457,6 @@ async def build_weather_context(
         .limit(7)
     )
     forecasts = forecast_result.scalars().all()
-
-    # Fallback to farm-level when plot-scoped queries returned nothing.
-    if plot_id and latest_obs is None and not forecasts:
-        farm_obs_pred = WeatherObservation.plot_id.is_(None)
-        farm_fct_pred = WeatherForecast.plot_id.is_(None)
-
-        obs_result = await db.execute(
-            select(WeatherObservation)
-            .where(WeatherObservation.farm_id == farm_id, farm_obs_pred)
-            .order_by(WeatherObservation.timestamp.desc())
-            .limit(1)
-        )
-        latest_obs = obs_result.scalar_one_or_none()
-
-        forecast_result = await db.execute(
-            select(WeatherForecast)
-            .where(WeatherForecast.farm_id == farm_id, farm_fct_pred)
-            .order_by(WeatherForecast.forecast_date)
-            .limit(7)
-        )
-        forecasts = forecast_result.scalars().all()
 
     # Build typed weather objects from query results.
     hours_since_obs = None
