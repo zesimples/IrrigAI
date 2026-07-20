@@ -1,7 +1,9 @@
 import pytest
 
+from app.ai.evidence import build_evidence_registry
 from app.schemas.ai import AgronomicInterpretation
 from tests.ai_eval.harness import (
+    assert_evidence_ids_match_registry,
     assert_evidence_sources_resolve,
     assert_farm_urgent_actions_match_engine,
     assert_no_raw_vwc_decimals,
@@ -35,6 +37,16 @@ def test_eval_evidence_path_validation_supports_nested_lists():
     )
 
     assert_evidence_sources_resolve(interpretation, context)
+
+
+def test_eval_evidence_ids_and_values_match_backend_registry():
+    context = {"water_balance": {"depletion_mm": 12.5}}
+    registry = build_evidence_registry(context)
+    entry = registry.entry_for_path("water_balance.depletion_mm")
+    assert entry is not None
+    interpretation = _interpretation(evidence=[entry.to_evidence().model_dump()])
+
+    assert_evidence_ids_match_registry(interpretation, context)
 
 
 def test_eval_evidence_path_validation_rejects_missing_paths():

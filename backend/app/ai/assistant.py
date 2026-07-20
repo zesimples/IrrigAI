@@ -15,9 +15,15 @@ from app.ai.context_builder import (
     AssistantContextBuilder,
     build_sector_change_context,
 )
+from app.ai.evidence import EvidenceRegistry, build_evidence_registry
 from app.ai.openai_client import MockChatClient, OpenAIChatClient
 from app.ai.probe_signal import compute_probe_signal_stats
-from app.schemas.ai import AgronomicEvidence, AgronomicInterpretation
+from app.schemas.ai import (
+    AgronomicCitation,
+    AgronomicEvidence,
+    AgronomicInterpretation,
+    AgronomicInterpretationDraft,
+)
 
 
 class IrrigationAssistant:
@@ -469,22 +475,15 @@ class IrrigationAssistant:
             "Conselho alinhado com a recomendação mais recente do motor (não regar)."
         )
 
-        # Prepend a single combined engine-evidence item so the rendered Evidência
-        # (which shows ~3 items) keeps room for the LLM's depth observations.
-        engine_evidence = AgronomicEvidence(
-            source="latest_recommendation",
-            value=(
-                f"motor: não regar — depleção {depletion_pct_f:.0f}% da TAW"
-                if depletion_pct_f is not None
-                else "motor: não regar"
-            ),
+        # Prepend server-resolved engine evidence; never manufacture a display value.
+        registry = build_evidence_registry({"probe_signal": stats})
+        engine_evidence = registry.evidence_for_paths(
+            ["probe_signal.latest_recommendation.action"], limit=1
         )
         evidence = list(interpretation.evidence)
-        if all(
-            (ev.source, ev.value) != (engine_evidence.source, engine_evidence.value)
-            for ev in evidence
-        ):
-            evidence.insert(0, engine_evidence)
+        for item in reversed(engine_evidence):
+            if all(ev.evidence_id != item.evidence_id for ev in evidence):
+                evidence.insert(0, item)
         interpretation.evidence = evidence[:4]
         return interpretation
 
@@ -497,30 +496,82 @@ class IrrigationAssistant:
         fallback_risk: str = "medium",
         max_tokens: int = 900,
     ) -> AgronomicInterpretation:
-        system_prompt = system_prompt + prompt_templates.get_structured_output_contract(
-            self.language
+        registry = build_evidence_registry(context)
+        system_prompt = (
+            system_prompt
+            + prompt_templates.get_structured_output_contract(self.language)
+            + "\n\nREGISTO DE EVIDÊNCIA PERMITIDA (ID: caminho):\n"
+            + registry.prompt_catalog()
         )
         try:
             parsed = await self.client.complete_structured(
                 system_prompt,
                 user_message,
-                AgronomicInterpretation,
+                AgronomicInterpretationDraft,
                 max_tokens=max_tokens,
                 temperature=0.1,
             )
         except Exception:
-            parsed = self._fallback_structured(
+            return self._fallback_structured(
                 "",
                 context=context,
                 risk_level=fallback_risk,
                 confidence_score=0.3,
             )
 
-        if not parsed.evidence:
-            parsed.evidence = self._default_evidence(context)
-        if not parsed.missing_data:
-            parsed.missing_data = self._known_limitations(context)
-        return parsed
+        result = self._resolve_model_interpretation(parsed, registry, context)
+        if not result.evidence:
+            result.evidence = self._default_evidence(context, registry=registry)
+        if not result.missing_data:
+            result.missing_data = self._known_limitations(context)
+        return result
+
+    def _resolve_model_interpretation(
+        self,
+        parsed,
+        registry: EvidenceRegistry,
+        context: dict | list | None,
+    ) -> AgronomicInterpretation:
+        """Resolve model citations and discard every unregistered reference."""
+        if isinstance(parsed, AgronomicInterpretationDraft):
+            draft = parsed
+            citations = draft.evidence
+        elif isinstance(parsed, AgronomicInterpretation):
+            # Compatibility with test doubles and cached pre-P2 model objects. Values
+            # supplied by these objects are ignored; only resolvable paths survive.
+            citations = self._legacy_citations(parsed, registry, context)
+            draft = AgronomicInterpretationDraft.model_validate(
+                {
+                    **parsed.model_dump(exclude={"evidence"}),
+                    "evidence": [citation.model_dump() for citation in citations],
+                }
+            )
+        else:
+            draft = AgronomicInterpretationDraft.model_validate(parsed)
+            citations = draft.evidence
+
+        return AgronomicInterpretation(
+            **draft.model_dump(exclude={"evidence"}),
+            evidence=registry.resolve_citations(citations),
+        )
+
+    def _legacy_citations(
+        self,
+        parsed: AgronomicInterpretation,
+        registry: EvidenceRegistry,
+        context: dict | list | None,
+    ) -> list[AgronomicCitation]:
+        citations: list[AgronomicCitation] = []
+        root_prefix = None
+        if isinstance(context, dict) and len(context) == 1:
+            root_prefix = next(iter(context))
+        for evidence in parsed.evidence:
+            entry = registry.first_entry_under(evidence.source)
+            if entry is None and root_prefix:
+                entry = registry.first_entry_under(f"{root_prefix}.{evidence.source}")
+            if entry is not None:
+                citations.append(AgronomicCitation(evidence_id=entry.evidence_id))
+        return citations
 
     def _fallback_structured(
         self,
@@ -548,44 +599,11 @@ class IrrigationAssistant:
         )
 
     def render_structured(self, interpretation: AgronomicInterpretation) -> str:
-        _SRC_LABEL: dict[str, str] = {
-            "engine_decision": "Decisão",
-            "water_balance": "Água no solo",
-            "crop_state": "Estado da cultura",
-            "evapotranspiration": "Consumo da cultura",
-            "probe_state": "Qualidade dos dados",
-            "probe_live": "Qualidade dos dados",
-            "probe_summary.data_quality": "Qualidade dos dados",
-            "probe_summary": "Qualidade dos dados",
-            "probe_signal": "Leituras da sonda",
-            "probe": "Leituras da sonda",
-            "depths": "Leituras da sonda",
-            "depth": "Leituras da sonda",
-            "weather.forecast": "Previsão do tempo",
-            "weather": "Previsão do tempo",
-            "alert": "Atenção",
-            "water_events": "Eventos de rega/chuva",
-            "irrigation_execution": "Execução da rega",
-            "outcomes": "Eficácia da rega",
-            "calibration": "Calibração",
-            "alerts_and_limitations": "Limitações",
-            "recommendation_history": "Histórico",
-            "known_limitations": "Limitações",
-        }
-
         lines: list[str] = []
         used: set[str] = set()
 
         for ev in interpretation.evidence[:6]:
-            label = next(
-                (lbl for key, lbl in _SRC_LABEL.items() if ev.source.lower().startswith(key)),
-                None,
-            )
-            if label is None:
-                # Strip bracket notation (e.g. "depths[30]") → clean fallback
-                import re as _re
-                clean = _re.sub(r"\[.*?\]", "", ev.source)
-                label = clean.replace("_", " ").replace(".", " ").strip().title() or "Dados"
+            label = ev.label
             if label not in used:
                 lines.append(f"• {label}: {ev.value}")
                 used.add(label)
@@ -649,40 +667,30 @@ class IrrigationAssistant:
 
         return "\n".join(lines) if lines else "• Perfil da sonda: Sem análise disponível."
 
-    def _default_evidence(self, context: dict | list | None) -> list[AgronomicEvidence]:
-        if not isinstance(context, dict):
-            return []
-        candidates: list[tuple[str, object]] = [
-            ("engine_decision", context.get("engine_decision")),
-            ("probe_state.data_quality", _get_path(context, ["probe_state", "data_quality"])),
-            ("probe_state.latest_readings", _get_path(context, ["probe_state", "latest_readings"])),
-            ("probe_summary.data_quality", _get_path(context, ["probe_summary", "data_quality"])),
-            ("probe_summary.latest_readings", _get_path(context, ["probe_summary", "latest_readings"])),
-            ("water_events", context.get("water_events")),
-            ("water_event_changes", context.get("water_event_changes")),
-            ("water_balance", context.get("water_balance")),
-            ("outcomes.latest", _get_path(context, ["outcomes", "latest"])),
-            ("current_context_summary.water_balance", _get_path(context, ["current_context_summary", "water_balance"])),
-            ("recommendation_history", context.get("recommendation_history")),
-            ("recommendation_change", context.get("recommendation_change")),
-            ("weather.forecast", _get_path(context, ["weather", "forecast"])),
-            ("weather_changes.observations", _get_path(context, ["weather_changes", "observations"])),
-            ("alert", context.get("alert")),
-            ("known_limitations", context.get("known_limitations")),
-            (
-                "alerts_and_limitations.known_limitations",
-                _get_path(context, ["alerts_and_limitations", "known_limitations"]),
-            ),
-            ("probe_signal", context.get("probe_signal")),
+    def _default_evidence(
+        self,
+        context: dict | list | None,
+        *,
+        registry: EvidenceRegistry | None = None,
+    ) -> list[AgronomicEvidence]:
+        registry = registry or build_evidence_registry(context)
+        preferred = [
+            "engine_decision.action",
+            "water_balance.depletion_mm",
+            "water_balance.etc_mm",
+            "weather.forecast[0].rainfall_mm",
+            "probe_state.data_quality.fresh_depths",
+            "probe_signal.latest_recommendation.action",
+            "probe_signal.depths[0].humidade_actual",
+            "outcomes.latest.status",
+            "alert.severity",
+            "recommendation_history[0].action",
+            "sectors[0].recommendation_action",
         ]
-        evidence: list[AgronomicEvidence] = []
-        for source, value in candidates:
-            if value in (None, [], {}):
-                continue
-            evidence.append(AgronomicEvidence(source=source, value=_compact_value(value)))
-            if len(evidence) >= 4:
-                break
-        return evidence
+        evidence = registry.evidence_for_paths(preferred)
+        if evidence:
+            return evidence
+        return [entry.to_evidence() for entry in registry.entries[:4]]
 
     def _known_limitations(self, context: dict | list | None) -> list[str]:
         if not isinstance(context, dict):
@@ -712,8 +720,3 @@ def _get_path(data: dict, path: list[str]) -> object | None:
             return None
         current = current.get(key)
     return current
-
-
-def _compact_value(value: object) -> str:
-    text = json.dumps(value, ensure_ascii=False, default=str)
-    return text if len(text) <= 260 else text[:257] + "..."

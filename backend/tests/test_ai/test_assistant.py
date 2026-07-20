@@ -14,7 +14,7 @@ from app.ai.context_builder import (
 )
 from app.ai.context_v2 import SECTOR_AI_CONTEXT_BLOCKS, SectorAIContextV2
 from app.ai.openai_client import MockChatClient
-from app.schemas.ai import AgronomicInterpretation
+from app.schemas.ai import AgronomicInterpretation, AgronomicInterpretationDraft
 
 _MINIMAL_PROBE_STATS = {
     "probe_id": "probe-001",
@@ -347,10 +347,17 @@ async def test_interpret_probe_no_deficit_overrides_urgent_irrigation_advice(ass
     assert "Não regues agora" in result.irrigation_advice
     assert all("urgente" not in action.lower() for action in result.recommended_actions)
     # The engine decision is surfaced as evidence...
-    assert any(ev.source == "latest_recommendation" for ev in result.evidence)
+    assert any(
+        ev.source == "probe_signal.latest_recommendation.action"
+        for ev in result.evidence
+    )
     # ...and the LLM's depth description is preserved (not replaced by generic text).
     assert result.summary == depth_summary
-    assert any("50 cm" in ev.value for ev in result.evidence)
+    assert any(
+        ev.source == "probe_signal.depths[1].humidade_actual"
+        and "humidade crítica" in ev.value
+        for ev in result.evidence
+    )
 
 
 def test_render_probe_interpretation_includes_summary_advice_evidence_and_action(assistant):
@@ -405,6 +412,38 @@ async def test_complete_structured_uses_native_parse(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_complete_structured_rejects_unknown_evidence_id(monkeypatch):
+    client = MockChatClient()
+
+    async def invalid_citation(system, user, schema, **kw):
+        assert schema is AgronomicInterpretationDraft
+        return AgronomicInterpretationDraft(
+            summary="O solo mantém reserva suficiente.",
+            risk_level="low",
+            irrigation_advice="Não regar agora.",
+            evidence=[{"evidence_id": "ev_invented"}],
+            missing_data=[],
+            confidence_score=0.8,
+            confidence_explanation="Dados actuais e coerentes.",
+            recommended_actions=["Monitorizar amanhã."],
+        )
+
+    monkeypatch.setattr(client, "complete_structured", invalid_citation)
+    assistant = IrrigationAssistant(AssistantContextBuilder(), client, "pt")
+
+    result = await assistant._complete_structured(
+        system_prompt="x",
+        user_message="y",
+        context={"water_balance": {"depletion_mm": 12.5}},
+    )
+
+    assert result.evidence
+    assert all(evidence.evidence_id != "ev_invented" for evidence in result.evidence)
+    assert result.evidence[0].source == "water_balance.depletion_mm"
+    assert result.evidence[0].value == "12,5"
+
+
+@pytest.mark.asyncio
 async def test_complete_structured_injects_pt_output_contract(monkeypatch):
     """The native structured path must tell the model to fill ALL fields in
     European Portuguese and to cite canonical context source paths.
@@ -441,9 +480,9 @@ async def test_complete_structured_injects_pt_output_contract(monkeypatch):
     assert "RESUMO DA EXPLORAÇÃO base prompt." in system
     # All structured fields must be in Portuguese (translate English context values).
     assert "português" in system.lower()
-    # Canonical source-key guidance so evidence maps to render_structured's _SRC_LABEL.
-    assert "water_balance" in system
-    assert "recommendation_history" in system
+    # The model may cite only backend-issued IDs, never free-form paths/values.
+    assert "evidence_id" in system
+    assert "REGISTO DE EVIDÊNCIA PERMITIDA" in system
 
 
 @pytest.mark.asyncio

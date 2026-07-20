@@ -4,12 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { subHours } from "date-fns";
 import { ChevronDown, ExternalLink, ScanLine, RefreshCw } from "lucide-react";
+import { StructuredAIResult } from "@/components/ai/StructuredAIResult";
 import { useProbeReadings } from "@/hooks/useProbeReadings";
 import { ProbeChart, formatRootDepthHint } from "@/components/probes/ProbeChart";
 import { ProbeSumChart } from "@/components/probes/ProbeSumChart";
 import { ReadingsControls } from "@/components/probes/ReadingsControls";
 import { sectorsApi, probesApi, waterEventsApi } from "@/lib/api";
-import type { ProbeDetectedEvent, ReferenceLines } from "@/types";
+import type { AgronomicInterpretation, ProbeDetectedEvent, ReferenceLines } from "@/types";
 
 import { formatDecimal } from "@/lib/utils";
 
@@ -48,6 +49,8 @@ export function ProbeReadingsInline({
   const [sinceHours, setSinceHours] = useState(72);
   const [interval, setInterval] = useState("");
   const [interpretation, setInterpretation] = useState<string | null>(null);
+  const [structuredInterpretation, setStructuredInterpretation] =
+    useState<AgronomicInterpretation | null>(null);
   const [interpreting, setInterpreting] = useState(false);
   const [interpretError, setInterpretError] = useState<string | null>(null);
 
@@ -117,6 +120,7 @@ export function ProbeReadingsInline({
     try {
       const res = await probesApi.interpret(probeId);
       setInterpretation(res.interpretation);
+      setStructuredInterpretation(res.structured ?? null);
     } catch (e) {
       setInterpretError(e instanceof Error ? e.message : "Erro ao interpretar sonda.");
     } finally {
@@ -430,7 +434,15 @@ export function ProbeReadingsInline({
               )}
 
               {interpretation && !interpreting && (
-                <InterpretationBody text={interpretation} />
+                <div className="px-4 py-3">
+                  {structuredInterpretation ? (
+                    <StructuredAIResult interpretation={structuredInterpretation} compact />
+                  ) : (
+                    <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-2">
+                      {interpretation}
+                    </p>
+                  )}
+                </div>
               )}
 
               {!interpretation && !interpreting && !interpretError && (
@@ -582,44 +594,5 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
         </div>
       )}
     </div>
-  );
-}
-
-function InterpretationBody({ text }: { text: string }) {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  return (
-    <ul className="divide-y divide-rule-soft">
-      {lines.map((line, i) => {
-        const clean = line.replace(/^[•\-]\s*/, "");
-        const colonIdx = clean.indexOf(":");
-        const label = colonIdx > -1 ? clean.slice(0, colonIdx).trim() : null;
-        const rest = colonIdx > -1 ? clean.slice(colonIdx + 1).trim() : clean;
-        const parts = rest.split(/\s*→\s*/);
-
-        return (
-          <li key={i} className="px-4 py-2.5 text-[12.5px] leading-relaxed">
-            {label && (
-              <span className="font-serif font-semibold text-ink">{label}: </span>
-            )}
-            {parts.map((part, j) => (
-              <span key={j}>
-                {j > 0 && <span className="mx-1 text-ink-3">→</span>}
-                <span className={
-                  j === parts.length - 1 && parts.length > 1
-                    ? "font-medium text-[#c9a34a]"
-                    : "text-ink-2"
-                }>
-                  {part}
-                </span>
-              </span>
-            ))}
-          </li>
-        );
-      })}
-    </ul>
   );
 }

@@ -371,8 +371,10 @@ export interface DetectedWaterEventOut {
 // ── AI Structured Output ─────────────────────────────────────────────────────
 
 export interface AgronomicEvidence {
+  evidence_id: string;
   source: string;
   value: string;
+  label: string;
 }
 
 export interface AgronomicInterpretation {

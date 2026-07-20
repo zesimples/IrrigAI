@@ -20,7 +20,8 @@ detected irrigation response, and mixed farm actions.
 For every response the runner checks that:
 
 - user-facing fields are recognisably Portuguese from Portugal;
-- each `evidence.source` resolves to a real path in that case's context;
+- each evidence ID, source path, label, and display value matches the backend
+  registry generated from that case's context;
 - probe advice contains no raw VWC decimals;
 - the deterministic probe guard wins for `skip` and `defer` decisions;
 - “Rega urgente” names only sectors whose engine action is `irrigate`.
@@ -37,6 +38,11 @@ For every response the runner checks that:
 4. Run the deterministic contract tests first, then the live command above.
    Review failures; do not relax engine-authority assertions to accommodate a
    model response.
+
+The live runner uses the same `IrrigationAssistant._complete_structured()` path as
+production. The model sees an ID→path catalogue, emits only `evidence_id`, and the
+backend supplies the API's `source`, `label`, and localized `value`. Raw VWC scalar
+paths are deliberately absent from the catalogue.
 
 The shared assertion implementation is unit-tested by
 `tests/test_ai/test_eval_harness_contracts.py` in the default suite.

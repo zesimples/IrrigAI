@@ -253,16 +253,28 @@ class MockChatClient:
             risk, advice = "low", "Não regar — o balanço hídrico tem reserva suficiente."
         else:
             risk, advice = "medium", "Monitorizar a evolução do solo antes de alterar a rega."
-        return AgronomicInterpretation(
-            summary="Análise simulada do estado hídrico do setor.",
-            risk_level=risk,  # type: ignore[arg-type]
-            irrigation_advice=advice,
-            evidence=[AgronomicEvidence(source="water_balance", value="depleção dentro do esperado")],
-            missing_data=[],
-            confidence_score=0.7,
-            confidence_explanation="Resposta simulada para testes.",
-            recommended_actions=["Validar com observação de campo."],
-        )
+        match = _re.search(r"\bev_[0-9a-f]{12}\b", system_prompt)
+        common = {
+            "summary": "Análise simulada do estado hídrico do setor.",
+            "risk_level": risk,
+            "irrigation_advice": advice,
+            "missing_data": [],
+            "confidence_score": 0.7,
+            "confidence_explanation": "Resposta simulada para testes.",
+            "recommended_actions": ["Validar com observação de campo."],
+        }
+        if schema_model is AgronomicInterpretation:
+            evidence = [
+                AgronomicEvidence(
+                    evidence_id=match.group(0) if match else "",
+                    source="water_balance.depletion_mm",
+                    value="depleção dentro do esperado",
+                    label="Água no solo",
+                )
+            ]
+        else:
+            evidence = [{"evidence_id": match.group(0)}] if match else []
+        return schema_model.model_validate({**common, "evidence": evidence})
 
     async def run_tool_loop(
         self,

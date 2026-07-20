@@ -195,7 +195,8 @@ export const probesApi = {
   get: (id: string) => get<Probe>(`/probes/${id}`),
   create: (sectorId: string, body: { external_id: string; serial_number?: string }) =>
     post<Probe>(`/sectors/${sectorId}/probes`, body),
-  interpret: (id: string) => post<{ interpretation: string }>(`/probes/${id}/interpret`),
+  interpret: (id: string) =>
+    post<AITextResponse & { interpretation: string }>(`/probes/${id}/interpret`),
   readings: (
     id: string,
     params: {

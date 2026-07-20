@@ -18,6 +18,7 @@ from app.ai.openai_client import OpenAIChatClient
 from app.config import Settings
 from app.schemas.ai import AgronomicInterpretation
 from tests.ai_eval.harness import (
+    assert_evidence_ids_match_registry,
     assert_evidence_sources_resolve,
     assert_farm_urgent_actions_match_engine,
     assert_no_raw_vwc_decimals,
@@ -63,31 +64,33 @@ def _prompt_for(case: dict) -> tuple[str, str]:
         system = prompt_templates.FARM_SUMMARY_PT.format(context_json=context_json)
     else:  # pragma: no cover - fixture schema guard
         raise AssertionError(f"unknown eval surface: {surface}")
-    return (
-        system + prompt_templates.STRUCTURED_OUTPUT_CONTRACT_PT,
-        case["user_message"],
-    )
+    return system, case["user_message"]
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["id"])
 @pytest.mark.asyncio
 async def test_live_golden_context(case: dict, live_client: OpenAIChatClient) -> None:
     system_prompt, user_message = _prompt_for(case)
-    result = await live_client.complete_structured(
-        system_prompt,
-        user_message,
-        AgronomicInterpretation,
+    assistant = IrrigationAssistant(AssistantContextBuilder(), live_client, "pt")
+    evidence_context = (
+        {"probe_signal": case["context"]}
+        if case["surface"] == "probe"
+        else case["context"]
+    )
+    result = await assistant._complete_structured(
+        system_prompt=system_prompt,
+        user_message=user_message,
+        context=evidence_context,
         max_tokens=900,
-        temperature=0.1,
     )
     assert isinstance(result, AgronomicInterpretation)
 
     if case["surface"] == "probe":
-        assistant = IrrigationAssistant(AssistantContextBuilder(), live_client, "pt")
         result = assistant._apply_probe_recommendation_guard(case["context"], result)
 
     assert_response_is_pt_pt(result)
-    assert_evidence_sources_resolve(result, case["context"])
+    assert_evidence_sources_resolve(result, evidence_context)
+    assert_evidence_ids_match_registry(result, evidence_context)
 
     if case["surface"] == "probe":
         assert_probe_guard_holds(result, case["context"])

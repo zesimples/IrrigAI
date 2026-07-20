@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { StructuredAIResult } from "@/components/ai/StructuredAIResult";
 import { chatApi } from "@/lib/api";
-
 import { formatDecimal } from "@/lib/utils";
+import type { AgronomicInterpretation } from "@/types";
 
 // ─── Audio ───────────────────────────────────────────────────────────────────
 
@@ -116,55 +117,17 @@ function SoilVisualPicker({
   );
 }
 
-// ─── Result parser ────────────────────────────────────────────────────────────
-
-type Tone = "olive" | "ink" | "amber" | "terra";
-
-function toneFromKey(key: string): Tone {
-  const k = key.toLowerCase();
-  if (/aten[çc]|urgente|risco|stress|crít/.test(k)) return "terra";
-  if (/sonda|fiabilidade|aviso|limita/.test(k)) return "amber";
-  if (/água|reserva|solo|húmid/.test(k)) return "olive";
-  return "ink";
-}
-
-const TONE_DOT: Record<Tone, string> = {
-  olive: "bg-olive",
-  ink:   "bg-ink-2",
-  amber: "bg-[#c9a34a]",
-  terra: "bg-terra",
-};
-
-function parseResultBullets(
-  text: string,
-): Array<{ key: string; value: string; tone: Tone }> {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => /^[•\-]/.test(l));
-  if (lines.length === 0) return [];
-  return lines.map((line) => {
-    const content = line.replace(/^[•\-]\s*/, "").trim();
-    const colonIdx = content.indexOf(":");
-    if (colonIdx > 0 && colonIdx < 60) {
-      const key = content.slice(0, colonIdx).trim();
-      const value = content.slice(colonIdx + 1).trim();
-      return { key, value, tone: toneFromKey(key) };
-    }
-    return { key: "", value: content, tone: "ink" as Tone };
-  });
-}
-
 function AssistantResult({
   result,
+  structured,
   timestamp,
   onCopy,
 }: {
   result: string;
+  structured: AgronomicInterpretation | null;
   timestamp: Date | null;
   onCopy: () => void;
 }) {
-  const bullets = parseResultBullets(result);
   const timeLabel = timestamp
     ? Date.now() - timestamp.getTime() < 120_000
       ? "agora"
@@ -194,39 +157,8 @@ function AssistantResult({
           </div>
         </header>
 
-        {bullets.length > 0 ? (
-          <ul className="list-none m-0 p-0 flex flex-col divide-y divide-olive/10">
-            {bullets.map((b, i) => (
-              <li key={i} className="py-3.5 first:pt-0 last:pb-0">
-                {/* Mobile: stacked layout */}
-                <div className="flex items-center gap-2 mb-1 sm:hidden">
-                  <span className={`h-2 w-2 rounded-full shrink-0 ${TONE_DOT[b.tone]}`} />
-                  {b.key && (
-                    <span className="font-serif text-[14px] font-semibold text-ink tracking-[-0.01em]">
-                      {b.key}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[13.5px] leading-[1.6] text-ink-2 sm:hidden">{b.value}</p>
-
-                {/* Desktop: 3-column grid */}
-                <div
-                  className="hidden sm:grid items-start gap-4"
-                  style={{ gridTemplateColumns: "8px 152px 1fr" }}
-                >
-                  <span className={`h-2 w-2 rounded-full mt-[4px] shrink-0 ${TONE_DOT[b.tone]}`} />
-                  {b.key ? (
-                    <span className="font-serif text-[15px] font-semibold text-ink tracking-[-0.01em] leading-snug">
-                      {b.key}
-                    </span>
-                  ) : (
-                    <span />
-                  )}
-                  <span className="text-[14px] leading-[1.6] text-ink-2">{b.value}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
+        {structured ? (
+          <StructuredAIResult interpretation={structured} />
         ) : (
           <p className="text-[14px] leading-[1.65] text-ink-2 whitespace-pre-wrap">{result}</p>
         )}
@@ -264,6 +196,7 @@ export function SectorAnalysis({
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [structured, setStructured] = useState<AgronomicInterpretation | null>(null);
   const [resultTimestamp, setResultTimestamp] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -273,8 +206,13 @@ export function SectorAnalysis({
     try {
       const stored = localStorage.getItem(storageKey);
       if (stored) {
-        const { text, ts } = JSON.parse(stored) as { text: string; ts: number };
+        const { text, structured: cachedStructured, ts } = JSON.parse(stored) as {
+          text: string;
+          structured?: AgronomicInterpretation | null;
+          ts: number;
+        };
         setResult(text);
+        setStructured(cachedStructured ?? null);
         setResultTimestamp(new Date(ts));
       }
     } catch { /* ignore */ }
@@ -299,12 +237,17 @@ export function SectorAnalysis({
       const res = await chatApi.explainSector(sectorId, userNotes);
       const ts = new Date();
       setResult(res.explanation);
+      setStructured(res.structured ?? null);
       setResultTimestamp(ts);
       playResultChime();
       try {
         localStorage.setItem(
           storageKey,
-          JSON.stringify({ text: res.explanation, ts: ts.getTime() }),
+          JSON.stringify({
+            text: res.explanation,
+            structured: res.structured ?? null,
+            ts: ts.getTime(),
+          }),
         );
       } catch { /* quota exceeded or SSR */ }
     } catch (e: unknown) {
@@ -361,6 +304,7 @@ export function SectorAnalysis({
           <AssistantResult
             key={resultTimestamp?.getTime() ?? 0}
             result={result}
+            structured={structured}
             timestamp={resultTimestamp}
             onCopy={handleCopy}
           />

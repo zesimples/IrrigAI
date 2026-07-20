@@ -324,8 +324,8 @@ def get_missing_data_template(language: str = "pt") -> str:
 # explanation, diagnosis, anomaly, probe interpretation). Restores the
 # language + evidence-source guidance that STRUCTURED_OUTPUT_PT carried before
 # the native-parse migration (376467d) dropped it. Without this, the model
-# returns English fields and invents evidence.source paths that
-# render_structured's _SRC_LABEL cannot map, producing raw English bullets.
+# returns English fields or invents evidence references. The P2 contract limits
+# model output to backend-issued evidence IDs; the server resolves paths/values.
 STRUCTURED_OUTPUT_CONTRACT_PT = """
 
 FORMATO DA RESPOSTA ESTRUTURADA — obrigatório:
@@ -333,16 +333,10 @@ FORMATO DA RESPOSTA ESTRUTURADA — obrigatório:
   confidence_explanation, recommended_actions) em português de Portugal. Se um
   valor do contexto vier em inglês (p.ex. "No sector crop profile attached"),
   traduz para português — nunca copies texto em inglês para a resposta.
-- Em "evidence", cada "source" tem de ser um caminho REAL do contexto fornecido.
-  Cita o caminho exacto até ao valor usado, incluindo índices quando atravessas listas
-  (p.ex. "sectors[0].recommendation_action"). Podes usar, apenas quando existirem,
-  caminhos V2 como engine_decision.action, water_balance.depletion_mm,
-  probe_state.latest_readings[0].vwc, weather.forecast[0].rainfall_mm,
-  irrigation_execution.manual_events[0].applied_mm, outcomes.latest.status,
-  calibration.soil_bounds.provenance.source ou
-  alerts_and_limitations.known_limitations[0]. Contextos especializados e da
-  exploração podem ainda expor probe_signal, recommendation_history, water_events,
-  alert e known_limitations. NÃO inventes caminhos nem omitas índices de listas.
+- Em "evidence", devolve APENAS "evidence_id" escolhidos do REGISTO DE EVIDÊNCIA
+  PERMITIDA anexado ao pedido. Não devolvas caminhos nem valores e nunca inventes IDs.
+  Cada ID deve sustentar directamente uma afirmação da resposta. Se não existir um ID
+  adequado, declara o dado em falta em "missing_data" em vez de fabricar evidência.
 - NÃO calcules valores novos; interpreta apenas os dados já fornecidos.
 """
 
@@ -351,11 +345,9 @@ STRUCTURED_OUTPUT_CONTRACT_EN = """
 STRUCTURED RESPONSE FORMAT — mandatory:
 - Fill ALL fields (summary, irrigation_advice, evidence, missing_data,
   confidence_explanation, recommended_actions) in English.
-- In "evidence", each "source" must be a REAL path from the provided context.
-  Use the V2 keys engine_decision, water_balance, probe_state, weather,
-  irrigation_execution, outcomes, crop_state, calibration, and alerts_and_limitations
-  when schema_version is 2.0. Specialized and farm contexts may use their existing keys.
-  Do NOT invent paths.
+- In "evidence", return ONLY "evidence_id" values listed in the appended ALLOWED
+  EVIDENCE REGISTRY. Do not return paths or values and never invent IDs. If no suitable
+  ID exists, report the missing datum in "missing_data" instead of fabricating evidence.
 - Do NOT compute new values; only interpret the data provided.
 """
 

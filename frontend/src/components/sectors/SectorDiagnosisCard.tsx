@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { Microscope, RefreshCw } from "lucide-react";
+import { StructuredAIResult } from "@/components/ai/StructuredAIResult";
 import { Button } from "@/components/ui/button";
 import { chatApi } from "@/lib/api";
+import type { AgronomicInterpretation } from "@/types";
 
 interface Props {
   sectorId: string;
@@ -11,6 +13,7 @@ interface Props {
 
 export function SectorDiagnosisCard({ sectorId }: Props) {
   const [diagnosis, setDiagnosis] = useState<string | null>(null);
+  const [structured, setStructured] = useState<AgronomicInterpretation | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,6 +23,7 @@ export function SectorDiagnosisCard({ sectorId }: Props) {
     try {
       const res = await chatApi.diagnoseSector(sectorId);
       setDiagnosis(res.diagnosis);
+      setStructured(res.structured ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao gerar diagnóstico.");
     } finally {
@@ -75,39 +79,16 @@ export function SectorDiagnosisCard({ sectorId }: Props) {
       )}
 
       {diagnosis && !loading && (
-        <DiagnosisBody text={diagnosis} />
+        <div className="px-4 py-4">
+          {structured ? (
+            <StructuredAIResult interpretation={structured} />
+          ) : (
+            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-irrigai-text-muted">
+              {diagnosis}
+            </p>
+          )}
+        </div>
       )}
     </div>
-  );
-}
-
-function DiagnosisBody({ text }: { text: string }) {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  return (
-    <ul className="divide-y divide-black/[0.04]">
-      {lines.map((line, i) => {
-        const clean = line.replace(/^[•\-]\s*/, "");
-        const colonIdx = clean.indexOf(":");
-        const label = colonIdx > -1 ? clean.slice(0, colonIdx) : null;
-        const body = colonIdx > -1 ? clean.slice(colonIdx + 1).trim() : clean;
-
-        return (
-          <li key={i} className="px-4 py-3 text-[13px] leading-relaxed text-irrigai-text">
-            {label ? (
-              <>
-                <span className="font-medium">{label}:</span>{" "}
-                <span className="text-irrigai-text-muted">{body}</span>
-              </>
-            ) : (
-              <span className="text-irrigai-text-muted">{body}</span>
-            )}
-          </li>
-        );
-      })}
-    </ul>
   );
 }

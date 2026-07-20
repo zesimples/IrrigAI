@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from app.ai.evidence import build_evidence_registry
 from app.schemas.ai import AgronomicInterpretation
 
 _RAW_VWC_RE = re.compile(r"(?<!\d)0[.,]\d{2,5}(?!\d)")
@@ -54,6 +55,20 @@ def assert_evidence_sources_resolve(
             resolve_context_path(context, evidence.source)
         except KeyError as exc:
             raise AssertionError(f"evidence source does not resolve: {evidence.source!r}") from exc
+
+
+def assert_evidence_ids_match_registry(
+    interpretation: AgronomicInterpretation,
+    context: dict | list,
+) -> None:
+    registry = build_evidence_registry(context)
+    assert interpretation.evidence, "structured response returned no evidence"
+    for evidence in interpretation.evidence:
+        entry = registry.entry_for_path(evidence.source)
+        assert entry is not None, f"evidence path is not registered: {evidence.source!r}"
+        assert evidence.evidence_id == entry.evidence_id
+        assert evidence.value == entry.value
+        assert evidence.label == entry.label
 
 
 def _response_text(interpretation: AgronomicInterpretation) -> Iterable[str]:
