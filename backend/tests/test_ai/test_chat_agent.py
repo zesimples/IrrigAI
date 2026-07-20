@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 from pydantic import ValidationError
 
 from app.ai.chat_agent import MAX_HISTORY_TURNS, ChatAgent
 from app.ai.context_builder import AssistantContextBuilder
+from app.ai.context_v2 import SECTOR_AI_CONTEXT_BLOCKS, SectorAIContextV2
 from app.ai.openai_client import MockChatClient
 from app.schemas.ai import ChatTurn, ProposedAction
 
@@ -29,6 +30,32 @@ def _agent():
         context_builder=AssistantContextBuilder(),
         language="pt",
     )
+
+
+def _compact_context() -> SectorAIContextV2:
+    blocks = {
+        name: {"observed_at": None, "source": "test", "units": {}}
+        for name in SECTOR_AI_CONTEXT_BLOCKS
+    }
+    blocks["scope"].update(sector={"id": "sec-1", "name": "Norte"})
+    blocks["engine_decision"].update(action="defer", confidence_level="high")
+    blocks["water_balance"].update(depletion_mm=8.0)
+    blocks["probe_state"].update(data_quality={"fresh_depths": 2, "total_depths": 2})
+    return SectorAIContextV2(**blocks)
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_sector_seed_uses_compact_v2_context(monkeypatch):
+    agent = _agent()
+    build = AsyncMock(return_value=_compact_context())
+    monkeypatch.setattr(agent.context_builder, "build_sector_ai_context", build)
+
+    result = await agent._seed_scope_context("farm-1", "sec-1", AsyncMock())
+
+    build.assert_awaited_once_with("sec-1", ANY, compact=True)
+    assert result["schema_version"] == "2.0"
+    assert result["action"] == "defer"
+    assert result["probe_data_quality"]["fresh_depths"] == 2
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ from app.ai.context_builder import (
     FarmAssistantContext,
     SectorAssistantContext,
 )
+from app.ai.context_v2 import SECTOR_AI_CONTEXT_BLOCKS, SectorAIContextV2
 from app.ai.openai_client import MockChatClient
 from app.schemas.ai import AgronomicInterpretation
 
@@ -144,10 +145,30 @@ def _farm_ctx() -> FarmAssistantContext:
     )
 
 
+def _sector_v2(action: str | None = "irrigate") -> SectorAIContextV2:
+    blocks = {
+        name: {"observed_at": None, "source": "test", "units": {}}
+        for name in SECTOR_AI_CONTEXT_BLOCKS
+    }
+    blocks["scope"].update(
+        detail_level="compact",
+        sector={"id": "sec-001", "name": "Norte"},
+    )
+    blocks["engine_decision"].update(
+        action=action,
+        confidence_level="medium",
+    )
+    blocks["water_balance"].update(depletion_mm=12.0)
+    blocks["probe_state"].update(data_quality={"fresh_depths": 0, "total_depths": 0})
+    blocks["alerts_and_limitations"].update(known_limitations=[])
+    return SectorAIContextV2(**blocks)
+
+
 @pytest.fixture
 def mock_builder():
     builder = MagicMock(spec=AssistantContextBuilder)
     builder.build_sector_context = AsyncMock(return_value=_sector_ctx())
+    builder.build_sector_ai_context = AsyncMock(return_value=_sector_v2())
     builder.build_farm_context = AsyncMock(return_value=_farm_ctx())
     builder.to_json = AssistantContextBuilder().to_json  # use real serialiser
     return builder
@@ -168,13 +189,14 @@ async def test_explain_recommendation_returns_nonempty(assistant):
     result = await assistant.explain_recommendation("sec-001", db)
     assert isinstance(result, str)
     assert len(result) > 0
+    assistant.context_builder.build_sector_ai_context.assert_called_once_with(
+        "sec-001", db, compact=True
+    )
 
 
 @pytest.mark.asyncio
 async def test_explain_recommendation_no_rec_returns_message(mock_builder):
-    mock_builder.build_sector_context = AsyncMock(
-        return_value=_sector_ctx(recommendation_action=None)
-    )
+    mock_builder.build_sector_ai_context = AsyncMock(return_value=_sector_v2(action=None))
     asst = IrrigationAssistant(mock_builder, MockChatClient(), "pt")
     db = AsyncMock()
     result = await asst.explain_recommendation("sec-001", db)
@@ -210,7 +232,9 @@ async def test_chat_returns_nonempty(assistant):
 async def test_chat_with_sector_id_uses_sector_context(mock_builder, assistant):
     db = AsyncMock()
     await assistant.chat("farm-001", "Explica a recomendação", db, sector_id="sec-001")
-    mock_builder.build_sector_context.assert_called_once_with("sec-001", db)
+    mock_builder.build_sector_ai_context.assert_called_once_with(
+        "sec-001", db, compact=False
+    )
     mock_builder.build_farm_context.assert_not_called()
 
 
@@ -219,7 +243,18 @@ async def test_chat_without_sector_id_uses_farm_context(mock_builder, assistant)
     db = AsyncMock()
     await assistant.chat("farm-001", "Resume a exploração", db, sector_id=None)
     mock_builder.build_farm_context.assert_called_once_with("farm-001", db)
-    mock_builder.build_sector_context.assert_not_called()
+    mock_builder.build_sector_ai_context.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sector_diagnosis_uses_full_v2_context(mock_builder, assistant):
+    db = AsyncMock()
+
+    await assistant.diagnose_sector("sec-001", db)
+
+    mock_builder.build_sector_ai_context.assert_called_once_with(
+        "sec-001", db, compact=False
+    )
 
 
 @pytest.mark.asyncio

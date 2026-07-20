@@ -14,7 +14,6 @@ from app.ai import prompt_templates
 from app.ai.context_builder import (
     AssistantContextBuilder,
     build_sector_change_context,
-    build_structured_agronomic_context,
 )
 from app.ai.openai_client import MockChatClient, OpenAIChatClient
 from app.ai.probe_signal import compute_probe_signal_stats
@@ -43,10 +42,14 @@ class IrrigationAssistant:
         If user_notes is provided (field observations, agronomist context), they
         are appended to the prompt so the AI can incorporate them into its analysis.
         """
-        ctx = await self.context_builder.build_sector_context(sector_id, db)
-        context_json = self.context_builder.to_json(ctx)
+        ctx = await self.context_builder.build_sector_ai_context(
+            sector_id, db, compact=True
+        )
+        context_json = ctx.to_json()
+        decision = ctx.engine_decision
+        sector = ctx.scope["sector"]
 
-        if ctx.recommendation_action is None:
+        if decision["action"] is None:
             return (
                 "Ainda não foi gerada uma recomendação para este sector. "
                 "Por favor, clique em 'Gerar recomendação' primeiro."
@@ -57,7 +60,7 @@ class IrrigationAssistant:
             user_notes=user_notes or "Nenhuma observação adicional.",
         )
         user_message = (
-            f"Analisa e explica a situação de rega para o sector '{ctx.sector_name}'."
+            f"Analisa e explica a situação de rega para o sector '{sector['name']}'."
         )
         return await self.client.complete(system_prompt, user_message)
 
@@ -67,10 +70,14 @@ class IrrigationAssistant:
         db: AsyncSession,
         user_notes: str | None = None,
     ) -> AgronomicInterpretation:
-        ctx = await self.context_builder.build_sector_context(sector_id, db)
-        context_json = self.context_builder.to_json(ctx)
+        ctx = await self.context_builder.build_sector_ai_context(
+            sector_id, db, compact=True
+        )
+        context_json = ctx.to_json()
+        decision = ctx.engine_decision
+        sector = ctx.scope["sector"]
 
-        if ctx.recommendation_action is None:
+        if decision["action"] is None:
             return self._fallback_structured(
                 "Ainda não foi gerada uma recomendação para este sector.",
                 context={"known_limitations": ["No recommendation generated for this sector."]},
@@ -83,7 +90,7 @@ class IrrigationAssistant:
             user_notes=user_notes or "Nenhuma observação adicional.",
         )
         user_message = (
-            f"Analisa e explica a situação de rega para o sector '{ctx.sector_name}'."
+            f"Analisa e explica a situação de rega para o sector '{sector['name']}'."
         )
         return await self._complete_structured(
             system_prompt=system_prompt,
@@ -208,14 +215,17 @@ class IrrigationAssistant:
 
     async def diagnose_sector(self, sector_id: str, db: AsyncSession) -> str:
         """Root-cause diagnosis: WHY is this sector in its current hydric state."""
-        ctx = await self.context_builder.build_sector_context(sector_id, db)
-        context_json = self.context_builder.to_json(ctx)
+        ctx = await self.context_builder.build_sector_ai_context(
+            sector_id, db, compact=False
+        )
+        context_json = ctx.to_json()
+        sector = ctx.scope["sector"]
 
         system_prompt = prompt_templates.SECTOR_DIAGNOSIS_PT.format(
             context_json=context_json
         )
         user_message = (
-            f"Diagnostica as causas prováveis do estado hídrico actual do sector '{ctx.sector_name}'."
+            f"Diagnostica as causas prováveis do estado hídrico actual do sector '{sector['name']}'."
         )
         return await self.client.complete(system_prompt, user_message, max_tokens=600)
 
@@ -224,14 +234,17 @@ class IrrigationAssistant:
         sector_id: str,
         db: AsyncSession,
     ) -> AgronomicInterpretation:
-        ctx = await self.context_builder.build_sector_context(sector_id, db)
-        context_json = self.context_builder.to_json(ctx)
+        ctx = await self.context_builder.build_sector_ai_context(
+            sector_id, db, compact=False
+        )
+        context_json = ctx.to_json()
+        sector = ctx.scope["sector"]
 
         system_prompt = prompt_templates.SECTOR_DIAGNOSIS_PT.format(
             context_json=context_json
         )
         user_message = (
-            f"Diagnostica as causas prováveis do estado hídrico actual do sector '{ctx.sector_name}'."
+            f"Diagnostica as causas prováveis do estado hídrico actual do sector '{sector['name']}'."
         )
         return await self._complete_structured(
             system_prompt=system_prompt,
@@ -302,21 +315,14 @@ class IrrigationAssistant:
         LLM can cite evidence rather than hallucinate.
         """
         if sector_id:
-            base_ctx = await self.context_builder.build_sector_context(sector_id, db)
-            base_json = self.context_builder.to_json(base_ctx)
             try:
-                structured = await build_structured_agronomic_context(sector_id, db)
-                structured_json = json.dumps(
-                    structured, ensure_ascii=False, default=str, indent=2
+                structured = await self.context_builder.build_sector_ai_context(
+                    sector_id, db, compact=False
                 )
-                context_json = (
-                    base_json
-                    + "\n\n# STRUCTURED AGRONOMIC CONTEXT (cite by JSON path)\n"
-                    + structured_json
-                )
+                context_json = structured.to_json()
             except Exception:
-                # Structured context is best-effort; never break chat.
-                context_json = base_json
+                base_ctx = await self.context_builder.build_sector_context(sector_id, db)
+                context_json = self.context_builder.to_json(base_ctx)
         else:
             ctx = await self.context_builder.build_farm_context(farm_id, db)
             context_json = self.context_builder.to_json(ctx)
@@ -330,8 +336,9 @@ class IrrigationAssistant:
             system_prompt
             + "\n\nNota: quando a STRUCTURED AGRONOMIC CONTEXT estiver disponível, "
             + "fundamenta cada afirmação com referência ao caminho JSON exacto "
-            + "(p.ex. probe_summary.latest_readings, weather.forecast, water_events) "
-            + "e identifica explicitamente os campos em known_limitations quando "
+            + "(p.ex. probe_state.latest_readings, weather.forecast, "
+            + "irrigation_execution.manual_events) e identifica explicitamente "
+            + "alerts_and_limitations.known_limitations quando "
             + "responderes sobre fiabilidade."
         )
         return await self.client.complete(system_prompt, user_message, max_tokens=700)
@@ -344,20 +351,15 @@ class IrrigationAssistant:
         sector_id: str | None = None,
     ) -> AgronomicInterpretation:
         if sector_id:
-            base_ctx = await self.context_builder.build_sector_context(sector_id, db)
-            base_json = self.context_builder.to_json(base_ctx)
             try:
-                structured = await build_structured_agronomic_context(sector_id, db)
-                structured_json = json.dumps(
-                    structured, ensure_ascii=False, default=str, indent=2
+                structured = await self.context_builder.build_sector_ai_context(
+                    sector_id, db, compact=False
                 )
-                context_json = (
-                    base_json
-                    + "\n\n# STRUCTURED AGRONOMIC CONTEXT (cite by JSON path)\n"
-                    + structured_json
-                )
-                context_obj = structured
+                context_obj = structured.to_dict()
+                context_json = structured.to_json()
             except Exception:
+                base_ctx = await self.context_builder.build_sector_context(sector_id, db)
+                base_json = self.context_builder.to_json(base_ctx)
                 context_json = base_json
                 context_obj = json.loads(base_json)
         else:
@@ -547,8 +549,11 @@ class IrrigationAssistant:
 
     def render_structured(self, interpretation: AgronomicInterpretation) -> str:
         _SRC_LABEL: dict[str, str] = {
+            "engine_decision": "Decisão",
             "water_balance": "Água no solo",
+            "crop_state": "Estado da cultura",
             "evapotranspiration": "Consumo da cultura",
+            "probe_state": "Qualidade dos dados",
             "probe_live": "Qualidade dos dados",
             "probe_summary.data_quality": "Qualidade dos dados",
             "probe_summary": "Qualidade dos dados",
@@ -560,6 +565,10 @@ class IrrigationAssistant:
             "weather": "Previsão do tempo",
             "alert": "Atenção",
             "water_events": "Eventos de rega/chuva",
+            "irrigation_execution": "Execução da rega",
+            "outcomes": "Eficácia da rega",
+            "calibration": "Calibração",
+            "alerts_and_limitations": "Limitações",
             "recommendation_history": "Histórico",
             "known_limitations": "Limitações",
         }
@@ -644,11 +653,15 @@ class IrrigationAssistant:
         if not isinstance(context, dict):
             return []
         candidates: list[tuple[str, object]] = [
+            ("engine_decision", context.get("engine_decision")),
+            ("probe_state.data_quality", _get_path(context, ["probe_state", "data_quality"])),
+            ("probe_state.latest_readings", _get_path(context, ["probe_state", "latest_readings"])),
             ("probe_summary.data_quality", _get_path(context, ["probe_summary", "data_quality"])),
             ("probe_summary.latest_readings", _get_path(context, ["probe_summary", "latest_readings"])),
             ("water_events", context.get("water_events")),
             ("water_event_changes", context.get("water_event_changes")),
             ("water_balance", context.get("water_balance")),
+            ("outcomes.latest", _get_path(context, ["outcomes", "latest"])),
             ("current_context_summary.water_balance", _get_path(context, ["current_context_summary", "water_balance"])),
             ("recommendation_history", context.get("recommendation_history")),
             ("recommendation_change", context.get("recommendation_change")),
@@ -656,6 +669,10 @@ class IrrigationAssistant:
             ("weather_changes.observations", _get_path(context, ["weather_changes", "observations"])),
             ("alert", context.get("alert")),
             ("known_limitations", context.get("known_limitations")),
+            (
+                "alerts_and_limitations.known_limitations",
+                _get_path(context, ["alerts_and_limitations", "known_limitations"]),
+            ),
             ("probe_signal", context.get("probe_signal")),
         ]
         evidence: list[AgronomicEvidence] = []
@@ -671,6 +688,9 @@ class IrrigationAssistant:
         if not isinstance(context, dict):
             return []
         limitations = context.get("known_limitations")
+        if isinstance(limitations, list):
+            return [str(item) for item in limitations[:5]]
+        limitations = _get_path(context, ["alerts_and_limitations", "known_limitations"])
         if isinstance(limitations, list):
             return [str(item) for item in limitations[:5]]
         missing_config = context.get("missing_config")

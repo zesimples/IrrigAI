@@ -19,13 +19,10 @@ REGRAS:
 - NÃO calcules valores — usa apenas os dados fornecidos.
 - Traduz os números para linguagem do dia-a-dia (ex: em vez de "depleção 45mm", diz "o solo já perdeu quase metade da água disponível").
 - Inclui os valores numéricos mas sempre com contexto (ex: "18 mm em falta — dentro do normal para esta fase").
-- Usa os dados em "probe_live" para reportar o que as sondas estão a medir agora. Se "probe_live" for null, diz que não há leituras disponíveis neste momento.
-- QUALIDADE DOS DADOS — ponto obrigatório: inclui SEMPRE um ponto "Qualidade dos dados" usando o texto de "data_quality_explanation". Adapta ligeiramente a frase para soar natural, mas não alteres o significado. Acrescenta a implicação prática:
-  • Se "source_confidence" = "no_probe" → a recomendação é uma estimativa sem leitura directa do solo.
-  • Se "source_confidence" = "forecast_only" → os dados de humidade têm mais de 24 horas; a estimativa pode não reflectir o estado actual do solo.
-  • Se "source_confidence" = "stale" → os dados têm algumas horas de atraso; considera o contexto meteorológico recente ao interpretar a decisão.
-  • Se "source_confidence" = "fresh" → os dados são actuais e a decisão reflecte o estado real do solo.
-- Se "hours_since_any_reading" > 6h, nota que os dados de humidade do solo não foram actualizados recentemente — não atribuas a causa a falha de hardware, apenas informa que a informação pode estar desactualizada.
+- A autoridade da decisão é "engine_decision"; não infiras uma decisão diferente a partir das leituras.
+- Usa "probe_state.live" para reportar o que as sondas medem agora. Se for null, diz que não há leituras disponíveis neste momento.
+- QUALIDADE DOS DADOS — ponto obrigatório: inclui SEMPRE um ponto "Qualidade dos dados" baseado em "probe_state.data_quality" e nas limitações conhecidas. Explica se há leitura directa actual, atrasada ou ausente.
+- Se "probe_state.live.hours_since_any_reading" > 6h, nota que os dados de humidade do solo não foram actualizados recentemente — não atribuas a causa a falha de hardware, apenas informa que a informação pode estar desactualizada.
 - Se há previsão de chuva relevante, explica se vale a pena esperar ou não.
 - Se as observações do técnico contradizem os dados das sondas, cria um ponto "Atenção" a alertar para a discrepância.
 - Se faltam dados de configuração, sugere o que o agricultor deve configurar.
@@ -52,13 +49,10 @@ RULES:
 - Do NOT compute values — use only the provided data.
 - Translate numbers into everyday language (e.g. instead of "depletion 45mm", say "the soil has used up nearly half its available water").
 - Include numeric values but always with context (e.g. "18 mm deficit — normal for this growth stage").
-- Use "probe_live" data to report what the sensors are measuring right now. If null, say no readings are currently available.
-- DATA QUALITY — mandatory bullet: ALWAYS include a "Data quality" bullet using the text from "data_quality_explanation". Adapt it slightly to sound natural but keep the meaning. Add the practical implication:
-  • If "source_confidence" = "no_probe" → recommendation is a model estimate without direct soil readings.
-  • If "source_confidence" = "forecast_only" → moisture data is over 24 hours old; the estimate may not reflect current soil state.
-  • If "source_confidence" = "stale" → data is a few hours old; consider recent weather when interpreting the decision.
-  • If "source_confidence" = "fresh" → data is current and the decision reflects actual soil conditions.
-- If "hours_since_any_reading" > 6h, note that soil moisture data has not been updated recently — do NOT attribute this to hardware failure, only inform that the information may be outdated.
+- "engine_decision" is authoritative; never infer a different decision from sensor readings.
+- Use "probe_state.live" to report what sensors measure now. If null, say no readings are currently available.
+- DATA QUALITY — mandatory bullet: ALWAYS include a "Data quality" bullet based on "probe_state.data_quality" and known limitations. Explain whether direct readings are current, delayed, or absent.
+- If "probe_state.live.hours_since_any_reading" > 6h, note that soil moisture data has not been updated recently — do NOT attribute this to hardware failure, only inform that the information may be outdated.
 - If there is relevant rainfall forecast, explain whether it is worth waiting.
 - If field notes conflict with probe data, add a "Note" bullet flagging the discrepancy.
 - If configuration is missing, suggest what the farmer should set up.
@@ -342,10 +336,13 @@ FORMATO DA RESPOSTA ESTRUTURADA — obrigatório:
 - Em "evidence", cada "source" tem de ser um caminho REAL do contexto fornecido.
   Cita o caminho exacto até ao valor usado, incluindo índices quando atravessas listas
   (p.ex. "sectors[0].recommendation_action"). Podes usar, apenas quando existirem,
-  caminhos como water_balance.depletion_mm, weather.forecast,
-  probe_summary.latest_readings[0].vwc, probe_signal.depths[0].tendencia,
-  recommendation_history[0].action, water_events[0].kind, alert.severity ou
-  known_limitations[0]. NÃO inventes caminhos nem omitas índices de listas.
+  caminhos V2 como engine_decision.action, water_balance.depletion_mm,
+  probe_state.latest_readings[0].vwc, weather.forecast[0].rainfall_mm,
+  irrigation_execution.manual_events[0].applied_mm, outcomes.latest.status,
+  calibration.soil_bounds.provenance.source ou
+  alerts_and_limitations.known_limitations[0]. Contextos especializados e da
+  exploração podem ainda expor probe_signal, recommendation_history, water_events,
+  alert e known_limitations. NÃO inventes caminhos nem omitas índices de listas.
 - NÃO calcules valores novos; interpreta apenas os dados já fornecidos.
 """
 
@@ -355,8 +352,9 @@ STRUCTURED RESPONSE FORMAT — mandatory:
 - Fill ALL fields (summary, irrigation_advice, evidence, missing_data,
   confidence_explanation, recommended_actions) in English.
 - In "evidence", each "source" must be a REAL path from the provided context.
-  Use the canonical keys: water_balance, recommendation_history, weather.forecast,
-  probe_signal, probe_summary.latest_readings, water_events, alert, known_limitations.
+  Use the V2 keys engine_decision, water_balance, probe_state, weather,
+  irrigation_execution, outcomes, crop_state, calibration, and alerts_and_limitations
+  when schema_version is 2.0. Specialized and farm contexts may use their existing keys.
   Do NOT invent paths.
 - Do NOT compute new values; only interpret the data provided.
 """

@@ -97,14 +97,21 @@ class ChatAgent:
         """Compact grounding context for the system prompt (best-effort)."""
         try:
             if sector_id:
-                s = await self.context_builder.build_sector_context(sector_id, db)
+                context = await self.context_builder.build_sector_ai_context(
+                    sector_id, db, compact=True
+                )
+                scope = context.scope["sector"]
+                decision = context.engine_decision
+                water_balance = context.water_balance
+                probe_quality = context.probe_state["data_quality"]
                 return {
-                    "sector_id": s.sector_id,
-                    "name": s.sector_name,
-                    "action": s.recommendation_action,
-                    "depletion_mm": s.rootzone_depletion_mm,
-                    "confidence_level": s.confidence_level,
-                    "source_confidence": s.source_confidence,
+                    "schema_version": context.schema_version,
+                    "sector_id": scope["id"],
+                    "name": scope["name"],
+                    "action": decision["action"],
+                    "depletion_mm": water_balance["depletion_mm"],
+                    "confidence_level": decision["confidence_level"],
+                    "probe_data_quality": probe_quality,
                 }
             ctx = await self.context_builder.build_farm_context(farm_id, db)
             return {
