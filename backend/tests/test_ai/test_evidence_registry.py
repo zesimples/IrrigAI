@@ -51,6 +51,10 @@ def test_probe_evidence_labels_identify_the_layer_and_hide_metadata():
                 "probe_id": "probe-001",
                 "probe_external_id": "1597/3629",
                 "sector_name": "Turno 4 (S15)",
+                "soil_texture": "sandy_loam",
+                "soil_bounds": {
+                    "source": "probe_calibrated",
+                },
                 "root_depth_cm": 30,
                 "depths": [
                     {
@@ -69,12 +73,24 @@ def test_probe_evidence_labels_identify_the_layer_and_hide_metadata():
     assert registry.entry_for_path("probe_signal.depths[0].depth_cm") is None
 
     sector = registry.entry_for_path("probe_signal.sector_name")
+    soil_texture = registry.entry_for_path("probe_signal.soil_texture")
+    bounds_source = registry.entry_for_path("probe_signal.soil_bounds.source")
     root_depth = registry.entry_for_path("probe_signal.root_depth_cm")
     humidity = registry.entry_for_path("probe_signal.depths[0].humidade_actual")
     trend = registry.entry_for_path("probe_signal.depths[0].tendencia")
     readings = registry.entry_for_path("probe_signal.depths[0].n_readings")
 
     assert sector is not None and sector.label == "Sector"
+    assert soil_texture is not None
+    assert (soil_texture.label, soil_texture.value) == (
+        "Textura do solo",
+        "Franco-arenoso",
+    )
+    assert bounds_source is not None
+    assert (bounds_source.label, bounds_source.value) == (
+        "Origem dos limites do solo",
+        "Calibração da sonda",
+    )
     assert root_depth is not None
     assert (root_depth.label, root_depth.value) == ("Profundidade radicular", "30 cm")
     assert humidity is not None and humidity.label == "Humidade actual a 40 cm"

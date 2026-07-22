@@ -69,6 +69,10 @@ _FIELD_LABELS = {
     "title": "Alerta",
 }
 
+_PATH_SUFFIX_LABELS = {
+    "soil_bounds.source": "Origem dos limites do solo",
+}
+
 _VALUE_LABELS = {
     "irrigate": "Regar",
     "skip": "Não regar",
@@ -85,6 +89,36 @@ _VALUE_LABELS = {
     "pending": "Pendente",
     "active": "Activo",
     "confirmed": "Confirmado",
+    # Soil textures (same Portuguese names as the configured soil presets).
+    "sand": "Areia",
+    "loamy_sand": "Areia-franca",
+    "sandy_loam": "Franco-arenoso",
+    "loam": "Franco",
+    "silty_loam": "Franco-limoso",
+    "silt": "Limo",
+    "sandy_clay_loam": "Franco-argilo-arenoso",
+    "clay_loam": "Franco-argiloso",
+    "silty_clay_loam": "Franco-argilo-limoso",
+    "silty_clay": "Argilo-limoso",
+    "clay": "Argila",
+    "sandy_clay": "Argilo-arenoso",
+    "custom": "Personalizado",
+    # Deterministic engine provenance codes.
+    "scp_override": "Configuração específica do sector",
+    "probe_calibrated": "Calibração da sonda",
+    "scp": "Perfil da cultura do sector",
+    "plot_preset": "Textura configurada no talhão",
+    "default": "Valor predefinido",
+    "probe_weighted": "Média ponderada das sondas",
+    "water_balance": "Balanço hídrico",
+    "water_balance_model": "Modelo de balanço hídrico",
+    "default_estimate": "Estimativa predefinida",
+    "manual": "Registo manual",
+    "probe_detected": "Detectada pela sonda",
+    "flowmeter_detected": "Detectada pelo caudalímetro",
+    "configured": "Configuração do sistema",
+    "probe_learned": "Aprendida pela sonda",
+    "mm_only": "Apenas dotação em milímetros",
 }
 
 _UNIT_LABELS = {
@@ -305,6 +339,9 @@ def _display_value(value, unit: str | None) -> str:
 
 
 def _label_for_path(root: dict | list, path: str) -> str:
+    for suffix, label in _PATH_SUFFIX_LABELS.items():
+        if path == suffix or path.endswith(f".{suffix}"):
+            return label
     field = path.rsplit(".", 1)[-1].split("[", 1)[0]
     field_label = _FIELD_LABELS.get(field)
     if field_label:
