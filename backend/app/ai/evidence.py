@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 
 from app.schemas.ai import AgronomicCitation, AgronomicEvidence
@@ -43,8 +44,25 @@ _FIELD_LABELS = {
     "rain_skip_applies": "Efeito da chuva na decisão",
     "irrigation_depth_mm": "Dotação recomendada",
     "irrigation_runtime_min": "Tempo de rega",
+    "probe_external_id": "Sonda",
+    "sector_name": "Sector",
+    "soil_texture": "Textura do solo",
+    "root_depth_cm": "Profundidade radicular",
+    "analysis_window_hours": "Período analisado",
+    "n_irrigation_events_in_window": "Regas no período",
+    "last_irrigation_applied_mm": "Última rega aplicada",
+    "last_irrigation_event_source": "Origem da última rega",
+    "n_readings": "Leituras",
     "humidade_actual": "Humidade actual",
     "tendencia": "Tendência",
+    "sinal_estavel": "Estabilidade do sinal",
+    "causa_sinal_estavel": "Leitura do sinal",
+    "profundidade_alem_raizes": "Posição face às raízes",
+    "variabilidade_sinal": "Variabilidade do sinal",
+    "variacao_24h": "Variação em 24 h",
+    "variacao_48h": "Variação em 48 h",
+    "resposta_rega": "Resposta à rega",
+    "horas_ate_pico_apos_rega": "Tempo até ao pico após rega",
     "quality": "Qualidade da leitura",
     "status": "Estado",
     "severity": "Gravidade",
@@ -88,6 +106,20 @@ _VWC_FIELD_PARTS = (
     "pwp",
 )
 _NON_CITABLE_PARTS = ("known_limitations", "missing_config", "units")
+_NON_CITABLE_FIELDS = {
+    # Identifiers and standalone list coordinates describe where data came from,
+    # but do not verify an agronomic statement. Depth is added to the label of
+    # the reading it qualifies instead.
+    "probe_id",
+    "probe_external_id",
+    "farm_id",
+    "plot_id",
+    "sector_id",
+    "recommendation_id",
+    "depth_cm",
+}
+
+_PATH_TOKEN_RE = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
 
 
 @dataclass(frozen=True)
@@ -198,7 +230,7 @@ def _walk(
             evidence_id=_evidence_id(path),
             source=path,
             value=_display_value(value, unit),
-            label=_label_for_path(path),
+            label=_label_for_path(root, path),
         )
     )
 
@@ -206,7 +238,10 @@ def _walk(
 def _is_citable(path: str) -> bool:
     lowered = path.lower()
     segments = lowered.replace("[", ".").replace("]", "").split(".")
+    field = segments[-1]
     if lowered == "schema_version":
+        return False
+    if field in _NON_CITABLE_FIELDS or field.endswith("_id"):
         return False
     if len(segments) == 2 and segments[-1] in {"observed_at", "source"}:
         return False
@@ -221,18 +256,37 @@ def _evidence_id(path: str) -> str:
 
 
 def _unit_for_path(root: dict | list, path: str) -> str | None:
+    field = path.rsplit(".", 1)[-1].split("[", 1)[0]
     if not isinstance(root, dict):
-        return None
+        return _inferred_unit(path, field)
     top = path.split(".", 1)[0].split("[", 1)[0]
     block = root.get(top)
     if not isinstance(block, dict):
-        return None
+        return _inferred_unit(path, field)
     units = block.get("units")
     if not isinstance(units, dict):
-        return None
-    field = path.rsplit(".", 1)[-1].split("[", 1)[0]
+        return _inferred_unit(path, field)
     unit = units.get(field)
-    return str(unit) if unit else None
+    if unit:
+        return str(unit)
+    return _inferred_unit(path, field)
+
+
+def _inferred_unit(path: str, field: str) -> str | None:
+    """Supply obvious units for probe statistics, which have no unit map."""
+    if not path.startswith(("probe_signal.", "probe_state.", "probe_summary.")):
+        return None
+    if field.endswith("_cm"):
+        return "cm"
+    if field.endswith("_mm"):
+        return "mm"
+    if field.endswith("_pct") or field.endswith("_percent"):
+        return "%"
+    if field.endswith("_hours") or field.startswith("hours_"):
+        return "h"
+    if field.endswith("_min"):
+        return "min"
+    return None
 
 
 def _display_value(value, unit: str | None) -> str:
@@ -250,9 +304,37 @@ def _display_value(value, unit: str | None) -> str:
     return f"{display} {unit_label}" if unit_label else display
 
 
-def _label_for_path(path: str) -> str:
+def _label_for_path(root: dict | list, path: str) -> str:
     field = path.rsplit(".", 1)[-1].split("[", 1)[0]
-    if field in _FIELD_LABELS:
-        return _FIELD_LABELS[field]
+    field_label = _FIELD_LABELS.get(field)
+    if field_label:
+        depth_cm = _sibling_depth_cm(root, path)
+        if depth_cm is not None:
+            return f"{field_label} a {_display_value(depth_cm, 'cm')}"
+        return field_label
     top = path.split(".", 1)[0].split("[", 1)[0]
     return _TOP_LEVEL_LABELS.get(top, "Dados")
+
+
+def _sibling_depth_cm(root: dict | list, path: str) -> int | float | str | None:
+    """Return the depth belonging to a per-layer probe evidence path."""
+    if not path.startswith(("probe_signal.", "probe_state.", "probe_summary.")):
+        return None
+
+    current: object = root
+    tokens = [
+        key if key else int(index)
+        for key, index in _PATH_TOKEN_RE.findall(path)
+    ]
+    try:
+        for token in tokens[:-1]:
+            current = current[token]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+    if not isinstance(current, dict):
+        return None
+    depth = current.get("depth_cm")
+    if isinstance(depth, (int, float, str)) and not isinstance(depth, bool):
+        return depth
+    return None

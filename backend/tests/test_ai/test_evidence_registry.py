@@ -44,6 +44,44 @@ def test_registry_excludes_raw_vwc_values_from_citable_evidence():
     assert registry.entry_for_path("probe_signal.depths[0].humidade_actual") is not None
 
 
+def test_probe_evidence_labels_identify_the_layer_and_hide_metadata():
+    registry = build_evidence_registry(
+        {
+            "probe_signal": {
+                "probe_id": "probe-001",
+                "probe_external_id": "1597/3629",
+                "sector_name": "Turno 4 (S15)",
+                "root_depth_cm": 30,
+                "depths": [
+                    {
+                        "depth_cm": 40,
+                        "n_readings": 24,
+                        "humidade_actual": "humidade baixa",
+                        "tendencia": "a consumir gradualmente",
+                    }
+                ],
+            }
+        }
+    )
+
+    assert registry.entry_for_path("probe_signal.probe_id") is None
+    assert registry.entry_for_path("probe_signal.probe_external_id") is None
+    assert registry.entry_for_path("probe_signal.depths[0].depth_cm") is None
+
+    sector = registry.entry_for_path("probe_signal.sector_name")
+    root_depth = registry.entry_for_path("probe_signal.root_depth_cm")
+    humidity = registry.entry_for_path("probe_signal.depths[0].humidade_actual")
+    trend = registry.entry_for_path("probe_signal.depths[0].tendencia")
+    readings = registry.entry_for_path("probe_signal.depths[0].n_readings")
+
+    assert sector is not None and sector.label == "Sector"
+    assert root_depth is not None
+    assert (root_depth.label, root_depth.value) == ("Profundidade radicular", "30 cm")
+    assert humidity is not None and humidity.label == "Humidade actual a 40 cm"
+    assert trend is not None and trend.label == "Tendência a 40 cm"
+    assert readings is not None and readings.label == "Leituras a 40 cm"
+
+
 def test_resolver_discards_unknown_ids_and_ignores_model_supplied_values():
     registry = build_evidence_registry(
         {"engine_decision": {"action": "defer", "confidence_score": 0.82}}
