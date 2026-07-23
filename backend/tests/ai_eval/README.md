@@ -11,6 +11,21 @@ Run from `backend/`:
 LLM_PROVIDER=openai OPENAI_API_KEY=... pytest -q tests/ai_eval/eval_golden_set.py -s
 ```
 
+Production model routing can be evaluated without changing code:
+
+```bash
+OPENAI_MODEL=gpt-4o-mini \
+OPENAI_MODEL_CHAT=... \
+OPENAI_MODEL_STRUCTURED=... \
+OPENAI_MODEL_SUMMARY=... \
+LLM_PROVIDER=openai OPENAI_API_KEY=... \
+pytest -q tests/ai_eval/eval_golden_set.py -s
+```
+
+Blank routing overrides inherit `OPENAI_MODEL`. Promote a route only when the
+complete golden set passes; never relax the deterministic guard or evidence
+assertions to make a cheaper model pass.
+
 The 20 cases in `cases/golden_contexts.json` are anonymised, compacted snapshots
 that preserve the actual JSON field names and value types sent by the
 recommendation, probe-advisory, and farm-summary surfaces. They cover

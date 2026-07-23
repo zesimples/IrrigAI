@@ -26,6 +26,15 @@ export function StructuredAIResult({ interpretation, compact = false }: Props) {
 
   return (
     <div className="space-y-4" data-testid="structured-ai-result">
+      {interpretation.degraded && (
+        <div
+          role="status"
+          className="rounded-md border border-[#c9a34a]/30 bg-[#c9a34a]/[0.08] px-3.5 py-2.5 text-[12px] leading-relaxed text-[#715617]"
+        >
+          O serviço de IA não respondeu. Esta é uma síntese de contingência,
+          baseada apenas nos dados determinísticos disponíveis.
+        </div>
+      )}
       <div className="flex items-start justify-between gap-3">
         <p className="font-serif text-[16px] leading-relaxed text-ink">
           {interpretation.summary}

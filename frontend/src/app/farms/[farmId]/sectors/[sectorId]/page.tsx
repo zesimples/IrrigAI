@@ -13,6 +13,7 @@ import { SectorAnalysis } from "@/components/sectors/SectorAnalysis";
 import { AutoCalibrationCard } from "@/components/sectors/AutoCalibrationCard";
 import { GDDStatusCard } from "@/components/sectors/GDDStatusCard";
 import { IrrigationSystemForm } from "@/components/sectors/IrrigationSystemForm";
+import { IrrigationEffectivenessPanel } from "@/components/sectors/IrrigationEffectivenessPanel";
 import { SoilProfileForm } from "@/components/sectors/SoilProfileForm";
 import { VerdictPill } from "@/components/dashboard/editorial/VerdictPill";
 import { legacyDoseBand } from "@/lib/dose";
@@ -43,7 +44,7 @@ function toConfidence(level: string | null, probeHealth?: string): Confidence {
   return "sem-sonda";
 }
 
-type TabId = "monit" | "rega" | "solo" | "fenologia";
+type TabId = "monit" | "eficacia" | "rega" | "solo" | "fenologia";
 
 interface Props {
   params: { farmId: string; sectorId: string };
@@ -228,6 +229,7 @@ export default function SectorDetailPage({ params }: Props) {
 
   const tabs: { id: TabId; label: string }[] = [
     { id: "monit", label: "Monitorização" },
+    { id: "eficacia", label: "Eficácia da rega" },
     { id: "rega", label: "Sistema de rega" },
     { id: "solo", label: "Solo" },
     { id: "fenologia", label: "Fenologia" },
@@ -642,6 +644,16 @@ export default function SectorDetailPage({ params }: Props) {
               </button>
             </aside>
           </div>
+        </div>
+      )}
+
+      {/* ── Eficácia da rega tab ───────────────────────────────────────────── */}
+      {activeTab === "eficacia" && (
+        <div className="px-4 py-8 sm:px-8 lg:px-11">
+          <IrrigationEffectivenessPanel
+            sectorId={sectorId}
+            probeId={firstProbe?.probe_id}
+          />
         </div>
       )}
 

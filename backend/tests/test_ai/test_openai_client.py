@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.ai.openai_client import MockChatClient, get_chat_client
+from app.ai.openai_client import MockChatClient, OpenAIChatClient, get_chat_client
 from app.config import Settings
 from app.schemas.ai import AgronomicInterpretation
 
@@ -104,6 +104,24 @@ def test_get_chat_client_raises_for_unknown_provider():
     settings = Settings.model_construct(LLM_PROVIDER="unknown")
     with pytest.raises(ValueError, match="Unknown LLM provider"):
         get_chat_client(settings)
+
+
+def test_openai_client_routes_models_by_surface():
+    settings = Settings(
+        LLM_PROVIDER="openai",
+        OPENAI_API_KEY="test-key",
+        OPENAI_MODEL="base-model",
+        OPENAI_MODEL_CHAT="chat-model",
+        OPENAI_MODEL_STRUCTURED="structured-model",
+        OPENAI_MODEL_SUMMARY="summary-model",
+    )
+
+    client = get_chat_client(settings)
+
+    assert isinstance(client, OpenAIChatClient)
+    assert client.model_for_surface("chat") == "chat-model"
+    assert client.model_for_surface("farm_summary") == "summary-model"
+    assert client.model_for_surface("probe_diagnosis") == "structured-model"
 
 
 @pytest.mark.asyncio

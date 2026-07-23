@@ -5,6 +5,8 @@ import type {
   AutoCalibrationResult,
   CalibrationHistoryRun,
   ChatResult,
+  ChatConversation,
+  ChatConversationDetail,
   ChatTurn,
   ProbeCalibrationRun,
   CropProfileTemplate,
@@ -21,6 +23,7 @@ import type {
   FlowmeterReadingsResponse,
   FlowmeterReferenceOut,
   FlowmeterSectorAnalysisResponse,
+  FieldObservation,
   GDDStatus,
   IngestionRunOut,
   IrrigationEvent,
@@ -31,6 +34,7 @@ import type {
   Probe,
   ProbeReadingsDiagnosticsResponse,
   ProbeReadingsResponse,
+  ProposedAction,
   Recommendation,
   RecommendationDetail,
   RecommendationOutcome,
@@ -350,12 +354,107 @@ export const auditApi = {
 // ── AI Chat ───────────────────────────────────────────────────────────────────
 
 export const chatApi = {
-  chat: (farmId: string, message: string, sectorId?: string, history: ChatTurn[] = []) =>
+  chat: (
+    farmId: string,
+    message: string,
+    sectorId?: string,
+    history: ChatTurn[] = [],
+    conversationId?: string,
+  ) =>
     post<ChatResult>(`/farms/${farmId}/chat`, {
       message,
       sector_id: sectorId ?? null,
       history,
+      conversation_id: conversationId ?? null,
     }),
+  conversations: (farmId: string) =>
+    get<ChatConversation[]>(`/farms/${farmId}/chat/conversations`),
+  conversation: (farmId: string, conversationId: string) =>
+    get<ChatConversationDetail>(
+      `/farms/${farmId}/chat/conversations/${conversationId}`,
+    ),
+  deleteConversation: (farmId: string, conversationId: string) =>
+    del<void>(`/farms/${farmId}/chat/conversations/${conversationId}`),
+  streamChat: async (
+    farmId: string,
+    body: {
+      message: string;
+      sector_id?: string | null;
+      conversation_id?: string | null;
+    },
+    callbacks: {
+      onDelta: (text: string) => void;
+      onConversation?: (conversationId: string, messageId: string) => void;
+    },
+  ): Promise<ChatResult> => {
+    const token = getToken();
+    const response = await fetch(`${API_BASE}/farms/${farmId}/chat/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok || !response.body) {
+      const payload = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new ApiError(response.status, payload.detail ?? response.statusText);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let reply = "";
+    let conversationId = body.conversation_id ?? "";
+    let messageId = "";
+    let donePayload: Partial<ChatResult> = {};
+
+    const consumeEvent = (block: string) => {
+      let event = "message";
+      let data = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (!data) return;
+      const payload = JSON.parse(data) as Record<string, unknown>;
+      if (event === "conversation") {
+        conversationId = String(payload.conversation_id ?? "");
+        messageId = String(payload.message_id ?? "");
+        callbacks.onConversation?.(conversationId, messageId);
+      } else if (event === "delta") {
+        const text = String(payload.text ?? "");
+        reply += text;
+        callbacks.onDelta(text);
+      } else if (event === "done") {
+        donePayload = payload;
+      } else if (event === "error") {
+        throw new ApiError(500, String(payload.detail ?? "Erro no assistente."));
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary >= 0) {
+        consumeEvent(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf("\n\n");
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) consumeEvent(buffer);
+
+    return {
+      reply,
+      conversation_id: conversationId,
+      message_id: messageId,
+      proposed_action: (donePayload.proposed_action as ProposedAction | null) ?? null,
+      degraded: Boolean(donePayload.degraded),
+      model_name: (donePayload.model_name as string | null) ?? null,
+    };
+  },
   explainSector: (sectorId: string, userNotes?: string) =>
     post<AITextResponse & { explanation: string }>(`/sectors/${sectorId}/explain`, {
       user_notes: userNotes ?? null,
@@ -368,10 +467,49 @@ export const chatApi = {
     post<AITextResponse & { analysis: string }>(`/sectors/${sectorId}/change-analysis`, {
       window_hours: windowHours,
     }),
+  effectivenessAnalysis: (sectorId: string) =>
+    post<AITextResponse & { analysis: string }>(
+      `/sectors/${sectorId}/effectiveness-analysis`,
+    ),
   missingDataQuestions: (farmId: string) =>
     post<{ questions: string[] }>(`/farms/${farmId}/questions`),
   explainAlert: (alertId: string) =>
     post<AITextResponse & { explanation: string }>(`/alerts/${alertId}/explain`),
+  feedback: (body: {
+    surface: string;
+    rating: -1 | 1;
+    farm_id?: string;
+    chat_message_id?: string;
+    entity_id?: string;
+    comment?: string;
+  }) => post<{ id: string }>("/ai/feedback", body),
+};
+
+export const fieldObservationsApi = {
+  list: (sectorId: string, activeOnly = true) =>
+    get<FieldObservation[]>(
+      `/sectors/${sectorId}/field-observations?active_only=${activeOnly}`,
+    ),
+  create: (
+    sectorId: string,
+    body: {
+      observation_type: string;
+      structured_value?: Record<string, unknown> | null;
+      text?: string | null;
+      observed_at?: string;
+      expires_at?: string | null;
+    },
+  ) => post<FieldObservation>(`/sectors/${sectorId}/field-observations`, body),
+  verify: (observationId: string, isVerified: boolean) =>
+    request<FieldObservation>(
+      `/field-observations/${observationId}/verification`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ is_verified: isVerified }),
+      },
+    ),
+  remove: (observationId: string) =>
+    del<void>(`/field-observations/${observationId}`),
 };
 
 // ── Auto-Calibration ──────────────────────────────────────────────────────────

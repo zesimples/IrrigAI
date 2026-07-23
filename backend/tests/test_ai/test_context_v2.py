@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.core.enums import ConfidenceLevel, RecommendationAction
 from app.models import (
     Farm,
+    FieldObservation,
     IrrigationFingerprint,
     Plot,
     ProbeCalibrationRun,
@@ -37,11 +38,15 @@ async def seed_sector_id(async_db_session: AsyncSession) -> str:
         await async_db_session.execute(select(Farm).where(Farm.name == "Herdade do Esporão"))
     ).scalar_one()
     plot = (
-        await async_db_session.execute(select(Plot).where(Plot.farm_id == farm.id))
-    ).scalars().first()
+        (await async_db_session.execute(select(Plot).where(Plot.farm_id == farm.id)))
+        .scalars()
+        .first()
+    )
     sector = (
-        await async_db_session.execute(select(Sector).where(Sector.plot_id == plot.id))
-    ).scalars().first()
+        (await async_db_session.execute(select(Sector).where(Sector.plot_id == plot.id)))
+        .scalars()
+        .first()
+    )
     return sector.id
 
 
@@ -158,9 +163,7 @@ async def test_sector_ai_context_v2_surfaces_snapshot_outcome_fingerprint_and_ca
     )
     fingerprint = (
         await async_db_session.execute(
-            select(IrrigationFingerprint).where(
-                IrrigationFingerprint.sector_id == seed_sector_id
-            )
+            select(IrrigationFingerprint).where(IrrigationFingerprint.sector_id == seed_sector_id)
         )
     ).scalar_one_or_none()
     if fingerprint is None:
@@ -203,10 +206,42 @@ async def test_sector_ai_context_v2_surfaces_snapshot_outcome_fingerprint_and_ca
     assert payload["water_balance"]["etc_mm"] == 4.2
     assert payload["crop_state"]["stress_projection"] == {"urgency": "low"}
     assert payload["outcomes"]["recent"][0]["status"] == "matched"
-    assert payload["irrigation_execution"]["habitual_dose"][
-        "typical_event_net_mm"
-    ] == 16.0
+    assert payload["irrigation_execution"]["habitual_dose"]["typical_event_net_mm"] == 16.0
     assert payload["calibration"]["pending_candidate_count"] >= 1
     assert payload["calibration"]["runs"][0]["status"] == "candidate"
+
+    await async_db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_sector_ai_context_v2_includes_active_field_observations(
+    async_db_session,
+    seed_sector_id,
+):
+    now = datetime.now(UTC)
+    async_db_session.add(
+        FieldObservation(
+            sector_id=seed_sector_id,
+            observation_type="field_check",
+            structured_value={"visual_soil_condition": "dry"},
+            text="Folhas ligeiramente enroladas.",
+            observed_at=now,
+            is_verified=True,
+        )
+    )
+    await async_db_session.flush()
+
+    payload = (
+        await build_sector_ai_context_v2(
+            seed_sector_id,
+            async_db_session,
+            compact=False,
+        )
+    ).to_dict()
+
+    observations = payload["crop_state"]["field_observations"]
+    assert observations[0]["type"] == "field_check"
+    assert observations[0]["verified"] is True
+    assert observations[0]["source"] == "user_field_observation"
 
     await async_db_session.rollback()

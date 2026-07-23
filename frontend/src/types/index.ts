@@ -386,6 +386,8 @@ export interface AgronomicInterpretation {
   confidence_score: number;
   confidence_explanation: string;
   recommended_actions: string[];
+  degraded?: boolean;
+  error_code?: string | null;
 }
 
 export interface AITextResponse {
@@ -1043,5 +1045,49 @@ export interface ProposedAction {
 
 export interface ChatResult {
   reply: string;
+  conversation_id: string;
+  message_id: string;
   proposed_action: ProposedAction | null;
+  degraded: boolean;
+  model_name: string | null;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  proposed_action: ProposedAction | null;
+  degraded: boolean;
+  model_name: string | null;
+  created_at: string;
+}
+
+export interface ChatConversation {
+  id: string;
+  farm_id: string;
+  sector_id: string | null;
+  title: string | null;
+  last_message_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatConversationDetail extends ChatConversation {
+  messages: ChatMessage[];
+}
+
+export interface FieldObservation {
+  id: string;
+  sector_id: string;
+  author_id: string | null;
+  observation_type: string;
+  structured_value: Record<string, unknown> | unknown[] | null;
+  text: string | null;
+  observed_at: string;
+  expires_at: string | null;
+  is_verified: boolean;
+  verified_by_id: string | null;
+  verified_at: string | null;
+  created_at: string;
+  updated_at: string;
 }

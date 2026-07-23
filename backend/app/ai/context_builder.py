@@ -8,10 +8,11 @@ so the LLM can explain what was inferred vs. user-configured.
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.context_v2 import SectorAIContextV2
@@ -28,6 +29,7 @@ from app.models import (
     Alert,
     DetectedWaterEvent,
     Farm,
+    FieldObservation,
     IrrigationEvent,
     IrrigationEventDetected,
     IrrigationFingerprint,
@@ -53,6 +55,7 @@ from app.utils.format_pt import fmt_pt
 # Context dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SectorAssistantContext:
     # Identity
@@ -64,7 +67,7 @@ class SectorAssistantContext:
     area_ha: float | None
 
     # Configuration status
-    config_status: dict[str, str]           # e.g. {"soil": "configured", "irrigation_system": "missing"}
+    config_status: dict[str, str]  # e.g. {"soil": "configured", "irrigation_system": "missing"}
     defaults_used: list[str]
     missing_config: list[str]
 
@@ -138,6 +141,7 @@ class FarmAssistantContext:
 # Data-quality helpers
 # ---------------------------------------------------------------------------
 
+
 def _source_confidence_and_explanation(probe_live: dict | None) -> tuple[str, str]:
     """Derive (source_confidence, data_quality_explanation) from the live probe snapshot."""
     if probe_live is None:
@@ -198,9 +202,7 @@ async def build_canonical_probe_state(
                 "vwc": round(depth.latest_vwc, 4) if depth.latest_vwc is not None else None,
                 "latest_reading_at": latest.timestamp.isoformat() if latest else None,
                 "hours_since_reading": (
-                    round(depth.hours_since_last, 1)
-                    if depth.hours_since_last is not None
-                    else None
+                    round(depth.hours_since_last, 1) if depth.hours_since_last is not None else None
                 ),
                 "quality": depth.quality,
                 "quality_flag": latest.quality_flag if latest else None,
@@ -227,6 +229,7 @@ async def build_canonical_probe_state(
 # ---------------------------------------------------------------------------
 # Builder
 # ---------------------------------------------------------------------------
+
 
 class AssistantContextBuilder:
     """Assembles LLM context by reading from the DB and engine output."""
@@ -275,10 +278,12 @@ class AssistantContextBuilder:
                 .order_by(RecommendationReason.order)
             )
             for r in reasons_result.scalars().all():
-                reasons.append({
-                    "category": r.category,
-                    "message": r.message_pt,
-                })
+                reasons.append(
+                    {
+                        "category": r.category,
+                        "message": r.message_pt,
+                    }
+                )
 
             # Extract inputs from computation_log / inputs_snapshot
             snap = rec.inputs_snapshot or {}
@@ -296,7 +301,8 @@ class AssistantContextBuilder:
         irrig_ctx = await build_irrigation_context(sector_id, db)
         last_irrig_date = (
             irrig_ctx.last_irrigation_at.strftime("%Y-%m-%d")
-            if irrig_ctx.last_irrigation_at else None
+            if irrig_ctx.last_irrigation_at
+            else None
         )
 
         # Active alerts for this sector
@@ -333,14 +339,10 @@ class AssistantContextBuilder:
             # Only expose depth/runtime when action is actually "irrigate" —
             # a non-zero depth on a "no_irrigation" decision confuses the LLM.
             irrigation_depth_mm=(
-                rec.irrigation_depth_mm
-                if rec and rec.action == "irrigate"
-                else None
+                rec.irrigation_depth_mm if rec and rec.action == "irrigate" else None
             ),
             runtime_minutes=(
-                rec.irrigation_runtime_min
-                if rec and rec.action == "irrigate"
-                else None
+                rec.irrigation_runtime_min if rec and rec.action == "irrigate" else None
             ),
             confidence_score=rec.confidence_score if rec else None,
             confidence_level=rec.confidence_level if rec else None,
@@ -383,14 +385,13 @@ class AssistantContextBuilder:
         """Build the versioned context used by all new sector-scoped AI surfaces."""
         return await build_sector_ai_context_v2(sector_id, db, compact=compact)
 
-    async def build_farm_context(
-        self, farm_id: str, db: AsyncSession
-    ) -> FarmAssistantContext:
+    async def build_farm_context(self, farm_id: str, db: AsyncSession) -> FarmAssistantContext:
         farm = await db.get(Farm, farm_id)
         farm_name = farm.name if farm else farm_id
         location = (
             {"lat": farm.location_lat, "lon": farm.location_lon, "region": farm.region}
-            if farm else None
+            if farm
+            else None
         )
 
         # Weather summary
@@ -406,29 +407,16 @@ class AssistantContextBuilder:
             ),
         }
 
-        # All sectors under this farm
-        from app.active_records import active_plots_stmt, active_sectors_stmt
-
-        plots_result = await db.execute(active_plots_stmt(farm_id))
-        plots = plots_result.scalars().all()
-
-        sector_contexts: list[SectorAssistantContext] = []
-        for plot in plots:
-            sectors_result = await db.execute(
-                active_sectors_stmt(plot.id)
-            )
-            for sector in sectors_result.scalars().all():
-                try:
-                    sc = await self.build_sector_context(sector.id, db)
-                    sector_contexts.append(sc)
-                except Exception:
-                    pass
+        # Farm summaries use a bounded set of aggregate queries instead of calling
+        # build_sector_context once per sector (77 serial builds on Innoliva).
+        sector_contexts = await self._build_farm_sector_contexts(farm_id, db)
 
         # Setup completion
         total = len(sector_contexts)
         if total > 0:
             configured = sum(
-                1 for s in sector_contexts
+                1
+                for s in sector_contexts
                 if s.config_status.get("irrigation_system") == "configured"
                 and s.config_status.get("soil") == "configured"
             )
@@ -465,12 +453,216 @@ class AssistantContextBuilder:
 
     def to_json(self, ctx: SectorAssistantContext | FarmAssistantContext) -> str:
         """Serialise context to JSON string for injection into LLM prompt."""
-        return json.dumps(asdict(ctx), ensure_ascii=False, default=str, indent=2)
+        return json.dumps(
+            asdict(ctx),
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":"),
+        )
+
+    async def _build_farm_sector_contexts(
+        self,
+        farm_id: str,
+        db: AsyncSession,
+    ) -> list[SectorAssistantContext]:
+        sectors = (
+            (
+                await db.execute(
+                    select(Sector)
+                    .join(Plot, Sector.plot_id == Plot.id)
+                    .where(
+                        Plot.farm_id == farm_id,
+                        Plot.is_archived.is_(False),
+                        Sector.is_archived.is_(False),
+                    )
+                    .order_by(Sector.name)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not sectors:
+            return []
+
+        sector_ids = [sector.id for sector in sectors]
+        plots = {
+            row.id: row
+            for row in (
+                await db.execute(select(Plot).where(Plot.id.in_({row.plot_id for row in sectors})))
+            ).scalars()
+        }
+        recommendations = (
+            (
+                await db.execute(
+                    select(Recommendation)
+                    .where(Recommendation.sector_id.in_(sector_ids))
+                    .distinct(Recommendation.sector_id)
+                    .order_by(
+                        Recommendation.sector_id,
+                        Recommendation.generated_at.desc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        rec_by_sector = {row.sector_id: row for row in recommendations}
+        rec_ids = [row.id for row in recommendations]
+
+        reasons_by_rec: dict[str, list[dict]] = defaultdict(list)
+        if rec_ids:
+            reason_rows = (
+                (
+                    await db.execute(
+                        select(RecommendationReason)
+                        .where(RecommendationReason.recommendation_id.in_(rec_ids))
+                        .order_by(
+                            RecommendationReason.recommendation_id,
+                            RecommendationReason.order,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in reason_rows:
+                reasons_by_rec[row.recommendation_id].append(
+                    {"category": row.category, "message": row.message_pt}
+                )
+
+        configured_systems = set(
+            (
+                await db.execute(
+                    select(IrrigationSystem.sector_id).where(
+                        IrrigationSystem.sector_id.in_(sector_ids)
+                    )
+                )
+            ).scalars()
+        )
+        configured_profiles = set(
+            (
+                await db.execute(
+                    select(SectorCropProfile.sector_id).where(
+                        SectorCropProfile.sector_id.in_(sector_ids)
+                    )
+                )
+            ).scalars()
+        )
+        alerts_by_sector: dict[str, list[dict]] = defaultdict(list)
+        alert_rows = (
+            (
+                await db.execute(
+                    select(Alert)
+                    .where(
+                        Alert.sector_id.in_(sector_ids),
+                        Alert.is_active.is_(True),
+                    )
+                    .order_by(Alert.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in alert_rows:
+            if len(alerts_by_sector[row.sector_id]) < 5:
+                alerts_by_sector[row.sector_id].append(
+                    {
+                        "severity": row.severity,
+                        "title": row.title_pt,
+                        "description": row.description_pt,
+                    }
+                )
+
+        contexts: list[SectorAssistantContext] = []
+        for sector in sectors:
+            rec = rec_by_sector.get(sector.id)
+            snapshot = rec.inputs_snapshot or {} if rec else {}
+            computation_log = rec.computation_log or {} if rec else {}
+            plot = plots.get(sector.plot_id)
+            soil_configured = bool(
+                plot and plot.field_capacity is not None and plot.wilting_point is not None
+            )
+            missing: list[str] = []
+            if not soil_configured:
+                missing.append("soil FC/PWP")
+            if sector.id not in configured_systems:
+                missing.append("irrigation system")
+            if sector.id not in configured_profiles:
+                missing.append("no crop profile")
+            action = _enum_value(rec.action) if rec else None
+            contexts.append(
+                SectorAssistantContext(
+                    sector_id=sector.id,
+                    sector_name=sector.name,
+                    crop_type=sector.crop_type,
+                    variety=sector.variety,
+                    phenological_stage=sector.current_phenological_stage,
+                    area_ha=sector.area_ha,
+                    config_status={
+                        "soil": "configured" if soil_configured else "defaulted",
+                        "irrigation_system": (
+                            "configured" if sector.id in configured_systems else "missing"
+                        ),
+                        "phenological_stage": (
+                            "configured" if sector.current_phenological_stage else "not_set"
+                        ),
+                        "crop_profile": (
+                            "configured" if sector.id in configured_profiles else "missing"
+                        ),
+                    },
+                    defaults_used=[],
+                    missing_config=missing,
+                    recommendation_id=rec.id if rec else None,
+                    recommendation_action=action,
+                    recommendation_is_accepted=rec.is_accepted if rec else None,
+                    irrigation_depth_mm=(
+                        rec.irrigation_depth_mm if rec and action == "irrigate" else None
+                    ),
+                    runtime_minutes=(
+                        rec.irrigation_runtime_min if rec and action == "irrigate" else None
+                    ),
+                    confidence_score=rec.confidence_score if rec else None,
+                    confidence_level=(_enum_value(rec.confidence_level) if rec else None),
+                    reasons=reasons_by_rec.get(rec.id, []) if rec else [],
+                    rootzone_depletion_mm=snapshot.get("depletion_mm"),
+                    rootzone_taw_mm=snapshot.get("taw_mm"),
+                    rootzone_raw_mm=snapshot.get("raw_mm"),
+                    rootzone_swc=snapshot.get("swc_current"),
+                    today_etc_mm=snapshot.get("etc_mm"),
+                    rainfall_effective_mm=snapshot.get("rain_effective_mm"),
+                    rain_skip_applies=snapshot.get("rain_skip_applies"),
+                    swc_source=snapshot.get("swc_source"),
+                    swc_model=snapshot.get("swc_model"),
+                    fc_calibration=snapshot.get("fc_calibration"),
+                    dose_band=snapshot.get("dose_band"),
+                    dose_source=snapshot.get("dose_source"),
+                    dose_presentation=snapshot.get("dose_presentation"),
+                    stress_projection=snapshot.get("stress_projection"),
+                    confidence_penalties=computation_log.get("confidence_penalties"),
+                    today_et0_mm=snapshot.get("et0_mm"),
+                    today_temp_max_c=snapshot.get("temperature_max_c"),
+                    rainfall_last_24h_mm=snapshot.get("rainfall_mm") or 0.0,
+                    forecast_rain_next_48h_mm=(snapshot.get("forecast_rain_next_48h") or 0.0),
+                    last_irrigation_date=None,
+                    total_irrigation_7d_mm=0.0,
+                    active_alerts=alerts_by_sector.get(sector.id, []),
+                    probe_live=None,
+                    source_confidence=(
+                        "fresh" if snapshot.get("swc_source") == "probe_weighted" else "no_probe"
+                    ),
+                    data_quality_explanation=(
+                        "Resumo baseado no snapshot determinístico da recomendação."
+                    ),
+                    generated_at=rec.generated_at.isoformat() if rec else None,
+                )
+            )
+        return contexts
 
 
 # ---------------------------------------------------------------------------
 # Structured agronomic context for LLM grounding
 # ---------------------------------------------------------------------------
+
 
 async def get_probe_diagnostics(probe_id: str, db: AsyncSession) -> dict:
     """Per-probe diagnostics: depth freshness, latest readings, ingestion telemetry."""
@@ -479,19 +671,23 @@ async def get_probe_diagnostics(probe_id: str, db: AsyncSession) -> dict:
         return {"error": "probe_not_found"}
 
     depths = (
-        await db.execute(select(ProbeDepth).where(ProbeDepth.probe_id == probe_id))
-    ).scalars().all()
+        (await db.execute(select(ProbeDepth).where(ProbeDepth.probe_id == probe_id)))
+        .scalars()
+        .all()
+    )
     depth_info: list[dict] = []
     for d in sorted(depths, key=lambda x: x.depth_cm):
-        depth_info.append({
-            "depth_cm": d.depth_cm,
-            "sensor_type": d.sensor_type,
-            "last_reading_at": d.last_reading_at.isoformat() if d.last_reading_at else None,
-            "last_quality_flag": d.last_quality_flag,
-            "last_unit": d.last_unit,
-            "readings_count_total": d.readings_count_total,
-            "data_status": d.data_status,
-        })
+        depth_info.append(
+            {
+                "depth_cm": d.depth_cm,
+                "sensor_type": d.sensor_type,
+                "last_reading_at": d.last_reading_at.isoformat() if d.last_reading_at else None,
+                "last_quality_flag": d.last_quality_flag,
+                "last_unit": d.last_unit,
+                "readings_count_total": d.readings_count_total,
+                "data_status": d.data_status,
+            }
+        )
 
     # Most recent ingestion run for this probe
     last_run = (
@@ -528,22 +724,24 @@ async def get_probe_diagnostics(probe_id: str, db: AsyncSession) -> dict:
     }
 
 
-async def get_sector_water_events(
-    sector_id: str, db: AsyncSession, days: int = 14
-) -> list[dict]:
+async def get_sector_water_events(sector_id: str, db: AsyncSession, days: int = 14) -> list[dict]:
     """Return persisted water events for a sector over the last N days."""
     since = datetime.now(UTC) - timedelta(days=days)
     rows = (
-        await db.execute(
-            select(DetectedWaterEvent)
-            .where(
-                DetectedWaterEvent.sector_id == sector_id,
-                DetectedWaterEvent.timestamp >= since,
+        (
+            await db.execute(
+                select(DetectedWaterEvent)
+                .where(
+                    DetectedWaterEvent.sector_id == sector_id,
+                    DetectedWaterEvent.timestamp >= since,
+                )
+                .order_by(DetectedWaterEvent.timestamp.desc())
+                .limit(50)
             )
-            .order_by(DetectedWaterEvent.timestamp.desc())
-            .limit(50)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
         {
             "id": r.id,
@@ -638,25 +836,33 @@ async def get_weather_summary(
         else WeatherForecast.plot_id.is_(None)
     )
     obs = (
-        await db.execute(
-            select(WeatherObservation)
-            .where(
-                WeatherObservation.farm_id == farm_id,
-                WeatherObservation.timestamp >= obs_since,
-                obs_scope,
+        (
+            await db.execute(
+                select(WeatherObservation)
+                .where(
+                    WeatherObservation.farm_id == farm_id,
+                    WeatherObservation.timestamp >= obs_since,
+                    obs_scope,
+                )
+                .order_by(WeatherObservation.timestamp.desc())
+                .limit(obs_days * 4)
             )
-            .order_by(WeatherObservation.timestamp.desc())
-            .limit(obs_days * 4)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     fc = (
-        await db.execute(
-            select(WeatherForecast)
-            .where(WeatherForecast.farm_id == farm_id, forecast_scope)
-            .order_by(WeatherForecast.forecast_date)
-            .limit(fc_days)
+        (
+            await db.execute(
+                select(WeatherForecast)
+                .where(WeatherForecast.farm_id == farm_id, forecast_scope)
+                .order_by(WeatherForecast.forecast_date)
+                .limit(fc_days)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return {
         "recent_observations": [
             {
@@ -688,13 +894,17 @@ async def get_recommendation_history(
 ) -> list[dict]:
     """Return the most recent recommendations for a sector."""
     rows = (
-        await db.execute(
-            select(Recommendation)
-            .where(Recommendation.sector_id == sector_id)
-            .order_by(Recommendation.generated_at.desc())
-            .limit(limit)
+        (
+            await db.execute(
+                select(Recommendation)
+                .where(Recommendation.sector_id == sector_id)
+                .order_by(Recommendation.generated_at.desc())
+                .limit(limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
         {
             "id": r.id,
@@ -793,26 +1003,26 @@ async def build_sector_ai_context_v2(
     farm = await db.get(Farm, plot.farm_id) if plot else None
 
     crop_profile = (
-        await db.execute(
-            select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
-        )
+        await db.execute(select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id))
     ).scalar_one_or_none()
     irrigation_system = (
-        await db.execute(
-            select(IrrigationSystem).where(IrrigationSystem.sector_id == sector_id)
-        )
+        await db.execute(select(IrrigationSystem).where(IrrigationSystem.sector_id == sector_id))
     ).scalar_one_or_none()
     engine_context = await build_sector_context(sector_id, db)
     soil_bounds = await resolve_sector_soil_bounds(sector_id, db, plot=plot)
 
     recommendations = (
-        await db.execute(
-            select(Recommendation)
-            .where(Recommendation.sector_id == sector_id)
-            .order_by(Recommendation.generated_at.desc())
-            .limit(5)
+        (
+            await db.execute(
+                select(Recommendation)
+                .where(Recommendation.sector_id == sector_id)
+                .order_by(Recommendation.generated_at.desc())
+                .limit(5)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     latest = recommendations[0] if recommendations else None
     snapshot = latest.inputs_snapshot or {} if latest else {}
     computation_log = latest.computation_log or {} if latest else {}
@@ -820,12 +1030,16 @@ async def build_sector_ai_context_v2(
     reasons = []
     if latest:
         reason_rows = (
-            await db.execute(
-                select(RecommendationReason)
-                .where(RecommendationReason.recommendation_id == latest.id)
-                .order_by(RecommendationReason.order)
+            (
+                await db.execute(
+                    select(RecommendationReason)
+                    .where(RecommendationReason.recommendation_id == latest.id)
+                    .order_by(RecommendationReason.order)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         reasons = [
             {
                 "category": _enum_value(row.category),
@@ -848,9 +1062,7 @@ async def build_sector_ai_context_v2(
         for row in recommendations
     ]
 
-    probes = (
-        await db.execute(select(Probe).where(Probe.sector_id == sector_id))
-    ).scalars().all()
+    probes = (await db.execute(select(Probe).where(Probe.sector_id == sector_id))).scalars().all()
     probe_live = await build_canonical_probe_state(engine_context, db)
     latest_readings = probe_live.get("depths", []) if probe_live else []
     diagnostics = []
@@ -874,9 +1086,7 @@ async def build_sector_ai_context_v2(
         else {"recent_observations": [], "forecast": []}
     )
     weather_observed_at = (
-        weather["recent_observations"][0]["timestamp"]
-        if weather["recent_observations"]
-        else None
+        weather["recent_observations"][0]["timestamp"] if weather["recent_observations"] else None
     )
     if compact:
         weather = {
@@ -886,25 +1096,33 @@ async def build_sector_ai_context_v2(
 
     since = now - timedelta(days=14)
     manual_events = (
-        await db.execute(
-            select(IrrigationEvent)
-            .where(IrrigationEvent.sector_id == sector_id, IrrigationEvent.start_time >= since)
-            .order_by(IrrigationEvent.start_time.desc())
-            .limit(20)
+        (
+            await db.execute(
+                select(IrrigationEvent)
+                .where(IrrigationEvent.sector_id == sector_id, IrrigationEvent.start_time >= since)
+                .order_by(IrrigationEvent.start_time.desc())
+                .limit(20)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     detected_events = await get_sector_water_events(sector_id, db, days=14)
     flowmeter_events = (
-        await db.execute(
-            select(IrrigationEventDetected)
-            .where(
-                IrrigationEventDetected.sector_id == sector_id,
-                IrrigationEventDetected.start_time >= since,
+        (
+            await db.execute(
+                select(IrrigationEventDetected)
+                .where(
+                    IrrigationEventDetected.sector_id == sector_id,
+                    IrrigationEventDetected.start_time >= since,
+                )
+                .order_by(IrrigationEventDetected.start_time.desc())
+                .limit(20)
             )
-            .order_by(IrrigationEventDetected.start_time.desc())
-            .limit(20)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     fingerprint = (
         await db.execute(
             select(IrrigationFingerprint).where(IrrigationFingerprint.sector_id == sector_id)
@@ -954,28 +1172,34 @@ async def build_sector_ai_context_v2(
     ]
 
     outcome_rows = (
-        await db.execute(
-            select(RecommendationOutcome)
-            .where(RecommendationOutcome.sector_id == sector_id)
-            .order_by(RecommendationOutcome.evaluated_at.desc())
-            .limit(10)
+        (
+            await db.execute(
+                select(RecommendationOutcome)
+                .where(RecommendationOutcome.sector_id == sector_id)
+                .order_by(RecommendationOutcome.evaluated_at.desc())
+                .limit(10)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     outcomes = [_outcome_row(row) for row in outcome_rows]
 
     calibration = (
-        await db.execute(
-            select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
-        )
+        await db.execute(select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id))
     ).scalar_one_or_none()
     calibration_runs = (
-        await db.execute(
-            select(ProbeCalibrationRun)
-            .where(ProbeCalibrationRun.sector_id == sector_id)
-            .order_by(ProbeCalibrationRun.computed_at.desc())
-            .limit(10)
+        (
+            await db.execute(
+                select(ProbeCalibrationRun)
+                .where(ProbeCalibrationRun.sector_id == sector_id)
+                .order_by(ProbeCalibrationRun.computed_at.desc())
+                .limit(10)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     calibration_meta = soil_bounds.calibration or {}
     active_calibration = (
         {
@@ -1001,14 +1225,50 @@ async def build_sector_ai_context_v2(
     )
     gdd = asdict(gdd_status) if gdd_status else None
 
-    alert_rows = (
-        await db.execute(
-            select(Alert)
-            .where(Alert.sector_id == sector_id, Alert.is_active == True)  # noqa: E712
-            .order_by(Alert.created_at.desc())
-            .limit(10)
+    observation_rows = (
+        (
+            await db.execute(
+                select(FieldObservation)
+                .where(
+                    FieldObservation.sector_id == sector_id,
+                    or_(
+                        FieldObservation.expires_at.is_(None),
+                        FieldObservation.expires_at > now,
+                    ),
+                )
+                .order_by(FieldObservation.observed_at.desc())
+                .limit(5 if compact else 20)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    field_observations = [
+        {
+            "id": row.id,
+            "type": row.observation_type,
+            "text": row.text,
+            "structured_value": row.structured_value,
+            "observed_at": row.observed_at.isoformat(),
+            "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+            "verified": row.is_verified,
+            "source": "user_field_observation",
+        }
+        for row in observation_rows
+    ]
+
+    alert_rows = (
+        (
+            await db.execute(
+                select(Alert)
+                .where(Alert.sector_id == sector_id, Alert.is_active == True)  # noqa: E712
+                .order_by(Alert.created_at.desc())
+                .limit(10)
+            )
+        )
+        .scalars()
+        .all()
+    )
     alerts = [
         {
             "id": row.id,
@@ -1055,9 +1315,7 @@ async def build_sector_ai_context_v2(
             "deficit_factor": sector.deficit_factor,
         },
         plot=(
-            {"id": plot.id, "name": plot.name, "soil_texture": plot.soil_texture}
-            if plot
-            else None
+            {"id": plot.id, "name": plot.name, "soil_texture": plot.soil_texture} if plot else None
         ),
         farm=(
             {
@@ -1209,7 +1467,9 @@ async def build_sector_ai_context_v2(
 
     crop_state = _context_block(
         observed_at=decision_at or now_iso,
-        source="sector crop profile, GDD tracker, and recommendation snapshot",
+        source=(
+            "sector crop profile, GDD tracker, recommendation snapshot, and user field observations"
+        ),
         units={
             "root_depth_mature_m": "m",
             "root_depth_young_m": "m",
@@ -1230,6 +1490,7 @@ async def build_sector_ai_context_v2(
         ),
         gdd=gdd,
         stress_projection=snapshot.get("stress_projection"),
+        field_observations=field_observations,
     )
     calibration_block = _context_block(
         observed_at=(
@@ -1291,9 +1552,7 @@ async def build_sector_ai_context_v2(
     )
 
 
-async def _build_legacy_structured_agronomic_context(
-    sector_id: str, db: AsyncSession
-) -> dict:
+async def _build_legacy_structured_agronomic_context(sector_id: str, db: AsyncSession) -> dict:
     """Build a complete agronomic context dict for LLM grounding.
 
     Returns a JSON-serialisable dict covering every data surface the LLM is
@@ -1315,20 +1574,14 @@ async def _build_legacy_structured_agronomic_context(
     }
 
     crop_profile = (
-        await db.execute(
-            select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
-        )
+        await db.execute(select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id))
     ).scalar_one_or_none()
     irrigation_system = (
-        await db.execute(
-            select(IrrigationSystem).where(IrrigationSystem.sector_id == sector_id)
-        )
+        await db.execute(select(IrrigationSystem).where(IrrigationSystem.sector_id == sector_id))
     ).scalar_one_or_none()
 
     # Probes + per-depth diagnostics
-    probes = (
-        await db.execute(select(Probe).where(Probe.sector_id == sector_id))
-    ).scalars().all()
+    probes = (await db.execute(select(Probe).where(Probe.sector_id == sector_id))).scalars().all()
     probe_diagnostics: list[dict] = []
     for probe in probes:
         diag = await get_probe_diagnostics(probe.id, db)
@@ -1339,13 +1592,15 @@ async def _build_legacy_structured_agronomic_context(
     latest_readings = probe_live.get("depths", []) if probe_live else []
 
     water_events = await get_sector_water_events(sector_id, db, days=14)
-    weather = await get_weather_summary(
-        farm.id,
-        db,
-        plot_id=plot.id if plot else None,
-    ) if farm else {
-        "recent_observations": [], "forecast": []
-    }
+    weather = (
+        await get_weather_summary(
+            farm.id,
+            db,
+            plot_id=plot.id if plot else None,
+        )
+        if farm
+        else {"recent_observations": [], "forecast": []}
+    )
     water_balance = await get_sector_water_balance(sector_id, db)
     recs = await get_recommendation_history(sector_id, db)
 
@@ -1362,15 +1617,23 @@ async def _build_legacy_structured_agronomic_context(
     if not probes:
         known_limitations.append("Sector has no probes — no direct soil moisture signal.")
     if total_depths and stale_depths == total_depths:
-        known_limitations.append("All probe depths are stale; reasoning relies on water balance only.")
+        known_limitations.append(
+            "All probe depths are stale; reasoning relies on water balance only."
+        )
     if irrigation_system is None:
-        known_limitations.append("Irrigation system is not configured — applied-mm conversions use defaults.")
+        known_limitations.append(
+            "Irrigation system is not configured — applied-mm conversions use defaults."
+        )
     if crop_profile is None:
-        known_limitations.append("No sector crop profile attached — Kc and root depth fall back to defaults.")
+        known_limitations.append(
+            "No sector crop profile attached — Kc and root depth fall back to defaults."
+        )
     if not weather.get("recent_observations"):
         known_limitations.append("No recent weather observations available for this farm.")
     if not water_balance.get("available"):
-        known_limitations.append("No water-balance snapshot has been generated yet for this sector.")
+        known_limitations.append(
+            "No water-balance snapshot has been generated yet for this sector."
+        )
 
     confidence_inputs = {
         "fresh_depths": fresh_depths,
@@ -1404,7 +1667,8 @@ async def _build_legacy_structured_agronomic_context(
                 "location_lat": farm.location_lat,
                 "location_lon": farm.location_lon,
             }
-            if farm else None
+            if farm
+            else None
         ),
         "crop": (
             {
@@ -1415,7 +1679,8 @@ async def _build_legacy_structured_agronomic_context(
                 "stages": crop_profile.stages,
                 "is_customized": crop_profile.is_customized,
             }
-            if crop_profile else None
+            if crop_profile
+            else None
         ),
         "soil": (
             {
@@ -1425,7 +1690,8 @@ async def _build_legacy_structured_agronomic_context(
                 "stone_content_pct": plot.stone_content_pct,
                 "provenance": soil_provenance,
             }
-            if plot else None
+            if plot
+            else None
         ),
         "irrigation_system": (
             {
@@ -1435,7 +1701,8 @@ async def _build_legacy_structured_agronomic_context(
                 "distribution_uniformity": irrigation_system.distribution_uniformity,
                 "max_runtime_hours": irrigation_system.max_runtime_hours,
             }
-            if irrigation_system else None
+            if irrigation_system
+            else None
         ),
         "probe_summary": {
             "live": probe_live,
@@ -1530,36 +1797,42 @@ async def build_sector_change_context(
             return {"error": "sector_not_found", "sector_id": sector_id}
         raise
 
-    probes = (
-        await db.execute(select(Probe).where(Probe.sector_id == sector_id))
-    ).scalars().all()
+    probes = (await db.execute(select(Probe).where(Probe.sector_id == sector_id))).scalars().all()
 
     probe_changes: list[dict] = []
     for probe in probes:
         depths = (
-            await db.execute(select(ProbeDepth).where(ProbeDepth.probe_id == probe.id))
-        ).scalars().all()
+            (await db.execute(select(ProbeDepth).where(ProbeDepth.probe_id == probe.id)))
+            .scalars()
+            .all()
+        )
         for depth in sorted(depths, key=lambda d: d.depth_cm):
             rows = (
-                await db.execute(
-                    select(ProbeReading)
-                    .where(
-                        ProbeReading.probe_depth_id == depth.id,
-                        ProbeReading.timestamp >= since,
-                        ProbeReading.timestamp <= now,
-                        ProbeReading.unit == "vwc_m3m3",
+                (
+                    await db.execute(
+                        select(ProbeReading)
+                        .where(
+                            ProbeReading.probe_depth_id == depth.id,
+                            ProbeReading.timestamp >= since,
+                            ProbeReading.timestamp <= now,
+                            ProbeReading.unit == "vwc_m3m3",
+                        )
+                        .order_by(ProbeReading.timestamp)
                     )
-                    .order_by(ProbeReading.timestamp)
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if not rows:
-                probe_changes.append({
-                    "probe_id": probe.id,
-                    "probe_external_id": probe.external_id,
-                    "depth_cm": depth.depth_cm,
-                    "status": "no_readings_in_window",
-                    "data_status": depth.data_status,
-                })
+                probe_changes.append(
+                    {
+                        "probe_id": probe.id,
+                        "probe_external_id": probe.external_id,
+                        "depth_cm": depth.depth_cm,
+                        "status": "no_readings_in_window",
+                        "data_status": depth.data_status,
+                    }
+                )
                 continue
 
             previous_values = [_reading_value(r) for r in rows if _ensure_utc(r.timestamp) < split]
@@ -1569,46 +1842,58 @@ async def build_sector_change_context(
             first_value = _reading_value(rows[0])
             last_value = _reading_value(rows[-1])
 
-            probe_changes.append({
-                "probe_id": probe.id,
-                "probe_external_id": probe.external_id,
-                "depth_cm": depth.depth_cm,
-                "reading_count": len(rows),
-                "first_reading_at": _ensure_utc(rows[0].timestamp).isoformat(),
-                "last_reading_at": _ensure_utc(rows[-1].timestamp).isoformat(),
-                "first_vwc": round(first_value, 4) if first_value is not None else None,
-                "last_vwc": round(last_value, 4) if last_value is not None else None,
-                "delta_vwc": round(last_value - first_value, 4)
-                if first_value is not None and last_value is not None
-                else None,
-                "previous_half_avg_vwc": round(sum(previous_values) / len(previous_values), 4)
-                if previous_values else None,
-                "recent_half_avg_vwc": round(sum(recent_values) / len(recent_values), 4)
-                if recent_values else None,
-                "quality_counts": _quality_counts(rows),
-                "data_status": depth.data_status,
-            })
+            probe_changes.append(
+                {
+                    "probe_id": probe.id,
+                    "probe_external_id": probe.external_id,
+                    "depth_cm": depth.depth_cm,
+                    "reading_count": len(rows),
+                    "first_reading_at": _ensure_utc(rows[0].timestamp).isoformat(),
+                    "last_reading_at": _ensure_utc(rows[-1].timestamp).isoformat(),
+                    "first_vwc": round(first_value, 4) if first_value is not None else None,
+                    "last_vwc": round(last_value, 4) if last_value is not None else None,
+                    "delta_vwc": round(last_value - first_value, 4)
+                    if first_value is not None and last_value is not None
+                    else None,
+                    "previous_half_avg_vwc": round(sum(previous_values) / len(previous_values), 4)
+                    if previous_values
+                    else None,
+                    "recent_half_avg_vwc": round(sum(recent_values) / len(recent_values), 4)
+                    if recent_values
+                    else None,
+                    "quality_counts": _quality_counts(rows),
+                    "data_status": depth.data_status,
+                }
+            )
 
     water_events = (
-        await db.execute(
-            select(DetectedWaterEvent)
-            .where(
-                DetectedWaterEvent.sector_id == sector_id,
-                DetectedWaterEvent.timestamp >= since,
+        (
+            await db.execute(
+                select(DetectedWaterEvent)
+                .where(
+                    DetectedWaterEvent.sector_id == sector_id,
+                    DetectedWaterEvent.timestamp >= since,
+                )
+                .order_by(DetectedWaterEvent.timestamp.desc())
+                .limit(50)
             )
-            .order_by(DetectedWaterEvent.timestamp.desc())
-            .limit(50)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     recs = (
-        await db.execute(
-            select(Recommendation)
-            .where(Recommendation.sector_id == sector_id)
-            .order_by(Recommendation.generated_at.desc())
-            .limit(2)
+        (
+            await db.execute(
+                select(Recommendation)
+                .where(Recommendation.sector_id == sector_id)
+                .order_by(Recommendation.generated_at.desc())
+                .limit(2)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     latest_rec = recs[0] if recs else None
     previous_rec = recs[1] if len(recs) > 1 else None
 

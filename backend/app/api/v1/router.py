@@ -9,6 +9,7 @@ from app.api.v1 import (
     crop_profiles,
     dashboard,
     farms,
+    field_observations,
     flowmeter,
     flowmeter_reference,
     gdd,
@@ -33,6 +34,7 @@ _auth = [Depends(get_current_user)]
 
 router.include_router(auth.router)
 router.include_router(farms.router, dependencies=_auth)
+router.include_router(field_observations.router, dependencies=_auth)
 router.include_router(plots.router, dependencies=_auth)
 router.include_router(sectors.router, dependencies=_auth)
 router.include_router(probes.router, dependencies=_auth)

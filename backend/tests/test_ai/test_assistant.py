@@ -232,9 +232,7 @@ async def test_chat_returns_nonempty(assistant):
 async def test_chat_with_sector_id_uses_sector_context(mock_builder, assistant):
     db = AsyncMock()
     await assistant.chat("farm-001", "Explica a recomendação", db, sector_id="sec-001")
-    mock_builder.build_sector_ai_context.assert_called_once_with(
-        "sec-001", db, compact=False
-    )
+    mock_builder.build_sector_ai_context.assert_called_once_with("sec-001", db, compact=False)
     mock_builder.build_farm_context.assert_not_called()
 
 
@@ -252,9 +250,7 @@ async def test_sector_diagnosis_uses_full_v2_context(mock_builder, assistant):
 
     await assistant.diagnose_sector("sec-001", db)
 
-    mock_builder.build_sector_ai_context.assert_called_once_with(
-        "sec-001", db, compact=False
-    )
+    mock_builder.build_sector_ai_context.assert_called_once_with("sec-001", db, compact=False)
 
 
 @pytest.mark.asyncio
@@ -304,8 +300,12 @@ async def test_interpret_probe_structured_evidence_no_depth_pattern_labels(assis
         result = await assistant.interpret_probe_patterns_structured("probe-001", db)
 
     anti_pattern_values = {
-        "Sinal Estável", "Equilíbrio hídrico", "Além das raízes",
-        "Solo saturado", "Resposta fraca à rega", "Drenagem rápida",
+        "Sinal Estável",
+        "Equilíbrio hídrico",
+        "Além das raízes",
+        "Solo saturado",
+        "Resposta fraca à rega",
+        "Drenagem rápida",
     }
     for ev in result.evidence:
         # A source like "depths[0]" paired with a bare pattern-name value is the anti-pattern
@@ -320,7 +320,9 @@ async def test_interpret_probe_no_deficit_overrides_urgent_irrigation_advice(ass
     """When the engine says skip/defer, the guard neutralises the irrigation advice
     but PRESERVES the LLM's depth description (summary + depth evidence)."""
 
-    depth_summary = "Humidade elevada à superfície mas crítica a 50 cm, com consumo nas camadas fundas."
+    depth_summary = (
+        "Humidade elevada à superfície mas crítica a 50 cm, com consumo nas camadas fundas."
+    )
 
     async def _bad_model_output(system_prompt, user_message, schema_model, **kwargs):
         return AgronomicInterpretation(
@@ -347,15 +349,11 @@ async def test_interpret_probe_no_deficit_overrides_urgent_irrigation_advice(ass
     assert "Não regues agora" in result.irrigation_advice
     assert all("urgente" not in action.lower() for action in result.recommended_actions)
     # The engine decision is surfaced as evidence...
-    assert any(
-        ev.source == "probe_signal.latest_recommendation.action"
-        for ev in result.evidence
-    )
+    assert any(ev.source == "probe_signal.latest_recommendation.action" for ev in result.evidence)
     # ...and the LLM's depth description is preserved (not replaced by generic text).
     assert result.summary == depth_summary
     assert any(
-        ev.source == "probe_signal.depths[1].humidade_actual"
-        and "humidade crítica" in ev.value
+        ev.source == "probe_signal.depths[1].humidade_actual" and "humidade crítica" in ev.value
         for ev in result.evidence
     )
 
@@ -378,7 +376,9 @@ def test_render_probe_interpretation_includes_summary_advice_evidence_and_action
 
     rendered = assistant.render_probe_interpretation(interpretation)
 
-    assert rendered.splitlines()[0] == "• Perfil da sonda: Sonda mostra humidade estável e adequada."
+    assert (
+        rendered.splitlines()[0] == "• Perfil da sonda: Sonda mostra humidade estável e adequada."
+    )
     assert "• Conselho: Não há necessidade de regar agora." in rendered
     assert "• Sinais observados: humidade adequada; estável" in rendered
     assert "• Próxima verificação: Monitorizar a tendência nas próximas 24h." in rendered
@@ -395,9 +395,14 @@ async def test_complete_structured_uses_native_parse(monkeypatch):
     async def spy_complete_structured(system, user, schema, **kw):
         called["hit"] = True
         return AgronomicInterpretation(
-            summary="ok", risk_level="low", irrigation_advice="monitorizar",
-            evidence=[], missing_data=[], confidence_score=0.8,
-            confidence_explanation="teste", recommended_actions=[],
+            summary="ok",
+            risk_level="low",
+            irrigation_advice="monitorizar",
+            evidence=[],
+            missing_data=[],
+            confidence_score=0.8,
+            confidence_explanation="teste",
+            recommended_actions=[],
         )
 
     monkeypatch.setattr(client, "complete_structured", spy_complete_structured)
@@ -405,7 +410,9 @@ async def test_complete_structured_uses_native_parse(monkeypatch):
         context_builder=AssistantContextBuilder(), client=client, language="pt"
     )
     result = await assistant._complete_structured(
-        system_prompt="x", user_message="y", context={"known_limitations": []},
+        system_prompt="x",
+        user_message="y",
+        context={"known_limitations": []},
     )
     assert called.get("hit") is True
     assert result.summary == "ok"
@@ -460,9 +467,14 @@ async def test_complete_structured_injects_pt_output_contract(monkeypatch):
     async def spy(system, user, schema, **kw):
         captured["system"] = system
         return AgronomicInterpretation(
-            summary="ok", risk_level="low", irrigation_advice="monitorizar",
-            evidence=[], missing_data=[], confidence_score=0.8,
-            confidence_explanation="teste", recommended_actions=[],
+            summary="ok",
+            risk_level="low",
+            irrigation_advice="monitorizar",
+            evidence=[],
+            missing_data=[],
+            confidence_score=0.8,
+            confidence_explanation="teste",
+            recommended_actions=[],
         )
 
     monkeypatch.setattr(client, "complete_structured", spy)
@@ -497,9 +509,13 @@ async def test_complete_structured_fallback_low_confidence_on_error(monkeypatch)
         context_builder=AssistantContextBuilder(), client=client, language="pt"
     )
     result = await assistant._complete_structured(
-        system_prompt="x", user_message="y", context={"known_limitations": ["sem sondas"]},
+        system_prompt="x",
+        user_message="y",
+        context={"known_limitations": ["sem sondas"]},
     )
     assert result.confidence_score <= 0.3
+    assert result.degraded is True
+    assert result.error_code == "llm_unavailable"
 
 
 @pytest.mark.parametrize("language", ["pt", "en"])

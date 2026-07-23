@@ -28,21 +28,25 @@ async def evaluate_recent_for_farm(farm_id: str, db: AsyncSession) -> int:
     """Upsert outcomes for recent farmer-accepted recommendations."""
     since = datetime.now(UTC) - timedelta(days=_LOOKBACK_DAYS)
     recommendations = (
-        await db.execute(
-            select(Recommendation)
-            .join(Sector, Recommendation.sector_id == Sector.id)
-            .join(Plot, Sector.plot_id == Plot.id)
-            .join(Farm, Plot.farm_id == Farm.id)
-            .where(
-                Plot.farm_id == farm_id,
-                Farm.is_archived.is_(False),
-                Plot.is_archived.is_(False),
-                Sector.is_archived.is_(False),
-                Recommendation.is_accepted.is_(True),
-                Recommendation.generated_at >= since,
+        (
+            await db.execute(
+                select(Recommendation)
+                .join(Sector, Recommendation.sector_id == Sector.id)
+                .join(Plot, Sector.plot_id == Plot.id)
+                .join(Farm, Plot.farm_id == Farm.id)
+                .where(
+                    Plot.farm_id == farm_id,
+                    Farm.is_archived.is_(False),
+                    Plot.is_archived.is_(False),
+                    Sector.is_archived.is_(False),
+                    Recommendation.is_accepted.is_(True),
+                    Recommendation.generated_at >= since,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     evaluated = 0
     for recommendation in recommendations:
@@ -99,11 +103,7 @@ async def evaluate_recommendation(
     actual_mm = (
         manual_event.applied_mm
         if manual_event is not None
-        else (
-            round(detected_event.total_m3_ha / 10.0, 3)
-            if detected_event is not None
-            else None
-        )
+        else (round(detected_event.total_m3_ha / 10.0, 3) if detected_event is not None else None)
     )
 
     now = datetime.now(UTC)
@@ -119,8 +119,9 @@ async def evaluate_recommendation(
             dose_error_pct = round(dose_error_mm / recommended_mm * 100, 2)
 
     pre_vwc = post_vwc = response_delta = None
+    response_by_depth: list[dict] = []
     if event_start is not None:
-        pre_vwc, post_vwc = await _probe_response(
+        pre_vwc, post_vwc, response_by_depth = await _probe_response(
             str(recommendation.sector_id), event_start, db
         )
         if pre_vwc is not None and post_vwc is not None:
@@ -167,6 +168,7 @@ async def evaluate_recommendation(
             if manual_event
             else ("flowmeter_detected_event" if detected_event else "none")
         ),
+        "probe_response_by_depth": response_by_depth,
     }
     await db.flush()
     return outcome
@@ -176,23 +178,28 @@ async def _probe_response(
     sector_id: str,
     event_start: datetime,
     db: AsyncSession,
-) -> tuple[float | None, float | None]:
+) -> tuple[float | None, float | None, list[dict]]:
     """Compare per-depth VWC immediately before and 2–24h after irrigation."""
     depths = (
-        await db.execute(
-            select(ProbeDepth)
-            .join(Probe, ProbeDepth.probe_id == Probe.id)
-            .where(
-                Probe.sector_id == sector_id,
-                ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
+        (
+            await db.execute(
+                select(ProbeDepth)
+                .join(Probe, ProbeDepth.probe_id == Probe.id)
+                .where(
+                    Probe.sector_id == sector_id,
+                    ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if not depths:
-        return None, None
+        return None, None, []
 
     before_values: list[float] = []
     after_values: list[float] = []
+    by_depth: list[dict] = []
     for depth in depths:
         before = (
             await db.execute(
@@ -224,8 +231,27 @@ async def _probe_response(
             before_values.append(before.calibrated_value)
         if after and after.calibrated_value is not None:
             after_values.append(after.calibrated_value)
+        if (
+            before
+            and after
+            and before.calibrated_value is not None
+            and after.calibrated_value is not None
+        ):
+            delta = round(after.calibrated_value - before.calibrated_value, 5)
+            by_depth.append(
+                {
+                    "depth_cm": depth.depth_cm,
+                    "delta_vwc": delta,
+                    "response": (
+                        "increase"
+                        if delta > 0.003
+                        else ("decrease" if delta < -0.003 else "stable")
+                    ),
+                }
+            )
 
     return (
         round(sum(before_values) / len(before_values), 5) if before_values else None,
         round(sum(after_values) / len(after_values), 5) if after_values else None,
+        by_depth,
     )

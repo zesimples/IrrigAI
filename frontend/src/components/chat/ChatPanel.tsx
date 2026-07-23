@@ -5,10 +5,13 @@ import { chatApi, recommendationsApi, sectorsApi, calibrationApi } from "@/lib/a
 import type { ProposedAction } from "@/types";
 
 interface Message {
+  id?: string;
   role: "user" | "assistant";
   text: string;
   proposedAction?: ProposedAction | null;
   actionResolved?: boolean;
+  degraded?: boolean;
+  feedback?: -1 | 1;
 }
 
 interface QuickAction {
@@ -27,7 +30,40 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (typeof chatApi.conversations !== "function") return;
+    chatApi
+      .conversations(farmId)
+      .then((rows) =>
+        rows.find((row) => row.sector_id === (sectorId ?? null)),
+      )
+      .then((conversation) => {
+        if (!conversation || cancelled) return;
+        return chatApi.conversation(farmId, conversation.id).then((detail) => {
+          if (cancelled) return;
+          setConversationId(detail.id);
+          setMessages(
+            detail.messages.map((message) => ({
+              id: message.id,
+              role: message.role,
+              text: message.content,
+              proposedAction: message.proposed_action,
+              degraded: message.degraded,
+            })),
+          );
+        });
+      })
+      .catch(() => {
+        // Chat history is helpful but non-blocking.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [farmId, sectorId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -91,17 +127,63 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
     if (!text || loading) return;
     setInput("");
     pushUser(text);
+    setMessages((prev) => [...prev, { role: "assistant", text: "" }]);
     setLoading(true);
     try {
-      const history = messages.map((m) => ({ role: m.role, content: m.text }));
-      const r = await chatApi.chat(farmId, text, sectorId, history);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: r.reply, proposedAction: r.proposed_action },
-      ]);
+      const r = await chatApi.streamChat(
+        farmId,
+        {
+          message: text,
+          sector_id: sectorId ?? null,
+          conversation_id: conversationId,
+        },
+        {
+          onConversation: (nextConversationId, messageId) => {
+            setConversationId(nextConversationId);
+            setMessages((prev) =>
+              prev.map((message, index) =>
+                index === prev.length - 1 ? { ...message, id: messageId } : message,
+              ),
+            );
+          },
+          onDelta: (delta) => {
+            setMessages((prev) =>
+              prev.map((message, index) =>
+                index === prev.length - 1
+                  ? { ...message, text: message.text + delta }
+                  : message,
+              ),
+            );
+          },
+        },
+      );
+      setConversationId(r.conversation_id);
+      setMessages((prev) =>
+        prev.map((message, index) =>
+          index === prev.length - 1
+            ? {
+                ...message,
+                id: r.message_id,
+                text: r.reply || message.text,
+                proposedAction: r.proposed_action,
+                degraded: r.degraded,
+              }
+            : message,
+        ),
+      );
     } catch (e) {
       const detail = e instanceof Error ? e.message : "Erro desconhecido";
-      pushAssistant(`Erro ao contactar o assistente: ${detail}. Tente novamente.`);
+      setMessages((prev) =>
+        prev.map((message, index) =>
+          index === prev.length - 1
+            ? {
+                ...message,
+                text: `Erro ao contactar o assistente: ${detail}. Tente novamente.`,
+                degraded: true,
+              }
+            : message,
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -158,6 +240,30 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
     pushAssistant("Acção cancelada.");
   }
 
+  async function sendFeedback(index: number, message: Message, rating: -1 | 1) {
+    if (!message.id || message.feedback) return;
+    setMessages((prev) =>
+      prev.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, feedback: rating } : item,
+      ),
+    );
+    try {
+      await chatApi.feedback({
+        surface: "chat",
+        rating,
+        farm_id: farmId,
+        chat_message_id: message.id,
+        entity_id: sectorId,
+      });
+    } catch {
+      setMessages((prev) =>
+        prev.map((item, itemIndex) =>
+          itemIndex === index ? { ...item, feedback: undefined } : item,
+        ),
+      );
+    }
+  }
+
   return (
     <div className="fixed bottom-20 right-4 z-50 flex h-[min(540px,calc(100vh-7rem))] w-[min(24rem,calc(100vw-2rem))] flex-col rounded-[1.75rem] border border-slate-200 bg-white shadow-2xl sm:right-6">
       {/* Header */}
@@ -166,13 +272,27 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
           <p className="text-sm font-semibold text-white">Assistente IrrigAI</p>
           <p className="text-xs text-emerald-200">Dados da exploração em contexto</p>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-full p-1 text-white hover:bg-emerald-600"
-          aria-label="Fechar"
-        >
-          ✕
-        </button>
+        <div className="flex items-center gap-1">
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setConversationId(null);
+                setMessages([]);
+              }}
+              className="rounded-full px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-600"
+            >
+              Nova
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="rounded-full p-1 text-white hover:bg-emerald-600"
+            aria-label="Fechar"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {/* Quick actions */}
@@ -208,8 +328,13 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
                 msg.role === "user" ? "bg-emerald-700 text-white" : "bg-slate-100 text-slate-800"
               }`}
             >
-              {msg.text}
+              {msg.text || "A preparar resposta…"}
             </div>
+            {msg.role === "assistant" && msg.degraded && (
+              <p className="mt-1 max-w-[85%] text-[10px] text-amber-700">
+                Resposta de contingência — o serviço de IA não estava disponível.
+              </p>
+            )}
             {msg.proposedAction && !msg.actionResolved && (
               <div className="mt-2 max-w-[85%] rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
                 <p className="mb-2 font-medium text-amber-900">{msg.proposedAction.summary}</p>
@@ -229,6 +354,30 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
                     Cancelar
                   </button>
                 </div>
+              </div>
+            )}
+            {msg.role === "assistant" && msg.id && msg.text && (
+              <div className="mt-1 flex gap-1">
+                <button
+                  type="button"
+                  aria-label="Resposta útil"
+                  onClick={() => sendFeedback(i, msg, 1)}
+                  className={`rounded px-1.5 py-0.5 text-xs ${
+                    msg.feedback === 1 ? "bg-emerald-100" : "text-slate-400"
+                  }`}
+                >
+                  👍
+                </button>
+                <button
+                  type="button"
+                  aria-label="Resposta pouco útil"
+                  onClick={() => sendFeedback(i, msg, -1)}
+                  className={`rounded px-1.5 py-0.5 text-xs ${
+                    msg.feedback === -1 ? "bg-amber-100" : "text-slate-400"
+                  }`}
+                >
+                  👎
+                </button>
               </div>
             )}
           </div>

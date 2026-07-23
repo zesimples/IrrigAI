@@ -40,4 +40,16 @@ describe("StructuredAIResult", () => {
     expect(screen.queryByText("ev_123456789abc")).not.toBeInTheDocument();
     expect(screen.queryByText("water_balance.depletion_mm")).not.toBeInTheDocument();
   });
+
+  it("surfaces a degraded deterministic fallback honestly", () => {
+    render(
+      <StructuredAIResult
+        interpretation={{ ...interpretation, degraded: true }}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "síntese de contingência",
+    );
+  });
 });

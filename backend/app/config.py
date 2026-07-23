@@ -39,9 +39,9 @@ class Settings(BaseSettings):
 
     # IrriWatch (Hydrosat) — used when PROBE_PROVIDER=irriwatch or WEATHER_PROVIDER=irriwatch
     IRRIWATCH_BASE_URL: str = "https://api.irriwatch.hydrosat.com"
-    IRRIWATCH_CLIENT_ID: str = ""      # API Key shown in IrriWatch portal
+    IRRIWATCH_CLIENT_ID: str = ""  # API Key shown in IrriWatch portal
     IRRIWATCH_CLIENT_SECRET: str = ""  # Password shown in IrriWatch portal
-    IRRIWATCH_COMPANY_UUID: str = ""   # Company UUID (see /api/v1/company after login)
+    IRRIWATCH_COMPANY_UUID: str = ""  # Company UUID (see /api/v1/company after login)
 
     # MyIrrigation — used when PROBE_PROVIDER=myirrigation or WEATHER_PROVIDER=myirrigation
     MYIRRIGATION_BASE_URL: str = "https://api.myirrigation.eu/api/v1"
@@ -49,13 +49,20 @@ class Settings(BaseSettings):
     MYIRRIGATION_PASSWORD: str = ""
     MYIRRIGATION_CLIENT_ID: str = ""
     MYIRRIGATION_CLIENT_SECRET: str = ""
-    MYIRRIGATION_PROJECT_ID: str = ""     # for weather forecast endpoints; auto-detected if blank
+    MYIRRIGATION_PROJECT_ID: str = ""  # for weather forecast endpoints; auto-detected if blank
     MYIRRIGATION_WEATHER_DEVICE_ID: str = ""  # iMetos station device ID for observations/ET0
 
     # LLM — OpenAI ChatGPT
     LLM_PROVIDER: Literal["openai", "mock"] = "openai"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL_CHAT: str = ""
+    OPENAI_MODEL_STRUCTURED: str = ""
+    OPENAI_MODEL_SUMMARY: str = ""
+    LLM_TIMEOUT_SECONDS: float = 30.0
+    LLM_MAX_RETRIES: int = 2
+    LLM_DAILY_REQUEST_LIMIT: int = 200
+    LLM_FARM_SUMMARY_CACHE_TTL_SECONDS: int = 900
 
     # Observability
     SENTRY_DSN: str = ""
@@ -91,9 +98,7 @@ def check_production_security(settings: Settings) -> None:
             "ENCRYPTION_KEY."
         )
     if settings.SECRET_KEY == _INSECURE_SECRET_KEY:
-        problems.append(
-            "SECRET_KEY is still the placeholder default — set a unique secret."
-        )
+        problems.append("SECRET_KEY is still the placeholder default — set a unique secret.")
     if problems:
         raise RuntimeError(
             "Insecure production configuration (set DEBUG=true only for local/dev):\n- "

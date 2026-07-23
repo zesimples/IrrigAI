@@ -14,7 +14,7 @@ import pytest
 from app.ai import prompt_templates
 from app.ai.assistant import IrrigationAssistant
 from app.ai.context_builder import AssistantContextBuilder
-from app.ai.openai_client import OpenAIChatClient
+from app.ai.openai_client import OpenAIChatClient, get_chat_client
 from app.config import Settings
 from app.schemas.ai import AgronomicInterpretation
 from tests.ai_eval.harness import (
@@ -46,7 +46,9 @@ def live_client() -> OpenAIChatClient:
         pytest.skip("live AI eval requires LLM_PROVIDER=openai")
     if not settings.OPENAI_API_KEY:
         pytest.skip("live AI eval skipped: OPENAI_API_KEY is not configured")
-    return OpenAIChatClient(settings.OPENAI_API_KEY, settings.OPENAI_MODEL)
+    client = get_chat_client(settings)
+    assert isinstance(client, OpenAIChatClient)
+    return client
 
 
 def _prompt_for(case: dict) -> tuple[str, str]:
@@ -73,15 +75,18 @@ async def test_live_golden_context(case: dict, live_client: OpenAIChatClient) ->
     system_prompt, user_message = _prompt_for(case)
     assistant = IrrigationAssistant(AssistantContextBuilder(), live_client, "pt")
     evidence_context = (
-        {"probe_signal": case["context"]}
-        if case["surface"] == "probe"
-        else case["context"]
+        {"probe_signal": case["context"]} if case["surface"] == "probe" else case["context"]
     )
     result = await assistant._complete_structured(
         system_prompt=system_prompt,
         user_message=user_message,
         context=evidence_context,
         max_tokens=900,
+        surface={
+            "recommendation": "recommendation",
+            "probe": "probe_diagnosis",
+            "farm": "farm_summary",
+        }[case["surface"]],
     )
     assert isinstance(result, AgronomicInterpretation)
 

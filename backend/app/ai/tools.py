@@ -98,6 +98,75 @@ TOOL_SPECS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "get_outcomes",
+            "description": (
+                "Resultados determinísticos recentes que comparam a recomendação, "
+                "a dotação realmente aplicada e a resposta da sonda."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"sector_id": {"type": "string"}},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_calibration_status",
+            "description": (
+                "Limites de solo efectivos, calibração activa e candidatos de "
+                "calibração pendentes para um setor."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"sector_id": {"type": "string"}},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_recommendation_history",
+            "description": "Histórico recente de recomendações determinísticas de um setor.",
+            "parameters": {
+                "type": "object",
+                "properties": {"sector_id": {"type": "string"}},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_flowmeter_summary",
+            "description": (
+                "Execução de rega recente: eventos manuais, detetados por sonda e "
+                "detetados pelo caudalímetro, incluindo a dotação habitual."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"sector_id": {"type": "string"}},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_stress_projection",
+            "description": ("Projeção determinística do tempo até ao limiar de stress hídrico."),
+            "parameters": {
+                "type": "object",
+                "properties": {"sector_id": {"type": "string"}},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_override",
             "description": "Propõe substituir a recomendação de um setor (NÃO executa). Requer recommendation_id.",
             "parameters": {
@@ -183,23 +252,39 @@ async def execute_tool(
         if name == "get_farm_overview":
             return await _get_farm_overview(_resolve(args, scope, "farm_id"), access, db)
         if name == "get_sector_status":
-            return await _get_sector_status(
-                _resolve(args, scope, "sector_id"), access, db, scope
-            )
+            return await _get_sector_status(_resolve(args, scope, "sector_id"), access, db, scope)
         if name == "get_probe_readings":
             return await _get_probe_readings(
                 _resolve(args, scope, "sector_id"),
-                args.get("window_hours", 72),
+                _bounded_int(args.get("window_hours"), default=72, minimum=1, maximum=720),
                 access,
                 db,
                 scope,
             )
         if name == "get_water_events":
             return await _get_water_events(
-                _resolve(args, scope, "sector_id"), args.get("days", 14), access, db, scope
+                _resolve(args, scope, "sector_id"),
+                _bounded_int(args.get("days"), default=14, minimum=1, maximum=90),
+                access,
+                db,
+                scope,
             )
         if name == "get_weather":
             return await _get_weather(_resolve(args, scope, "farm_id"), access, db)
+        if name in {
+            "get_outcomes",
+            "get_calibration_status",
+            "get_recommendation_history",
+            "get_flowmeter_summary",
+            "get_stress_projection",
+        }:
+            return await _get_sector_context_block(
+                name,
+                _resolve(args, scope, "sector_id"),
+                access,
+                db,
+                scope,
+            )
         if name.startswith("propose_"):
             return await _propose(name, args, access, db, scope)
         return {"error": f"unknown_tool:{name}"}
@@ -217,13 +302,15 @@ async def _get_farm_overview(farm_id, access, db) -> dict:
         depletion_pct = None
         if s.rootzone_depletion_mm is not None and s.rootzone_taw_mm:
             depletion_pct = round(s.rootzone_depletion_mm / s.rootzone_taw_mm * 100, 1)
-        sectors.append({
-            "sector_id": s.sector_id,
-            "name": s.sector_name,
-            "action": s.recommendation_action,
-            "depletion_pct": depletion_pct,
-            "confidence": s.confidence_level,
-        })
+        sectors.append(
+            {
+                "sector_id": s.sector_id,
+                "name": s.sector_name,
+                "action": s.recommendation_action,
+                "depletion_pct": depletion_pct,
+                "confidence": s.confidence_level,
+            }
+        )
     return {"farm": ctx.farm_name, "sectors": sectors, "active_alerts": ctx.total_active_alerts}
 
 
@@ -282,8 +369,45 @@ async def _get_weather(farm_id, access, db) -> dict:
     return await get_weather_summary(farm_id, db)
 
 
+async def _get_sector_context_block(name, sector_id, access, db, scope) -> dict:
+    if not sector_id:
+        return {"error": "missing_sector_id"}
+    await _require_sector_scope(sector_id, access, scope)
+    context = (
+        await AssistantContextBuilder().build_sector_ai_context(
+            sector_id,
+            db,
+            compact=False,
+        )
+    ).to_dict()
+    if name == "get_outcomes":
+        return {"outcomes": context["outcomes"]}
+    if name == "get_calibration_status":
+        return {"calibration": context["calibration"]}
+    if name == "get_recommendation_history":
+        return {"recommendation_history": context["engine_decision"].get("history", [])}
+    if name == "get_flowmeter_summary":
+        return {"irrigation_execution": context["irrigation_execution"]}
+    return {
+        "stress_projection": context["crop_state"].get("stress_projection"),
+        "water_balance": context["water_balance"],
+    }
+
+
+def _bounded_int(value, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(parsed, maximum))
+
+
 async def _propose(name, args, access, db, scope) -> dict:
-    if name in ("propose_override", "propose_accept_recommendation", "propose_reject_recommendation"):
+    if name in (
+        "propose_override",
+        "propose_accept_recommendation",
+        "propose_reject_recommendation",
+    ):
         rec_id = args.get("recommendation_id")
         if not rec_id:
             return {"error": "missing_recommendation_id"}

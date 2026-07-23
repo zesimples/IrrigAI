@@ -6,7 +6,12 @@ import { ChatPanel } from "./ChatPanel";
 window.HTMLElement.prototype.scrollIntoView = vi.fn() as typeof window.HTMLElement.prototype.scrollIntoView;
 
 vi.mock("@/lib/api", () => ({
-  chatApi: { chat: vi.fn() },
+  chatApi: {
+    streamChat: vi.fn(),
+    conversations: vi.fn().mockResolvedValue([]),
+    conversation: vi.fn(),
+    feedback: vi.fn(),
+  },
   recommendationsApi: { override: vi.fn(), accept: vi.fn(), reject: vi.fn() },
   sectorsApi: { generateRecommendation: vi.fn() },
   calibrationApi: { run: vi.fn() },
@@ -17,20 +22,51 @@ import { chatApi, calibrationApi, sectorsApi } from "@/lib/api";
 describe("ChatPanel", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it("sends history with the message", async () => {
-    (chatApi.chat as any).mockResolvedValue({ reply: "olá!", proposed_action: null });
+  it("streams the message with server-side conversation scope", async () => {
+    (chatApi.streamChat as any).mockImplementation(
+      async (_farmId: string, _body: unknown, callbacks: { onDelta: (text: string) => void }) => {
+        callbacks.onDelta("olá!");
+        return {
+          reply: "olá!",
+          conversation_id: "conv-1",
+          message_id: "msg-1",
+          proposed_action: null,
+          degraded: false,
+          model_name: "mock",
+        };
+      },
+    );
     render(<ChatPanel farmId="f1" onClose={() => {}} />);
     expect(screen.queryByText(/Powered by GPT-4o/i)).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "primeira" } });
     fireEvent.click(screen.getByLabelText("Enviar"));
-    await waitFor(() => expect(chatApi.chat).toHaveBeenCalledWith("f1", "primeira", undefined, []));
+    await waitFor(() =>
+      expect(chatApi.streamChat).toHaveBeenCalledWith(
+        "f1",
+        {
+          message: "primeira",
+          sector_id: null,
+          conversation_id: null,
+        },
+        expect.any(Object),
+      ),
+    );
   });
 
   it("renders a confirm card and dispatches on confirm", async () => {
-    (chatApi.chat as any).mockResolvedValue({
-      reply: "Proponho calibrar.",
-      proposed_action: { type: "run_calibration", summary: "Correr a calibração inteligente.", sector_id: "sec-9", params: {} },
-    });
+    (chatApi.streamChat as any).mockImplementation(
+      async (_farmId: string, _body: unknown, callbacks: { onDelta: (text: string) => void }) => {
+        callbacks.onDelta("Proponho calibrar.");
+        return {
+          reply: "Proponho calibrar.",
+          conversation_id: "conv-1",
+          message_id: "msg-1",
+          proposed_action: { type: "run_calibration", summary: "Correr a calibração inteligente.", sector_id: "sec-9", params: {} },
+          degraded: false,
+          model_name: "mock",
+        };
+      },
+    );
     (calibrationApi.run as any).mockResolvedValue({});
     render(<ChatPanel farmId="f1" sectorId="sec-9" onClose={() => {}} />);
     fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "recalibrar" } });
@@ -41,10 +77,19 @@ describe("ChatPanel", () => {
   });
 
   it("dispatches regenerate_recommendation via sectorsApi", async () => {
-    (chatApi.chat as any).mockResolvedValue({
-      reply: "Vou gerar uma nova recomendação.",
-      proposed_action: { type: "regenerate_recommendation", summary: "Gerar nova recomendação.", sector_id: "sec-9", params: {} },
-    });
+    (chatApi.streamChat as any).mockImplementation(
+      async (_farmId: string, _body: unknown, callbacks: { onDelta: (text: string) => void }) => {
+        callbacks.onDelta("Vou gerar uma nova recomendação.");
+        return {
+          reply: "Vou gerar uma nova recomendação.",
+          conversation_id: "conv-1",
+          message_id: "msg-1",
+          proposed_action: { type: "regenerate_recommendation", summary: "Gerar nova recomendação.", sector_id: "sec-9", params: {} },
+          degraded: false,
+          model_name: "mock",
+        };
+      },
+    );
     (sectorsApi.generateRecommendation as any).mockResolvedValue({});
     render(<ChatPanel farmId="f1" sectorId="sec-9" onClose={() => {}} />);
     fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "nova recomendação" } });

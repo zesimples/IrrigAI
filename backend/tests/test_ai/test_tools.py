@@ -14,6 +14,11 @@ from app.ai.tools import TOOL_SPECS, ToolScope, execute_tool
 def test_tool_specs_shape():
     names = {t["function"]["name"] for t in TOOL_SPECS}
     assert "get_sector_status" in names
+    assert "get_outcomes" in names
+    assert "get_calibration_status" in names
+    assert "get_recommendation_history" in names
+    assert "get_flowmeter_summary" in names
+    assert "get_stress_projection" in names
     assert "propose_override" in names
     for t in TOOL_SPECS:
         assert t["type"] == "function"
@@ -26,8 +31,11 @@ async def test_read_tool_access_denied_returns_error():
     access.sector_in_farm.side_effect = HTTPException(status_code=404)
     db = AsyncMock()
     out = await execute_tool(
-        "get_sector_status", {"sector_id": "foreign"},
-        access=access, db=db, scope=ToolScope(farm_id="f1", sector_id=None),
+        "get_sector_status",
+        {"sector_id": "foreign"},
+        access=access,
+        db=db,
+        scope=ToolScope(farm_id="f1", sector_id=None),
     )
     assert out == {"error": "not_found_or_forbidden"}
 
@@ -79,7 +87,9 @@ async def test_propose_override_no_mutation_and_validates_access():
     out = await execute_tool(
         "propose_override",
         {"recommendation_id": "rec-1", "depth_mm": 15, "reason": "campo seco"},
-        access=access, db=db, scope=ToolScope(farm_id="f1", sector_id="sec-1"),
+        access=access,
+        db=db,
+        scope=ToolScope(farm_id="f1", sector_id="sec-1"),
     )
     assert out["status"] == "awaiting_confirmation"
     pa = out["proposed_action"]
@@ -97,7 +107,9 @@ async def test_propose_override_access_denied_returns_error():
     out = await execute_tool(
         "propose_override",
         {"recommendation_id": "foreign", "depth_mm": 15, "reason": "x"},
-        access=access, db=db, scope=ToolScope(farm_id="f1", sector_id="sec-1"),
+        access=access,
+        db=db,
+        scope=ToolScope(farm_id="f1", sector_id="sec-1"),
     )
     assert out == {"error": "not_found_or_forbidden"}
     db.commit.assert_not_called()
@@ -109,8 +121,11 @@ async def test_propose_run_calibration_uses_scope_sector():
     access.sector.return_value = object()
     db = AsyncMock()
     out = await execute_tool(
-        "propose_run_calibration", {},
-        access=access, db=db, scope=ToolScope(farm_id="f1", sector_id="sec-9"),
+        "propose_run_calibration",
+        {},
+        access=access,
+        db=db,
+        scope=ToolScope(farm_id="f1", sector_id="sec-9"),
     )
     assert out["proposed_action"]["type"] == "run_calibration"
     assert out["proposed_action"]["sector_id"] == "sec-9"

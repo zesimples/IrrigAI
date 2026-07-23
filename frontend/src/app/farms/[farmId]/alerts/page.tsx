@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { alertsApi } from "@/lib/api";
-import type { Alert } from "@/types";
+import { StructuredAIResult } from "@/components/ai/StructuredAIResult";
+import { alertsApi, chatApi } from "@/lib/api";
+import type { AgronomicInterpretation, Alert } from "@/types";
 import { Button } from "@/components/ui/button";
 import { AppHeader } from "@/components/ui/AppHeader";
 import {
@@ -51,6 +52,10 @@ export default function AlertsPage({ params }: Props) {
   const [resolving, setResolving] = useState<string | null>(null);
   const [resolvingAll, setResolvingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [explaining, setExplaining] = useState<string | null>(null);
+  const [explanations, setExplanations] = useState<
+    Record<string, AgronomicInterpretation>
+  >({});
 
   async function load() {
     try {
@@ -85,6 +90,21 @@ export default function AlertsPage({ params }: Props) {
       setAlerts([]);
     } finally {
       setResolvingAll(false);
+    }
+  }
+
+  async function explain(alertId: string) {
+    setExplaining(alertId);
+    try {
+      const response = await chatApi.explainAlert(alertId);
+      if (response.structured) {
+        setExplanations((current) => ({
+          ...current,
+          [alertId]: response.structured!,
+        }));
+      }
+    } finally {
+      setExplaining(null);
     }
   }
 
@@ -201,6 +221,14 @@ export default function AlertsPage({ params }: Props) {
                         {a.description_pt}
                       </p>
                     )}
+                    {explanations[a.id] && (
+                      <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/40 p-4">
+                        <StructuredAIResult
+                          interpretation={explanations[a.id]}
+                          compact
+                        />
+                      </div>
+                    )}
                     <p className="mt-2 text-xs text-slate-400">
                       {new Date(a.created_at).toLocaleString("pt-PT", {
                         day: "numeric",
@@ -211,15 +239,24 @@ export default function AlertsPage({ params }: Props) {
                     </p>
                   </div>
 
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    loading={resolving === a.id}
-                    onClick={() => resolve(a.id)}
-                    className="shrink-0"
-                  >
-                    Resolver
-                  </Button>
+                  <div className="flex shrink-0 flex-col gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={explaining === a.id}
+                      onClick={() => explain(a.id)}
+                    >
+                      Explicar com IA
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={resolving === a.id}
+                      onClick={() => resolve(a.id)}
+                    >
+                      Resolver
+                    </Button>
+                  </div>
                 </div>
               );
             })}

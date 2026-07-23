@@ -7,23 +7,28 @@ The LLM never accesses the DB — context_builder fetches everything first.
 from __future__ import annotations
 
 import json
+import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import prompt_templates
 from app.ai.context_builder import (
     AssistantContextBuilder,
+    FarmAssistantContext,
     build_sector_change_context,
 )
 from app.ai.evidence import EvidenceRegistry, build_evidence_registry
 from app.ai.openai_client import MockChatClient, OpenAIChatClient
 from app.ai.probe_signal import compute_probe_signal_stats
+from app.metrics import ai_degraded_responses_total
 from app.schemas.ai import (
     AgronomicCitation,
     AgronomicEvidence,
     AgronomicInterpretation,
     AgronomicInterpretationDraft,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class IrrigationAssistant:
@@ -48,9 +53,7 @@ class IrrigationAssistant:
         If user_notes is provided (field observations, agronomist context), they
         are appended to the prompt so the AI can incorporate them into its analysis.
         """
-        ctx = await self.context_builder.build_sector_ai_context(
-            sector_id, db, compact=True
-        )
+        ctx = await self.context_builder.build_sector_ai_context(sector_id, db, compact=True)
         context_json = ctx.to_json()
         decision = ctx.engine_decision
         sector = ctx.scope["sector"]
@@ -65,9 +68,7 @@ class IrrigationAssistant:
             context_json=context_json,
             user_notes=user_notes or "Nenhuma observação adicional.",
         )
-        user_message = (
-            f"Analisa e explica a situação de rega para o sector '{sector['name']}'."
-        )
+        user_message = f"Analisa e explica a situação de rega para o sector '{sector['name']}'."
         return await self.client.complete(system_prompt, user_message)
 
     async def explain_recommendation_structured(
@@ -76,9 +77,7 @@ class IrrigationAssistant:
         db: AsyncSession,
         user_notes: str | None = None,
     ) -> AgronomicInterpretation:
-        ctx = await self.context_builder.build_sector_ai_context(
-            sector_id, db, compact=True
-        )
+        ctx = await self.context_builder.build_sector_ai_context(sector_id, db, compact=True)
         context_json = ctx.to_json()
         decision = ctx.engine_decision
         sector = ctx.scope["sector"]
@@ -95,14 +94,13 @@ class IrrigationAssistant:
             context_json=context_json,
             user_notes=user_notes or "Nenhuma observação adicional.",
         )
-        user_message = (
-            f"Analisa e explica a situação de rega para o sector '{sector['name']}'."
-        )
+        user_message = f"Analisa e explica a situação de rega para o sector '{sector['name']}'."
         return await self._complete_structured(
             system_prompt=system_prompt,
             user_message=user_message,
             context=json.loads(context_json),
             fallback_risk="medium",
+            surface="recommendation",
         )
 
     async def summarize_farm(self, farm_id: str, db: AsyncSession) -> str:
@@ -120,8 +118,10 @@ class IrrigationAssistant:
         self,
         farm_id: str,
         db: AsyncSession,
+        *,
+        context: FarmAssistantContext | None = None,
     ) -> AgronomicInterpretation:
-        ctx = await self.context_builder.build_farm_context(farm_id, db)
+        ctx = context or await self.context_builder.build_farm_context(farm_id, db)
         context_json = self.context_builder.to_json(ctx)
 
         system_prompt = prompt_templates.get_farm_summary_template(self.language).format(
@@ -134,6 +134,7 @@ class IrrigationAssistant:
             context=json.loads(context_json),
             fallback_risk="medium",
             max_tokens=800,
+            surface="farm_summary",
         )
 
     async def explain_anomaly(self, alert_id: str, db: AsyncSession) -> str:
@@ -154,7 +155,12 @@ class IrrigationAssistant:
         }
 
         system_prompt = prompt_templates.ANOMALY_EXPLANATION_PT.format(
-            context_json=json.dumps(alert_data, ensure_ascii=False, default=str, indent=2)
+            context_json=json.dumps(
+                alert_data,
+                ensure_ascii=False,
+                default=str,
+                separators=(",", ":"),
+            )
         )
         user_message = f"Explica este alerta: {alert.title_pt}"
         return await self.client.complete(system_prompt, user_message)
@@ -187,15 +193,23 @@ class IrrigationAssistant:
             }
         }
         system_prompt = prompt_templates.ANOMALY_EXPLANATION_PT.format(
-            context_json=json.dumps(alert_data, ensure_ascii=False, default=str, indent=2)
+            context_json=json.dumps(
+                alert_data,
+                ensure_ascii=False,
+                default=str,
+                separators=(",", ":"),
+            )
         )
         user_message = f"Explica este alerta: {alert.title_pt}"
         return await self._complete_structured(
             system_prompt=system_prompt,
             user_message=user_message,
             context=alert_data,
-            fallback_risk=alert.severity if alert.severity in {"low", "medium", "high"} else "medium",
+            fallback_risk=alert.severity
+            if alert.severity in {"low", "medium", "high"}
+            else "medium",
             max_tokens=700,
+            surface="alert_explanation",
         )
 
     async def generate_missing_data_questions(self, farm_id: str, db: AsyncSession) -> list[str]:
@@ -213,26 +227,18 @@ class IrrigationAssistant:
         # Parse numbered list into individual strings
         lines = [line.strip() for line in raw.splitlines() if line.strip()]
         questions = [
-            line.lstrip("0123456789. )").strip()
-            for line in lines
-            if line and line[0].isdigit()
+            line.lstrip("0123456789. )").strip() for line in lines if line and line[0].isdigit()
         ]
         return questions or [raw]
 
     async def diagnose_sector(self, sector_id: str, db: AsyncSession) -> str:
         """Root-cause diagnosis: WHY is this sector in its current hydric state."""
-        ctx = await self.context_builder.build_sector_ai_context(
-            sector_id, db, compact=False
-        )
+        ctx = await self.context_builder.build_sector_ai_context(sector_id, db, compact=False)
         context_json = ctx.to_json()
         sector = ctx.scope["sector"]
 
-        system_prompt = prompt_templates.SECTOR_DIAGNOSIS_PT.format(
-            context_json=context_json
-        )
-        user_message = (
-            f"Diagnostica as causas prováveis do estado hídrico actual do sector '{sector['name']}'."
-        )
+        system_prompt = prompt_templates.SECTOR_DIAGNOSIS_PT.format(context_json=context_json)
+        user_message = f"Diagnostica as causas prováveis do estado hídrico actual do sector '{sector['name']}'."
         return await self.client.complete(system_prompt, user_message, max_tokens=600)
 
     async def diagnose_sector_structured(
@@ -240,24 +246,19 @@ class IrrigationAssistant:
         sector_id: str,
         db: AsyncSession,
     ) -> AgronomicInterpretation:
-        ctx = await self.context_builder.build_sector_ai_context(
-            sector_id, db, compact=False
-        )
+        ctx = await self.context_builder.build_sector_ai_context(sector_id, db, compact=False)
         context_json = ctx.to_json()
         sector = ctx.scope["sector"]
 
-        system_prompt = prompt_templates.SECTOR_DIAGNOSIS_PT.format(
-            context_json=context_json
-        )
-        user_message = (
-            f"Diagnostica as causas prováveis do estado hídrico actual do sector '{sector['name']}'."
-        )
+        system_prompt = prompt_templates.SECTOR_DIAGNOSIS_PT.format(context_json=context_json)
+        user_message = f"Diagnostica as causas prováveis do estado hídrico actual do sector '{sector['name']}'."
         return await self._complete_structured(
             system_prompt=system_prompt,
             user_message=user_message,
             context=json.loads(context_json),
             fallback_risk="medium",
             max_tokens=600,
+            surface="sector_diagnosis",
         )
 
     async def interpret_probe_patterns(self, probe_id: str, db: AsyncSession) -> str:
@@ -266,10 +267,13 @@ class IrrigationAssistant:
         if "error" in stats:
             return "Sonda não encontrada ou sem dados suficientes para análise."
 
-        signal_json = json.dumps(stats, ensure_ascii=False, default=str, indent=2)
-        system_prompt = prompt_templates.PROBE_INTERPRETATION_PT.format(
-            signal_json=signal_json
+        signal_json = json.dumps(
+            stats,
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":"),
         )
+        system_prompt = prompt_templates.PROBE_INTERPRETATION_PT.format(signal_json=signal_json)
         user_message = (
             f"Interpreta o comportamento da sonda '{stats.get('probe_external_id', probe_id)}' "
             f"no sector '{stats.get('sector_name', '')}'."
@@ -290,10 +294,13 @@ class IrrigationAssistant:
                 confidence_score=0.2,
             )
 
-        signal_json = json.dumps(stats, ensure_ascii=False, default=str, indent=2)
-        system_prompt = prompt_templates.PROBE_ADVISORY_PT.format(
-            signal_json=signal_json
+        signal_json = json.dumps(
+            stats,
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":"),
         )
+        system_prompt = prompt_templates.PROBE_ADVISORY_PT.format(signal_json=signal_json)
         user_message = (
             f"Interpreta o comportamento da sonda '{stats.get('probe_external_id', probe_id)}' "
             f"no sector '{stats.get('sector_name', '')}'."
@@ -304,6 +311,7 @@ class IrrigationAssistant:
             context={"probe_signal": stats},
             fallback_risk="medium",
             max_tokens=700,
+            surface="probe_diagnosis",
         )
         return self._apply_probe_recommendation_guard(stats, structured)
 
@@ -383,6 +391,7 @@ class IrrigationAssistant:
             context=context_obj,
             fallback_risk="medium",
             max_tokens=700,
+            surface="chat_structured",
         )
 
     async def analyze_sector_changes(
@@ -404,20 +413,63 @@ class IrrigationAssistant:
                 confidence_score=0.2,
             )
 
-        context_json = json.dumps(context, ensure_ascii=False, default=str, indent=2)
-        system_prompt = prompt_templates.SECTOR_CHANGE_ANALYSIS_PT.format(
-            context_json=context_json
+        context_json = json.dumps(
+            context,
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":"),
         )
+        system_prompt = prompt_templates.SECTOR_CHANGE_ANALYSIS_PT.format(context_json=context_json)
         sector_name = context.get("sector", {}).get("name", sector_id)
-        user_message = (
-            f"Explica o que mudou no sector '{sector_name}' nas últimas {context['window_hours']} horas."
-        )
+        user_message = f"Explica o que mudou no sector '{sector_name}' nas últimas {context['window_hours']} horas."
         return await self._complete_structured(
             system_prompt=system_prompt,
             user_message=user_message,
             context=context,
             fallback_risk="medium",
             max_tokens=800,
+            surface="change_analysis",
+        )
+
+    async def analyze_irrigation_effectiveness(
+        self,
+        sector_id: str,
+        db: AsyncSession,
+    ) -> AgronomicInterpretation:
+        context = (
+            await self.context_builder.build_sector_ai_context(
+                sector_id,
+                db,
+                compact=False,
+            )
+        ).to_dict()
+        relevant = {
+            key: context[key]
+            for key in (
+                "scope",
+                "engine_decision",
+                "probe_state",
+                "irrigation_execution",
+                "outcomes",
+                "alerts_and_limitations",
+            )
+        }
+        context_json = json.dumps(
+            relevant,
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":"),
+        )
+        system_prompt = prompt_templates.IRRIGATION_EFFECTIVENESS_PT.format(
+            context_json=context_json
+        )
+        return await self._complete_structured(
+            system_prompt=system_prompt,
+            user_message="Explica a eficácia das regas recentes deste sector.",
+            context=relevant,
+            fallback_risk="medium",
+            max_tokens=800,
+            surface="irrigation_effectiveness",
         )
 
     def _apply_probe_recommendation_guard(
@@ -495,6 +547,7 @@ class IrrigationAssistant:
         context: dict | list | None,
         fallback_risk: str = "medium",
         max_tokens: int = 900,
+        surface: str = "structured",
     ) -> AgronomicInterpretation:
         registry = build_evidence_registry(context)
         system_prompt = (
@@ -510,13 +563,24 @@ class IrrigationAssistant:
                 AgronomicInterpretationDraft,
                 max_tokens=max_tokens,
                 temperature=0.1,
+                surface=surface,
             )
-        except Exception:
+        except Exception as exc:
+            logger.exception(
+                "Structured AI completion failed; serving grounded fallback",
+                extra={"surface": surface, "error_type": type(exc).__name__},
+            )
+            ai_degraded_responses_total.labels(
+                surface,
+                type(exc).__name__,
+            ).inc()
             return self._fallback_structured(
                 "",
                 context=context,
                 risk_level=fallback_risk,
                 confidence_score=0.3,
+                degraded=True,
+                error_code="llm_unavailable",
             )
 
         result = self._resolve_model_interpretation(parsed, registry, context)
@@ -580,6 +644,8 @@ class IrrigationAssistant:
         context: dict | list | None,
         risk_level: str = "medium",
         confidence_score: float | None = None,
+        degraded: bool = False,
+        error_code: str | None = None,
     ) -> AgronomicInterpretation:
         evidence = self._default_evidence(context)
         missing_data = self._known_limitations(context)
@@ -589,13 +655,17 @@ class IrrigationAssistant:
             irrigation_advice=text.strip() or "Sem conselho de rega disponível.",
             evidence=evidence,
             missing_data=missing_data,
-            confidence_score=confidence_score if confidence_score is not None else (0.65 if evidence else 0.35),
+            confidence_score=confidence_score
+            if confidence_score is not None
+            else (0.65 if evidence else 0.35),
             confidence_explanation=(
                 "Resposta validada com evidência do contexto estruturado."
                 if evidence
                 else "Resposta gerada com contexto limitado; confirma os dados antes de actuar."
             ),
             recommended_actions=self._default_actions(context),
+            degraded=degraded,
+            error_code=error_code,
         )
 
     def render_structured(self, interpretation: AgronomicInterpretation) -> str:
@@ -612,7 +682,11 @@ class IrrigationAssistant:
             lines.append(f"• {interpretation.summary}")
 
         if interpretation.risk_level in ("high", "critical") and "Atenção" not in used:
-            msg = interpretation.missing_data[0] if interpretation.missing_data else interpretation.irrigation_advice
+            msg = (
+                interpretation.missing_data[0]
+                if interpretation.missing_data
+                else interpretation.irrigation_advice
+            )
             lines.append(f"• Atenção: {msg}")
 
         if interpretation.confidence_score < 0.60:

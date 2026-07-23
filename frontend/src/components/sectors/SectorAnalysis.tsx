@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { StructuredAIResult } from "@/components/ai/StructuredAIResult";
-import { chatApi } from "@/lib/api";
+import { chatApi, fieldObservationsApi } from "@/lib/api";
 import { formatDecimal } from "@/lib/utils";
 import type { AgronomicInterpretation } from "@/types";
 
@@ -234,11 +234,27 @@ export function SectorAnalysis({
           .filter(Boolean)
           .join("\n") || undefined;
 
-      const res = await chatApi.explainSector(sectorId, userNotes);
+      if (userNotes) {
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 7);
+        await fieldObservationsApi.create(sectorId, {
+          observation_type: "field_check",
+          structured_value: soilCondition
+            ? { visual_soil_condition: soilCondition }
+            : null,
+          text: notes.trim() || null,
+          observed_at: new Date().toISOString(),
+          expires_at: expiresAt.toISOString(),
+        });
+      }
+
+      const res = await chatApi.explainSector(sectorId);
       const ts = new Date();
       setResult(res.explanation);
       setStructured(res.structured ?? null);
       setResultTimestamp(ts);
+      setSoilCondition("");
+      setNotes("");
       playResultChime();
       try {
         localStorage.setItem(

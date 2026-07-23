@@ -37,9 +37,29 @@ class LLMRefusalError(Exception):
 
 
 class OpenAIChatClient:
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
-        self.client = openai.AsyncOpenAI(api_key=api_key)
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-4o-mini",
+        *,
+        models: dict[str, str] | None = None,
+        timeout_seconds: float = 30.0,
+        max_retries: int = 2,
+    ):
+        self.client = openai.AsyncOpenAI(
+            api_key=api_key,
+            timeout=timeout_seconds,
+            max_retries=max_retries,
+        )
         self.model = model
+        self.models = models or {}
+        self.last_model = model
+
+    def model_for_surface(self, surface: str) -> str:
+        model = self.models.get(surface)
+        if not model and surface != "chat":
+            model = self.models.get("structured")
+        return model or self.model
 
     async def complete(
         self,
@@ -47,10 +67,13 @@ class OpenAIChatClient:
         user_message: str,
         max_tokens: int = 1000,
         temperature: float = 0.3,
+        surface: str = "general",
     ) -> str:
+        model = self.model_for_surface(surface)
+        self.last_model = model
         try:
             response = await self.client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
@@ -60,17 +83,20 @@ class OpenAIChatClient:
             )
             usage = response.usage
             if usage:
-                ai_tokens_input_total.labels("openai", self.model).inc(usage.prompt_tokens)
-                ai_tokens_output_total.labels("openai", self.model).inc(usage.completion_tokens)
+                ai_tokens_input_total.labels("openai", model).inc(usage.prompt_tokens)
+                ai_tokens_output_total.labels("openai", model).inc(usage.completion_tokens)
                 logger.debug(
                     "openai_usage",
-                    extra={"model": self.model, "prompt_tokens": usage.prompt_tokens,
-                           "completion_tokens": usage.completion_tokens},
+                    extra={
+                        "model": model,
+                        "prompt_tokens": usage.prompt_tokens,
+                        "completion_tokens": usage.completion_tokens,
+                    },
                 )
-            ai_requests_total.labels("openai", self.model, "success").inc()
+            ai_requests_total.labels("openai", model, "success").inc()
             return response.choices[0].message.content or ""
         except Exception:
-            ai_requests_total.labels("openai", self.model, "failure").inc()
+            ai_requests_total.labels("openai", model, "failure").inc()
             raise
 
     async def complete_structured(
@@ -81,10 +107,13 @@ class OpenAIChatClient:
         *,
         max_tokens: int = 900,
         temperature: float = 0.1,
+        surface: str = "structured",
     ) -> BaseModel:
+        model = self.model_for_surface(surface)
+        self.last_model = model
         try:
             response = await self.client.beta.chat.completions.parse(
-                model=self.model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
@@ -95,21 +124,21 @@ class OpenAIChatClient:
             )
             usage = response.usage
             if usage:
-                ai_tokens_input_total.labels("openai", self.model).inc(usage.prompt_tokens)
-                ai_tokens_output_total.labels("openai", self.model).inc(usage.completion_tokens)
+                ai_tokens_input_total.labels("openai", model).inc(usage.prompt_tokens)
+                ai_tokens_output_total.labels("openai", model).inc(usage.completion_tokens)
             message = response.choices[0].message
             if getattr(message, "refusal", None):
-                ai_requests_total.labels("openai", self.model, "refusal").inc()
+                ai_requests_total.labels("openai", model, "refusal").inc()
                 raise LLMRefusalError(message.refusal)
             if message.parsed is None:
-                ai_requests_total.labels("openai", self.model, "failure").inc()
+                ai_requests_total.labels("openai", model, "failure").inc()
                 raise LLMRefusalError("empty parsed structured output")
-            ai_requests_total.labels("openai", self.model, "success").inc()
+            ai_requests_total.labels("openai", model, "success").inc()
             return message.parsed
         except LLMRefusalError:
             raise
         except Exception:
-            ai_requests_total.labels("openai", self.model, "failure").inc()
+            ai_requests_total.labels("openai", model, "failure").inc()
             raise
 
     async def run_tool_loop(
@@ -119,10 +148,13 @@ class OpenAIChatClient:
         *,
         max_tokens: int = 700,
         temperature: float = 0.2,
+        surface: str = "chat",
     ) -> LLMToolResponse:
+        model = self.model_for_surface(surface)
+        self.last_model = model
         try:
             response = await self.client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=messages,
                 tools=tools or None,
                 tool_choice="auto" if tools else None,
@@ -131,9 +163,9 @@ class OpenAIChatClient:
             )
             usage = response.usage
             if usage:
-                ai_tokens_input_total.labels("openai", self.model).inc(usage.prompt_tokens)
-                ai_tokens_output_total.labels("openai", self.model).inc(usage.completion_tokens)
-            ai_requests_total.labels("openai", self.model, "success").inc()
+                ai_tokens_input_total.labels("openai", model).inc(usage.prompt_tokens)
+                ai_tokens_output_total.labels("openai", model).inc(usage.completion_tokens)
+            ai_requests_total.labels("openai", model, "success").inc()
             msg = response.choices[0].message
             calls: list[LLMToolCall] = []
             for tc in msg.tool_calls or []:
@@ -144,12 +176,15 @@ class OpenAIChatClient:
                 calls.append(LLMToolCall(id=tc.id, name=tc.function.name, arguments=parsed_args))
             return LLMToolResponse(content=msg.content, tool_calls=calls)
         except Exception:
-            ai_requests_total.labels("openai", self.model, "failure").inc()
+            ai_requests_total.labels("openai", model, "failure").inc()
             raise
 
 
 class MockChatClient:
     """Returns plausible responses for testing without an OpenAI API key."""
+
+    model = "mock"
+    last_model = "mock"
 
     async def complete(
         self,
@@ -157,6 +192,7 @@ class MockChatClient:
         user_message: str,
         max_tokens: int = 1000,
         temperature: float = 0.3,
+        surface: str = "general",
     ) -> str:
         prompt_lower = system_prompt.lower()
 
@@ -192,33 +228,45 @@ class MockChatClient:
             )
 
         if "não enumeres padrões por profundidade" in prompt_lower:
-            return _json.dumps({
-                "summary": "Sonda mostra humidade estável e adequada.",
-                "risk_level": "low",
-                "irrigation_advice": (
-                    "Não há necessidade de regar nos próximos 1-2 dias. "
-                    "Monitoriza a tendência e rega se o consumo se tornar activo."
-                ),
-                "evidence": [
-                    {"source": "depths[0].humidade_actual", "value": "humidade adequada"},
-                    {"source": "depths[0].tendencia", "value": "estável"},
-                ],
-                "missing_data": [],
-                "confidence_score": 0.75,
-                "confidence_explanation": "Sinal estável com leituras suficientes nas últimas 72 horas.",
-                "recommended_actions": [
-                    "Monitorizar a tendência de humidade nas próximas 24 horas.",
-                ],
-            }, ensure_ascii=False)
+            return _json.dumps(
+                {
+                    "summary": "Sonda mostra humidade estável e adequada.",
+                    "risk_level": "low",
+                    "irrigation_advice": (
+                        "Não há necessidade de regar nos próximos 1-2 dias. "
+                        "Monitoriza a tendência e rega se o consumo se tornar activo."
+                    ),
+                    "evidence": [
+                        {"source": "depths[0].humidade_actual", "value": "humidade adequada"},
+                        {"source": "depths[0].tendencia", "value": "estável"},
+                    ],
+                    "missing_data": [],
+                    "confidence_score": 0.75,
+                    "confidence_explanation": "Sinal estável com leituras suficientes nas últimas 72 horas.",
+                    "recommended_actions": [
+                        "Monitorizar a tendência de humidade nas próximas 24 horas.",
+                    ],
+                },
+                ensure_ascii=False,
+            )
 
-        if "interpreta" in prompt_lower or "sonda" in prompt_lower or "padrão" in prompt_lower or "flatline" in prompt_lower:
+        if (
+            "interpreta" in prompt_lower
+            or "sonda" in prompt_lower
+            or "padrão" in prompt_lower
+            or "flatline" in prompt_lower
+        ):
             return (
                 "• Sonda estável por solo saturado: variância < 0.001 m³/m³ com VWC próximo da CC → solo bem hidratado sem consumo radicular activo nem drenagem → normal após rega ou chuva abundante; reavaliar em 24-48h.\n"
                 "• Absorção apenas nas raízes superficiais: depleção concentrada nos 30 cm, 60 cm estável → raízes activas predominantemente na camada rasa → confirmar se solo compactado impede penetração.\n"
                 "• Rega atingiu 30 cm mas não 60 cm: +0.04 m³/m³ aos 30 cm, +0.002 m³/m³ aos 60 cm após rega → rega não atingiu a profundidade total → aumentar tempo de rega ou verificar DU."
             )
 
-        if "caudalímetro" in prompt_lower or "consumo de água" in prompt_lower or "flowmeter" in prompt_lower:
+        if (
+            "caudalímetro" in prompt_lower
+            or "consumo de água" in prompt_lower
+            or "flowmeter" in prompt_lower
+        ):
             if "setor" in prompt_lower or "sector" in prompt_lower:
                 return (
                     "O setor aplica em média 17.4 m³/ha por evento de rega, com intervalos regulares de 2-3 dias. "
@@ -245,6 +293,7 @@ class MockChatClient:
         *,
         max_tokens: int = 900,
         temperature: float = 0.1,
+        surface: str = "structured",
     ) -> BaseModel:
         prompt_lower = system_prompt.lower()
         if "irrigar" in prompt_lower or "irrigate" in prompt_lower:
@@ -283,6 +332,7 @@ class MockChatClient:
         *,
         max_tokens: int = 700,
         temperature: float = 0.2,
+        surface: str = "chat",
     ) -> LLMToolResponse:
         last_user = ""
         for m in reversed(messages):
@@ -301,40 +351,59 @@ class MockChatClient:
                     tool_calls=[],
                 )
             if "aceita" in last_user and last_tool_result.get("recommendation_id"):
-                return LLMToolResponse(content=None, tool_calls=[
-                    LLMToolCall(
-                        id="mock-2",
-                        name="propose_accept_recommendation",
-                        arguments={"recommendation_id": last_tool_result["recommendation_id"]},
-                    )
-                ])
+                return LLMToolResponse(
+                    content=None,
+                    tool_calls=[
+                        LLMToolCall(
+                            id="mock-2",
+                            name="propose_accept_recommendation",
+                            arguments={"recommendation_id": last_tool_result["recommendation_id"]},
+                        )
+                    ],
+                )
             return LLMToolResponse(
                 content="Consultei os dados disponíveis para responder ao pedido.",
                 tool_calls=[],
             )
         if "recalibr" in last_user or "calibra" in last_user:
-            return LLMToolResponse(content=None, tool_calls=[
-                LLMToolCall(id="mock-1", name="propose_run_calibration", arguments={})
-            ])
+            return LLMToolResponse(
+                content=None,
+                tool_calls=[LLMToolCall(id="mock-1", name="propose_run_calibration", arguments={})],
+            )
         if "gerar" in last_user or "nova recomenda" in last_user or "regenera" in last_user:
-            return LLMToolResponse(content=None, tool_calls=[
-                LLMToolCall(id="mock-1", name="propose_regenerate_recommendation", arguments={})
-            ])
+            return LLMToolResponse(
+                content=None,
+                tool_calls=[
+                    LLMToolCall(id="mock-1", name="propose_regenerate_recommendation", arguments={})
+                ],
+            )
         if "aceita" in last_user:
-            return LLMToolResponse(content=None, tool_calls=[
-                LLMToolCall(id="mock-1", name="get_sector_status", arguments={})
-            ])
+            return LLMToolResponse(
+                content=None,
+                tool_calls=[LLMToolCall(id="mock-1", name="get_sector_status", arguments={})],
+            )
         if "substitu" in last_user or "override" in last_user or "regar" in last_user:
             m = _re.search(r"(\d+(?:\.\d+)?)\s*mm", last_user)
             depth = float(m.group(1)) if m else 10.0
-            return LLMToolResponse(content=None, tool_calls=[
-                LLMToolCall(id="mock-1", name="propose_override",
-                            arguments={"recommendation_id": "rec-mock", "depth_mm": depth,
-                                       "reason": "pedido do utilizador"})
-            ])
+            return LLMToolResponse(
+                content=None,
+                tool_calls=[
+                    LLMToolCall(
+                        id="mock-1",
+                        name="propose_override",
+                        arguments={
+                            "recommendation_id": "rec-mock",
+                            "depth_mm": depth,
+                            "reason": "pedido do utilizador",
+                        },
+                    )
+                ],
+            )
         return LLMToolResponse(
-            content=("Com base nos dados disponíveis, o setor está estável e não "
-                     "requer rega imediata. Vigia a evolução nas próximas 24-48h."),
+            content=(
+                "Com base nos dados disponíveis, o setor está estável e não "
+                "requer rega imediata. Vigia a evolução nas próximas 24-48h."
+            ),
             tool_calls=[],
         )
 
@@ -345,5 +414,19 @@ def get_chat_client(config: Settings) -> OpenAIChatClient | MockChatClient:
     if config.LLM_PROVIDER == "openai":
         if not config.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
-        return OpenAIChatClient(api_key=config.OPENAI_API_KEY, model=config.OPENAI_MODEL)
+        return OpenAIChatClient(
+            api_key=config.OPENAI_API_KEY,
+            model=config.OPENAI_MODEL,
+            models={
+                "chat": config.OPENAI_MODEL_CHAT or config.OPENAI_MODEL,
+                "farm_summary": (
+                    config.OPENAI_MODEL_SUMMARY
+                    or config.OPENAI_MODEL_STRUCTURED
+                    or config.OPENAI_MODEL
+                ),
+                "structured": config.OPENAI_MODEL_STRUCTURED or config.OPENAI_MODEL,
+            },
+            timeout_seconds=config.LLM_TIMEOUT_SECONDS,
+            max_retries=config.LLM_MAX_RETRIES,
+        )
     raise ValueError(f"Unknown LLM provider: {config.LLM_PROVIDER}")

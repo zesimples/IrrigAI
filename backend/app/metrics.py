@@ -75,6 +75,18 @@ ai_tokens_output_total = Counter(
     ["provider", "model"],
 )
 
+ai_degraded_responses_total = Counter(
+    "irrigai_ai_degraded_responses_total",
+    "AI responses served from a deterministic degraded fallback",
+    ["surface", "reason"],
+)
+
+ai_response_feedback_total = Counter(
+    "irrigai_ai_response_feedback_total",
+    "User thumbs feedback on AI responses",
+    ["surface", "rating"],
+)
+
 # ── System ────────────────────────────────────────────────────────────────────
 
 app_info = Info("irrigai_app", "IrrigAI application metadata")

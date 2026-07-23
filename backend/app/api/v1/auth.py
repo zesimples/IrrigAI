@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import create_access_token, hash_password, verify_password
 from app.database import get_db
+from app.limiter import limiter
 from app.models.base import new_uuid
 from app.models.user import User
 
@@ -18,13 +19,15 @@ class TokenResponse(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    email: str
-    password: str
-    name: str
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+    name: str = Field(min_length=1, max_length=255)
 
 
 @router.post("/token", response_model=TokenResponse)
+@limiter.limit("10/minute")
 async def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
@@ -42,12 +45,15 @@ async def login(
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+@limiter.limit("5/hour")
+async def register(
+    request: Request,
+    body: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
     existing = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
-    if len(body.password) < 8:
-        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
     user = User(
         id=new_uuid(),
         email=body.email,

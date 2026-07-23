@@ -22,6 +22,8 @@ MAX_ITERATIONS = 4
 class ChatResult:
     reply: str
     proposed_action: ProposedAction | None = None
+    degraded: bool = False
+    model_name: str | None = None
 
 
 class ChatAgent:
@@ -62,33 +64,45 @@ class ChatAgent:
         for _ in range(MAX_ITERATIONS):
             resp = await self.client.run_tool_loop(messages, TOOL_SPECS)
             if not resp.tool_calls:
-                return ChatResult(reply=resp.content or last_content or "", proposed_action=proposed)
+                return ChatResult(
+                    reply=resp.content or last_content or "",
+                    proposed_action=proposed,
+                    model_name=getattr(self.client, "last_model", "mock"),
+                )
             last_content = resp.content or last_content
-            messages.append({
-                "role": "assistant",
-                "content": resp.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
-                    }
-                    for tc in resp.tool_calls
-                ],
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": resp.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+                        }
+                        for tc in resp.tool_calls
+                    ],
+                }
+            )
             for tc in resp.tool_calls:
-                result = await execute_tool(tc.name, tc.arguments, access=access, db=db, scope=scope)
+                result = await execute_tool(
+                    tc.name, tc.arguments, access=access, db=db, scope=scope
+                )
                 if proposed is None and "proposed_action" in result:
                     proposed = ProposedAction.model_validate(result["proposed_action"])
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": json.dumps(result, ensure_ascii=False, default=str),
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": json.dumps(result, ensure_ascii=False, default=str),
+                    }
+                )
 
         return ChatResult(
             reply=last_content or "Não consegui concluir a resposta. Tenta reformular.",
             proposed_action=proposed,
+            degraded=True,
+            model_name=getattr(self.client, "last_model", "mock"),
         )
 
     async def _seed_scope_context(
