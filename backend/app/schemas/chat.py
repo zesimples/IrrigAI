@@ -1,11 +1,14 @@
 """API contracts for persisted and streaming AI chat."""
 
+import json
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.ai import ChatTurn, ProposedAction
+
+_MAX_DETAILS_BYTES = 4096
 
 
 class ChatRequest(BaseModel):
@@ -67,6 +70,13 @@ class AIResponseFeedbackCreate(BaseModel):
     entity_id: str | None = None
     comment: str | None = Field(default=None, max_length=2000)
     details: dict = Field(default_factory=dict)
+
+    @field_validator("details")
+    @classmethod
+    def _bound_details(cls, value: dict) -> dict:
+        if len(json.dumps(value, default=str)) > _MAX_DETAILS_BYTES:
+            raise ValueError("details payload too large")
+        return value
 
 
 class AIResponseFeedbackOut(BaseModel):

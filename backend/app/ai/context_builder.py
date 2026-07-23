@@ -12,7 +12,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.context_v2 import SectorAIContextV2
@@ -24,6 +24,7 @@ from app.engine.pipeline import (
     resolve_weather_plot_id,
 )
 from app.engine.probe_interpreter import interpret_probes
+from app.engine.staleness import PROBE_STALE_H, PROBE_VERY_STALE_H
 from app.engine.types import SectorContext
 from app.models import (
     Alert,
@@ -140,6 +141,46 @@ class FarmAssistantContext:
 # ---------------------------------------------------------------------------
 # Data-quality helpers
 # ---------------------------------------------------------------------------
+
+
+def _farm_probe_confidence(
+    *,
+    has_probe: bool,
+    last_reading_at: datetime | None,
+    now: datetime,
+) -> tuple[str, str]:
+    """Honest (source_confidence, explanation) for the farm-summary aggregate view.
+
+    The farm summary does not compute the full live probe snapshot per sector, so
+    freshness is derived from the probe's stored ``last_reading_at`` using the
+    canonical staleness thresholds — never fabricated as "fresh"/"no_probe" from
+    the recommendation snapshot.
+    """
+    if not has_probe:
+        return (
+            "no_probe",
+            "Sem sondas configuradas — resumo baseado em balanço hídrico e meteorologia.",
+        )
+    if last_reading_at is None:
+        return (
+            "forecast_only",
+            "Sonda configurada mas ainda sem leituras — sem leitura real do solo.",
+        )
+    hours = (now - _ensure_utc(last_reading_at)).total_seconds() / 3600
+    if hours > PROBE_VERY_STALE_H:
+        return (
+            "forecast_only",
+            f"Sonda sem comunicação há {hours:.0f}h — sem leitura real recente do solo.",
+        )
+    if hours > PROBE_STALE_H:
+        return (
+            "stale",
+            f"Última leitura da sonda há {hours:.0f}h — o estado do solo pode ter mudado.",
+        )
+    return (
+        "fresh",
+        f"Leitura da sonda recente (há {hours:.0f}h) — estado hídrico do solo actualizado.",
+    )
 
 
 def _source_confidence_and_explanation(probe_live: dict | None) -> tuple[str, str]:
@@ -573,6 +614,49 @@ class AssistantContextBuilder:
                     }
                 )
 
+        # Real irrigation history (7-day applied total + last event date) — never
+        # fabricate 0.0/None, which would tell the farm-summary LLM every sector
+        # applied nothing. One aggregate query for all sectors.
+        now = datetime.now(UTC)
+        irrig_cutoff = now - timedelta(days=7)
+        irrig_by_sector = {
+            row[0]: (row[1], row[2])
+            for row in (
+                await db.execute(
+                    select(
+                        IrrigationEvent.sector_id,
+                        func.max(IrrigationEvent.start_time),
+                        func.coalesce(
+                            func.sum(
+                                case(
+                                    (
+                                        IrrigationEvent.start_time >= irrig_cutoff,
+                                        IrrigationEvent.applied_mm,
+                                    ),
+                                    else_=0.0,
+                                )
+                            ),
+                            0.0,
+                        ),
+                    )
+                    .where(IrrigationEvent.sector_id.in_(sector_ids))
+                    .group_by(IrrigationEvent.sector_id)
+                )
+            ).all()
+        }
+        # Probe freshness from the stored last_reading_at — a sector with a probe
+        # whose reading is stale must not be reported as "fresh" or "no_probe".
+        probe_last_by_sector = {
+            row[0]: row[1]
+            for row in (
+                await db.execute(
+                    select(Probe.sector_id, func.max(Probe.last_reading_at))
+                    .where(Probe.sector_id.in_(sector_ids))
+                    .group_by(Probe.sector_id)
+                )
+            ).all()
+        }
+
         contexts: list[SectorAssistantContext] = []
         for sector in sectors:
             rec = rec_by_sector.get(sector.id)
@@ -590,6 +674,12 @@ class AssistantContextBuilder:
             if sector.id not in configured_profiles:
                 missing.append("no crop profile")
             action = _enum_value(rec.action) if rec else None
+            last_irrig_start, total_irrig_7d = irrig_by_sector.get(sector.id, (None, 0.0))
+            probe_confidence, probe_explanation = _farm_probe_confidence(
+                has_probe=sector.id in probe_last_by_sector,
+                last_reading_at=probe_last_by_sector.get(sector.id),
+                now=now,
+            )
             contexts.append(
                 SectorAssistantContext(
                     sector_id=sector.id,
@@ -643,16 +733,14 @@ class AssistantContextBuilder:
                     today_temp_max_c=snapshot.get("temperature_max_c"),
                     rainfall_last_24h_mm=snapshot.get("rainfall_mm") or 0.0,
                     forecast_rain_next_48h_mm=(snapshot.get("forecast_rain_next_48h") or 0.0),
-                    last_irrigation_date=None,
-                    total_irrigation_7d_mm=0.0,
+                    last_irrigation_date=(
+                        last_irrig_start.strftime("%Y-%m-%d") if last_irrig_start else None
+                    ),
+                    total_irrigation_7d_mm=round(total_irrig_7d or 0.0, 2),
                     active_alerts=alerts_by_sector.get(sector.id, []),
                     probe_live=None,
-                    source_confidence=(
-                        "fresh" if snapshot.get("swc_source") == "probe_weighted" else "no_probe"
-                    ),
-                    data_quality_explanation=(
-                        "Resumo baseado no snapshot determinístico da recomendação."
-                    ),
+                    source_confidence=probe_confidence,
+                    data_quality_explanation=probe_explanation,
                     generated_at=rec.generated_at.isoformat() if rec else None,
                 )
             )

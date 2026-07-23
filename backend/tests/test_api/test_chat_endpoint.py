@@ -9,7 +9,15 @@ from app.ai.context_builder import AssistantContextBuilder
 from app.ai.openai_client import MockChatClient
 from app.api.v1.chat import get_chat_agent
 from app.main import app
-from app.models import ChatConversation, ChatMessage, Farm, Plot, Sector, User
+from app.models import (
+    AIResponseFeedback,
+    ChatConversation,
+    ChatMessage,
+    Farm,
+    Plot,
+    Sector,
+    User,
+)
 from tests.test_api.conftest import delete_farm_subtree
 
 _OWNER_EMAIL = "you@irrigai.dev"  # matches the authenticated `client` fixture
@@ -207,3 +215,37 @@ async def test_chat_feedback_is_persisted_for_owned_message(client, chat_farm):
     )
     assert response.status_code == 201
     assert response.json()["rating"] == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_feedback_is_one_mutable_vote_per_message(client, chat_farm, db):
+    chat = await client.post(
+        f"/api/v1/farms/{chat_farm['farm_id']}/chat",
+        json={"message": "resumo"},
+    )
+    message_id = chat.json()["message_id"]
+
+    up = await client.post(
+        "/api/v1/ai/feedback",
+        json={"surface": "chat", "rating": 1, "chat_message_id": message_id},
+    )
+    assert up.status_code == 201
+    down = await client.post(
+        "/api/v1/ai/feedback",
+        json={"surface": "chat", "rating": -1, "chat_message_id": message_id},
+    )
+    assert down.status_code in (200, 201)
+
+    rows = (
+        (
+            await db.execute(
+                select(AIResponseFeedback).where(
+                    AIResponseFeedback.chat_message_id == message_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].rating == -1

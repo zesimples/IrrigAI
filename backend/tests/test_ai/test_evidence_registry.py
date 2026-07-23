@@ -209,6 +209,34 @@ def test_resolver_keeps_only_one_user_facing_row_per_label():
     ]
 
 
+def test_change_analysis_keeps_both_latest_and_previous_decisions():
+    registry = build_evidence_registry(
+        {
+            "recommendation_change": {
+                "latest": {"action": "irrigate"},
+                "previous": {"action": "skip"},
+            }
+        }
+    )
+    latest = registry.entry_for_path("recommendation_change.latest.action")
+    previous = registry.entry_for_path("recommendation_change.previous.action")
+    assert latest is not None and previous is not None
+
+    resolved = registry.resolve_citations(
+        [
+            AgronomicCitation(evidence_id=latest.evidence_id),
+            AgronomicCitation(evidence_id=previous.evidence_id),
+        ]
+    )
+
+    assert len(resolved) == 2
+    assert {item.label for item in resolved} == {
+        "Decisão (recente)",
+        "Decisão (anterior)",
+    }
+    assert {item.value for item in resolved} == {"Regar", "Não regar"}
+
+
 def test_outcome_probe_response_uses_agronomic_wording_not_engine_code():
     path = "outcomes.items[0].details.probe_response_by_depth[0].response"
     registry = build_evidence_registry(

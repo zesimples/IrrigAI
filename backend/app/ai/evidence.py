@@ -445,7 +445,30 @@ def _label_for_path(root: dict | list, path: str) -> str | None:
         if depth_cm is not None:
             depth = _display_value(depth_cm, "cm")
             return f"{field_label} a {depth}" if depth else field_label
+        qualifier = _comparison_qualifier(path)
+        if qualifier:
+            return f"{field_label} ({qualifier})"
         return field_label
+    return None
+
+
+# Comparison surfaces (e.g. change analysis) cite the same field under two
+# sibling branches — recommendation_change.latest.action vs .previous.action.
+# They share a field label ("Decisão"), so the label-based dedup in
+# resolve_citations would drop one. Qualify the label by branch so both survive
+# and the farmer sees which value is the recent one.
+_COMPARISON_SEGMENT_LABELS = {
+    "latest": "recente",
+    "previous": "anterior",
+}
+
+
+def _comparison_qualifier(path: str) -> str | None:
+    segments = path.replace("[", ".").replace("]", "").split(".")
+    for segment in segments:
+        qualifier = _COMPARISON_SEGMENT_LABELS.get(segment)
+        if qualifier:
+            return qualifier
     return None
 
 

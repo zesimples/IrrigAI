@@ -497,6 +497,17 @@ async def test_complete_structured_injects_pt_output_contract(monkeypatch):
     assert "REGISTO DE EVIDÊNCIA PERMITIDA" in system
 
 
+def test_structured_output_contract_frames_unverified_observations_as_claims():
+    """Unverified field observations enter the AI context; the contract must tell
+    the model they are unconfirmed farmer claims, never measured fact."""
+    from app.ai.prompt_templates import get_structured_output_contract
+
+    for language in ("pt", "en"):
+        contract = get_structured_output_contract(language).lower()
+        assert "verified" in contract
+        assert "observ" in contract
+
+
 @pytest.mark.asyncio
 async def test_complete_structured_fallback_low_confidence_on_error(monkeypatch):
     client = MockChatClient()

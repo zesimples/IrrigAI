@@ -358,6 +358,10 @@ FORMATO DA RESPOSTA ESTRUTURADA — obrigatório:
   PERMITIDA anexado ao pedido. Não devolvas caminhos nem valores e nunca inventes IDs.
   Cada ID deve sustentar directamente uma afirmação da resposta. Se não existir um ID
   adequado, declara o dado em falta em "missing_data" em vez de fabricar evidência.
+- As observações de campo do utilizador (field_observations) com "verified": false são
+  relatos NÃO CONFIRMADOS do agricultor — trata-as como indícios a validar, nunca como
+  medições ou factos verificados. Se contradizerem as sondas ou o motor, assinala a
+  discrepância em vez de assumir que a observação está correcta.
 - NÃO calcules valores novos; interpreta apenas os dados já fornecidos.
 """
 
@@ -369,6 +373,10 @@ STRUCTURED RESPONSE FORMAT — mandatory:
 - In "evidence", return ONLY "evidence_id" values listed in the appended ALLOWED
   EVIDENCE REGISTRY. Do not return paths or values and never invent IDs. If no suitable
   ID exists, report the missing datum in "missing_data" instead of fabricating evidence.
+- User field observations (field_observations) with "verified": false are UNCONFIRMED
+  farmer claims — treat them as leads to validate, never as measurements or verified
+  fact. If they contradict the probes or the engine, flag the discrepancy rather than
+  assuming the observation is correct.
 - Do NOT compute new values; only interpret the data provided.
 """
 

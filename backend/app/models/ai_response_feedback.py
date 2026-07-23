@@ -1,6 +1,6 @@
 """Thumbs feedback for chat messages and other AI response surfaces."""
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,16 @@ class AIResponseFeedback(Base, TimestampMixin):
     __table_args__ = (
         CheckConstraint("rating IN (-1, 1)", name="ck_ai_response_feedback_rating"),
         Index("ix_ai_response_feedback_surface_created", "surface", "created_at"),
+        # One mutable vote per user per chat message: reloading the UI must not
+        # spawn duplicate rows that skew ai_response_feedback_total. Partial so
+        # non-chat (entity-based) feedback rows are unaffected.
+        Index(
+            "uq_ai_response_feedback_user_message",
+            "user_id",
+            "chat_message_id",
+            unique=True,
+            postgresql_where=text("chat_message_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)

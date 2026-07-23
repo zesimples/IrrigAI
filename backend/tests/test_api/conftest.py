@@ -36,6 +36,10 @@ _FARM_SUBTREE_DELETES = (
     "JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",
     "DELETE FROM sector_crop_profile WHERE sector_id IN (SELECT s.id FROM sector s "
     "JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",
+    # irrigation_event references BOTH sector and recommendation, so it must be
+    # deleted before either (its recommendation_id FK has no ON DELETE rule).
+    "DELETE FROM irrigation_event WHERE sector_id IN (SELECT s.id FROM sector s "
+    "JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",
     # recommendation_reason before recommendation before sector: PUT /crop-profile
     # now regenerates a recommendation on soil edits (see crop_profiles.py), so
     # fixtures that PUT soil changes leave behind recommendation rows too.

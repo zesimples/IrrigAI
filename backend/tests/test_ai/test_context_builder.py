@@ -5,14 +5,49 @@ Integration tests (with a real DB) should use the fixtures in tests/fixtures/.
 """
 
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.ai.context_builder import (
     AssistantContextBuilder,
     FarmAssistantContext,
     SectorAssistantContext,
+    _farm_probe_confidence,
     _recommendation_snapshot_context,
 )
+
+_NOW = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
+
+
+def test_farm_probe_confidence_no_probe_configured():
+    confidence, explanation = _farm_probe_confidence(
+        has_probe=False, last_reading_at=None, now=_NOW
+    )
+    assert confidence == "no_probe"
+    assert "sonda" in explanation.lower()
+
+
+def test_farm_probe_confidence_fresh_when_reading_recent():
+    confidence, _ = _farm_probe_confidence(
+        has_probe=True, last_reading_at=_NOW - timedelta(hours=2), now=_NOW
+    )
+    assert confidence == "fresh"
+
+
+def test_farm_probe_confidence_stale_between_thresholds():
+    confidence, _ = _farm_probe_confidence(
+        has_probe=True, last_reading_at=_NOW - timedelta(hours=40), now=_NOW
+    )
+    assert confidence == "stale"
+
+
+def test_farm_probe_confidence_forecast_only_when_dead_or_never_read():
+    dead, _ = _farm_probe_confidence(
+        has_probe=True, last_reading_at=_NOW - timedelta(hours=100), now=_NOW
+    )
+    never_read, _ = _farm_probe_confidence(has_probe=True, last_reading_at=None, now=_NOW)
+    assert dead == "forecast_only"
+    assert never_read == "forecast_only"
 
 
 def _make_sector_ctx(**overrides) -> SectorAssistantContext:

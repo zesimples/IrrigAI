@@ -393,7 +393,10 @@ def _reply_chunks(reply: str, chunk_size: int = 80):
     response_model=AIResponseFeedbackOut,
     status_code=201,
 )
+@limiter.limit("30/minute")
 async def create_ai_feedback(
+    request: Request,
+    response: Response,
     body: AIResponseFeedbackCreate,
     access: Access,
     db: AsyncSession = Depends(get_db),
@@ -420,17 +423,37 @@ async def create_ai_feedback(
     if farm_id:
         await access.farm(farm_id)
 
-    row = AIResponseFeedback(
-        user_id=access.current_user.id,
-        farm_id=farm_id,
-        chat_message_id=body.chat_message_id,
-        surface=body.surface,
-        entity_id=body.entity_id,
-        rating=body.rating,
-        comment=body.comment,
-        details=body.details,
-    )
-    db.add(row)
+    # One mutable vote per user per chat message — reloading the UI updates the
+    # existing row instead of stacking duplicates (guarded by a partial unique
+    # index for concurrent writes).
+    row = None
+    if body.chat_message_id:
+        row = (
+            await db.execute(
+                select(AIResponseFeedback).where(
+                    AIResponseFeedback.user_id == access.current_user.id,
+                    AIResponseFeedback.chat_message_id == body.chat_message_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+    if row is None:
+        row = AIResponseFeedback(
+            user_id=access.current_user.id,
+            farm_id=farm_id,
+            chat_message_id=body.chat_message_id,
+            surface=body.surface,
+            entity_id=body.entity_id,
+            rating=body.rating,
+            comment=body.comment,
+            details=body.details,
+        )
+        db.add(row)
+    else:
+        row.rating = body.rating
+        row.comment = body.comment
+        row.details = body.details
+        response.status_code = 200
     await db.flush()
     await db.refresh(row)
     await db.commit()
