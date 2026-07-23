@@ -9,29 +9,9 @@ from dataclasses import dataclass
 from app.schemas.ai import AgronomicCitation, AgronomicEvidence
 from app.utils.format_pt import fmt_pt
 
-_TOP_LEVEL_LABELS = {
-    "engine_decision": "Decisão",
-    "water_balance": "Água no solo",
-    "probe_state": "Estado da sonda",
-    "probe_signal": "Estado da sonda",
-    "probe_summary": "Estado da sonda",
-    "weather": "Previsão do tempo",
-    "weather_changes": "Meteorologia",
-    "irrigation_execution": "Execução da rega",
-    "water_events": "Eventos de água",
-    "water_event_changes": "Eventos de água",
-    "outcomes": "Eficácia da rega",
-    "crop_state": "Estado da cultura",
-    "calibration": "Calibração",
-    "alerts_and_limitations": "Alertas e limitações",
-    "alert": "Atenção",
-    "recommendation_history": "Histórico",
-    "recommendation_change": "Alteração da recomendação",
-    "sectors": "Sectores",
-}
-
 _FIELD_LABELS = {
     "action": "Decisão",
+    "recommendation_action": "Decisão",
     "confidence_score": "Confiança",
     "confidence_level": "Nível de confiança",
     "depletion_mm": "Depleção",
@@ -67,10 +47,26 @@ _FIELD_LABELS = {
     "status": "Estado",
     "severity": "Gravidade",
     "title": "Alerta",
+    "fresh_depths": "Profundidades com dados recentes",
+    "stale_depths": "Profundidades com dados antigos",
+    "dead_depths": "Profundidades sem dados",
+    "recommended_depth_mm": "Dotação recomendada",
+    "actual_applied_mm": "Dotação aplicada",
+    "dose_error_mm": "Desvio da dotação",
+    "dose_error_pct": "Desvio da dotação",
+    "event_count": "Regas avaliadas",
+    "pending_candidate_count": "Calibrações pendentes",
+    "response": "Resposta da sonda",
 }
 
 _PATH_SUFFIX_LABELS = {
     "soil_bounds.source": "Origem dos limites do solo",
+    "scope.sector.name": "Sector",
+    "scope.sector.crop_type": "Cultura",
+    "scope.sector.variety": "Variedade",
+    "scope.sector.phenological_stage": "Fase fenológica",
+    "scope.sector.current_phenological_stage": "Fase fenológica",
+    "scope.sector.area_ha": "Área",
 }
 
 _VALUE_LABELS = {
@@ -119,6 +115,64 @@ _VALUE_LABELS = {
     "configured": "Configuração do sistema",
     "probe_learned": "Aprendida pela sonda",
     "mm_only": "Apenas dotação em milímetros",
+    # Crop and phenological codes stored by the deterministic domain model.
+    "olive": "Olival",
+    "almond": "Amendoal",
+    "maize": "Milho",
+    "tomato": "Tomate",
+    "vineyard": "Vinha",
+    "olive_dormancy": "Dormência",
+    "olive_bud_break": "Abrolhamento",
+    "olive_budbreak": "Abrolhamento",
+    "olive_flowering": "Floração",
+    "olive_fruit_set": "Vingamento",
+    "olive_pit_hardening": "Endurecimento do caroço",
+    "olive_oil_accumulation": "Acumulação de azeite",
+    "olive_veraison": "Pintor",
+    "olive_harvest": "Colheita",
+    "olive_post_harvest": "Pós-colheita",
+    "almond_dormancy": "Dormência",
+    "almond_bloom": "Floração",
+    "almond_fruit_set": "Vingamento",
+    "almond_shell_expansion": "Expansão da casca",
+    "almond_kernel_fill": "Enchimento do miolo",
+    "almond_hull_split": "Abertura do pericarpo",
+    "almond_post_harvest": "Pós-colheita",
+    "vine_dormancy": "Dormência",
+    "vine_bleeding": "Choro",
+    "vine_budbreak": "Abrolhamento",
+    "vine_shoot_growth": "Crescimento do lançamento",
+    "vine_flowering": "Floração",
+    "vine_fruit_set": "Vingamento",
+    "vine_berry_growth": "Crescimento da baga",
+    "vine_veraison": "Pintor",
+    "vine_ripening": "Maturação",
+    "vine_harvest": "Colheita",
+    "vine_post_harvest": "Pós-colheita",
+    "maize_emergence": "Emergência–V6",
+    "maize_vegetative": "V6–VT (crescimento)",
+    "maize_tasseling": "VT–R1 (pendoamento)",
+    "maize_grain_fill": "R1–R3 (enchimento)",
+    "maize_maturation": "R4–R6 (maturação)",
+    # Runtime and outcome states.
+    "executed": "Rega executada",
+    "followed_skip": "Decisão de não regar seguida",
+    "no_event": "Sem rega associada",
+    "candidate": "Candidata",
+    "applied": "Aplicada",
+    "superseded": "Substituída",
+    "fresh": "Recente",
+    "stale": "Antiga",
+    "dead": "Sem dados",
+    "ok": "Boa",
+    "error": "Erro",
+    "offline": "Sem ligação",
+}
+
+_PROBE_RESPONSE_VALUE_LABELS = {
+    "increase": "Humidade aumentou",
+    "stable": "Sem alteração clara",
+    "decrease": "Humidade diminuiu",
 }
 
 _UNIT_LABELS = {
@@ -151,9 +205,24 @@ _NON_CITABLE_FIELDS = {
     "sector_id",
     "recommendation_id",
     "depth_cm",
+    "id",
+    "created_at",
+    "updated_at",
+    "observed_at",
+    "generated_at",
+    "computed_at",
+    "evaluated_at",
+    "pre_irrigation_vwc",
+    "post_irrigation_vwc",
+    "probe_response_delta",
 }
 
 _PATH_TOKEN_RE = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+_INTERNAL_CODE_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
 
 
 @dataclass(frozen=True)
@@ -202,32 +271,40 @@ class EvidenceRegistry:
     def resolve_citations(
         self,
         citations: list[AgronomicCitation],
+        *,
+        limit: int = 5,
     ) -> list[AgronomicEvidence]:
         resolved: list[AgronomicEvidence] = []
-        seen: set[str] = set()
+        seen_ids: set[str] = set()
+        seen_labels: set[str] = set()
         for citation in citations:
             entry = self._by_id.get(citation.evidence_id)
-            if entry is None or entry.evidence_id in seen:
+            label_key = entry.label.casefold() if entry else ""
+            if entry is None or entry.evidence_id in seen_ids or label_key in seen_labels:
                 continue
             resolved.append(entry.to_evidence())
-            seen.add(entry.evidence_id)
+            seen_ids.add(entry.evidence_id)
+            seen_labels.add(label_key)
+            if len(resolved) >= limit:
+                break
         return resolved
 
     def evidence_for_paths(self, paths: list[str], limit: int = 4) -> list[AgronomicEvidence]:
         evidence: list[AgronomicEvidence] = []
+        seen_labels: set[str] = set()
         for path in paths:
             entry = self.entry_for_path(path)
-            if entry is not None:
+            label_key = entry.label.casefold() if entry else ""
+            if entry is not None and label_key not in seen_labels:
                 evidence.append(entry.to_evidence())
+                seen_labels.add(label_key)
             if len(evidence) >= limit:
                 break
         return evidence
 
     def prompt_catalog(self) -> str:
         """Compact ID→path mapping; values already exist in the supplied context."""
-        return "\n".join(
-            f"- {entry.evidence_id}: {entry.source}" for entry in self.entries
-        )
+        return "\n".join(f"- {entry.evidence_id}: {entry.source}" for entry in self.entries)
 
 
 def build_evidence_registry(context: dict | list | None) -> EvidenceRegistry:
@@ -259,12 +336,16 @@ def _walk(
     unit = _unit_for_path(root, path)
     if unit == "m3/m3":
         return
+    label = _label_for_path(root, path)
+    display_value = _display_value(value, unit, path=path)
+    if label is None or display_value is None:
+        return
     entries.append(
         EvidenceEntry(
             evidence_id=_evidence_id(path),
             source=path,
-            value=_display_value(value, unit),
-            label=_label_for_path(root, path),
+            value=display_value,
+            label=label,
         )
     )
 
@@ -323,7 +404,12 @@ def _inferred_unit(path: str, field: str) -> str | None:
     return None
 
 
-def _display_value(value, unit: str | None) -> str:
+def _display_value(
+    value,
+    unit: str | None,
+    *,
+    path: str = "",
+) -> str | None:
     if isinstance(value, bool):
         display = "Sim" if value else "Não"
     elif isinstance(value, float):
@@ -333,12 +419,20 @@ def _display_value(value, unit: str | None) -> str:
         display = str(value)
     else:
         raw = str(value)
-        display = _VALUE_LABELS.get(raw.lower(), raw)
+        lowered = raw.lower()
+        if "probe_response_by_depth" in path and path.endswith(".response"):
+            display = _PROBE_RESPONSE_VALUE_LABELS.get(lowered)
+        else:
+            display = _VALUE_LABELS.get(lowered)
+        if display is None:
+            if _UUID_RE.fullmatch(raw) or _INTERNAL_CODE_RE.fullmatch(raw):
+                return None
+            display = raw
     unit_label = _UNIT_LABELS.get(unit or "", unit)
     return f"{display} {unit_label}" if unit_label else display
 
 
-def _label_for_path(root: dict | list, path: str) -> str:
+def _label_for_path(root: dict | list, path: str) -> str | None:
     for suffix, label in _PATH_SUFFIX_LABELS.items():
         if path == suffix or path.endswith(f".{suffix}"):
             return label
@@ -347,10 +441,10 @@ def _label_for_path(root: dict | list, path: str) -> str:
     if field_label:
         depth_cm = _sibling_depth_cm(root, path)
         if depth_cm is not None:
-            return f"{field_label} a {_display_value(depth_cm, 'cm')}"
+            depth = _display_value(depth_cm, "cm")
+            return f"{field_label} a {depth}" if depth else field_label
         return field_label
-    top = path.split(".", 1)[0].split("[", 1)[0]
-    return _TOP_LEVEL_LABELS.get(top, "Dados")
+    return None
 
 
 def _sibling_depth_cm(root: dict | list, path: str) -> int | float | str | None:
@@ -359,10 +453,7 @@ def _sibling_depth_cm(root: dict | list, path: str) -> int | float | str | None:
         return None
 
     current: object = root
-    tokens = [
-        key if key else int(index)
-        for key, index in _PATH_TOKEN_RE.findall(path)
-    ]
+    tokens = [key if key else int(index) for key, index in _PATH_TOKEN_RE.findall(path)]
     try:
         for token in tokens[:-1]:
             current = current[token]  # type: ignore[index]

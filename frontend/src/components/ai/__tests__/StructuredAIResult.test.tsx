@@ -52,4 +52,55 @@ describe("StructuredAIResult", () => {
       "síntese de contingência",
     );
   });
+
+  it("hides generic/internal evidence and deduplicates user-facing labels", () => {
+    render(
+      <StructuredAIResult
+        interpretation={{
+          ...interpretation,
+          evidence: [
+            {
+              evidence_id: "ev_id",
+              source: "scope.sector.id",
+              label: "Dados",
+              value: "8de7fe5b-6fce-4ebc-95c4-a0ab2b055650",
+            },
+            {
+              evidence_id: "ev_crop",
+              source: "scope.sector.crop_type",
+              label: "Cultura",
+              value: "olive",
+            },
+            {
+              evidence_id: "ev_stage",
+              source: "scope.sector.current_phenological_stage",
+              label: "Fase fenológica",
+              value: "olive_flowering",
+            },
+            {
+              evidence_id: "ev_depletion_1",
+              source: "water_balance.depletion_mm",
+              label: "Depleção",
+              value: "29,04 mm",
+            },
+            {
+              evidence_id: "ev_depletion_2",
+              source: "recommendation_change.depletion_mm",
+              label: "Depleção",
+              value: "30 mm",
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("Dados")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("8de7fe5b-6fce-4ebc-95c4-a0ab2b055650"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Olival")).toBeInTheDocument();
+    expect(screen.getByText("Floração")).toBeInTheDocument();
+    expect(screen.getAllByText("Depleção")).toHaveLength(1);
+    expect(screen.queryByText("30 mm")).not.toBeInTheDocument();
+  });
 });

@@ -1,4 +1,5 @@
 import type { AgronomicInterpretation } from "@/types";
+import { CROP_LABELS, STAGE_LABELS } from "@/lib/cropConfig";
 import { formatDecimal } from "@/lib/utils";
 
 
@@ -19,10 +20,38 @@ const RISK_CLASS = {
   high: "bg-terra/10 text-terra",
 } as const;
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const INTERNAL_CODE_RE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
+
 
 /** Render the validated API object directly; never parse model-authored prose. */
 export function StructuredAIResult({ interpretation, compact = false }: Props) {
   const confidencePct = interpretation.confidence_score * 100;
+  const evidence = interpretation.evidence
+    .reduce<typeof interpretation.evidence>((rows, item) => {
+      const label = item.label?.trim();
+      const rawValue = item.value?.trim();
+      if (!label || label.toLocaleLowerCase("pt-PT") === "dados" || !rawValue) {
+        return rows;
+      }
+      const value =
+        CROP_LABELS[rawValue] ?? STAGE_LABELS[rawValue] ?? rawValue;
+      if (
+        UUID_RE.test(value) ||
+        (INTERNAL_CODE_RE.test(value) && value === rawValue) ||
+        rows.some(
+          (row) =>
+            row.label.toLocaleLowerCase("pt-PT") ===
+            label.toLocaleLowerCase("pt-PT"),
+        )
+      ) {
+        return rows;
+      }
+      rows.push({ ...item, label, value });
+      return rows;
+    }, [])
+    .slice(0, 5);
 
   return (
     <div className="space-y-4" data-testid="structured-ai-result">
@@ -55,19 +84,19 @@ export function StructuredAIResult({ interpretation, compact = false }: Props) {
         </p>
       </div>
 
-      {interpretation.evidence.length > 0 && (
+      {evidence.length > 0 && (
         <section aria-label="Evidência verificada">
           <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-3 mb-2">
             Evidência verificada
           </p>
           <ul className="divide-y divide-black/[0.05] border-y border-black/[0.05]">
-            {interpretation.evidence.map((evidence) => (
+            {evidence.map((item) => (
               <li
-                key={evidence.evidence_id || evidence.source}
+                key={item.evidence_id || item.source}
                 className="grid grid-cols-[minmax(110px,0.7fr)_1fr] gap-3 py-2.5 text-[13px]"
               >
-                <span className="font-medium text-ink">{evidence.label}</span>
-                <span className="text-ink-2">{evidence.value}</span>
+                <span className="font-medium text-ink">{item.label}</span>
+                <span className="text-ink-2">{item.value}</span>
               </li>
             ))}
           </ul>
