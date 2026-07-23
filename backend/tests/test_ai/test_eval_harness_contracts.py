@@ -70,6 +70,21 @@ def test_eval_language_check_rejects_obvious_english_fields():
         assert_response_is_pt_pt(invalid)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("irrigation_advice", "Não é necessário irrigar neste momento."),
+        (
+            "irrigation_advice",
+            "Aguarda-se chuva significativa nas próximas 48 horas.",
+        ),
+        ("irrigation_advice", "Irrigar imediatamente os sectores recomendados."),
+    ],
+)
+def test_eval_language_check_accepts_valid_pt_pt_live_phrasing(field, value):
+    assert_response_is_pt_pt(_interpretation(**{field: value}))
+
+
 def test_eval_probe_output_rejects_raw_vwc_decimals():
     interpretation = _interpretation(summary="Humidade atual 0,341 m³/m³.")
 

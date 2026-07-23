@@ -15,9 +15,11 @@ _ENGLISH_WORD_RE = re.compile(
     re.IGNORECASE,
 )
 _PT_WORD_RE = re.compile(
-    r"\b(a|as|com|da|das|de|do|dos|e|em|está|para|rega|sector|setor|sem|solo|"
-    r"sonda|água|dados|leitura|leituras|actual|actualmente|atuais|coerente|"
-    r"suficiente|resposta|perfil|motor|confirmar|monitorizar|verificar)\b",
+    r"\b(a|as|com|da|das|de|do|dos|e|é|em|está|não|para|rega|regar|irrigar|"
+    r"sector|sectores|setor|setores|sem|solo|sonda|água|chuva|dados|leitura|"
+    r"leituras|actual|actualmente|atuais|coerente|suficiente|necessário|"
+    r"resposta|perfil|motor|momento|próximas|horas|imediatamente|recomendados|"
+    r"aguarda|confirmar|monitorizar|verificar)\b",
     re.IGNORECASE,
 )
 
