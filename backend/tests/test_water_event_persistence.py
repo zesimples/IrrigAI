@@ -6,6 +6,7 @@ Verifies:
 - POST /water-events/{id}/reject  transitions status → "rejected"
 """
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -20,6 +21,8 @@ from app.database import get_db
 from app.main import app
 from app.models import DetectedWaterEvent, Farm, Plot, Probe, Sector
 from app.models.user import User
+from app.schemas.probe import DepthReadings, ProbeDetectedEvent, TimeSeriesPoint
+from app.services import water_event_service
 from app.services.water_event_service import detect_and_persist_water_events
 
 # Seeded probe fixtures below are owned by the demo seed user.
@@ -69,9 +72,7 @@ async def api_client():
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_get_current_user
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             yield ac
     finally:
         app.dependency_overrides.pop(get_db, None)
@@ -85,22 +86,26 @@ async def seed_probe_id(async_db_session: AsyncSession) -> str:
         await async_db_session.execute(select(Farm).where(Farm.name == "Herdade do Esporão"))
     ).scalar_one()
     plot = (
-        await async_db_session.execute(select(Plot).where(Plot.farm_id == farm.id))
-    ).scalars().first()
+        (await async_db_session.execute(select(Plot).where(Plot.farm_id == farm.id)))
+        .scalars()
+        .first()
+    )
     sector = (
-        await async_db_session.execute(select(Sector).where(Sector.plot_id == plot.id))
-    ).scalars().first()
+        (await async_db_session.execute(select(Sector).where(Sector.plot_id == plot.id)))
+        .scalars()
+        .first()
+    )
     probe = (
-        await async_db_session.execute(select(Probe).where(Probe.sector_id == sector.id))
-    ).scalars().first()
+        (await async_db_session.execute(select(Probe).where(Probe.sector_id == sector.id)))
+        .scalars()
+        .first()
+    )
     assert probe is not None
     return probe.id
 
 
 @pytest.mark.asyncio
-async def test_detect_and_persist_is_idempotent(
-    async_db_session: AsyncSession, seed_probe_id: str
-):
+async def test_detect_and_persist_is_idempotent(async_db_session: AsyncSession, seed_probe_id: str):
     """Running detection twice over the same window must not duplicate rows."""
     since = datetime.now(UTC) - timedelta(days=7)
     until = datetime.now(UTC)
@@ -120,10 +125,14 @@ async def test_detect_and_persist_is_idempotent(
     assert keys_first == keys_second
 
     db_rows = (
-        await async_db_session.execute(
-            select(DetectedWaterEvent).where(DetectedWaterEvent.probe_id == seed_probe_id)
+        (
+            await async_db_session.execute(
+                select(DetectedWaterEvent).where(DetectedWaterEvent.probe_id == seed_probe_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     db_keys = {(e.probe_id, e.timestamp, e.kind) for e in db_rows}
     assert keys_first.issubset(db_keys)
 
@@ -136,7 +145,8 @@ async def test_confirm_and_reject_endpoints(
 ):
     """The confirm/reject endpoints must flip status correctly."""
     persisted = await detect_and_persist_water_events(
-        seed_probe_id, async_db_session,
+        seed_probe_id,
+        async_db_session,
         since=datetime.now(UTC) - timedelta(days=7),
         until=datetime.now(UTC),
     )
@@ -152,6 +162,7 @@ async def test_confirm_and_reject_endpoints(
     body = resp.json()
     assert body["status"] == "confirmed"
     assert body["notes"] == "Field-verified"
+    assert body["confirmed_by"] is not None
 
     resp = await api_client.post(
         f"/api/v1/water-events/{target_id}/reject", json={"notes": "Sensor glitch"}
@@ -167,7 +178,8 @@ async def test_list_water_events_endpoint(
     seed_probe_id: str,
 ):
     await detect_and_persist_water_events(
-        seed_probe_id, async_db_session,
+        seed_probe_id,
+        async_db_session,
         since=datetime.now(UTC) - timedelta(days=7),
         until=datetime.now(UTC),
     )
@@ -176,3 +188,86 @@ async def test_list_water_events_endpoint(
     resp = await api_client.get(f"/api/v1/probes/{seed_probe_id}/water-events")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio
+async def test_recalculation_preserves_feedback_and_removes_stale_active_rows(
+    async_db_session: AsyncSession,
+    seed_probe_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    probe = await async_db_session.get(Probe, seed_probe_id)
+    assert probe is not None
+    now = datetime.now(UTC)
+    reviewed_at = now - timedelta(hours=3)
+    stale_at = now - timedelta(hours=10)
+    reviewed = DetectedWaterEvent(
+        id=str(uuid.uuid4()),
+        probe_id=probe.id,
+        sector_id=probe.sector_id,
+        timestamp=reviewed_at,
+        kind="irrigation",
+        confidence="medium",
+        status="confirmed",
+        message="Confirmado no terreno.",
+    )
+    stale = DetectedWaterEvent(
+        id=str(uuid.uuid4()),
+        probe_id=probe.id,
+        sector_id=probe.sector_id,
+        timestamp=stale_at,
+        kind="unlogged",
+        confidence="low",
+        status="active",
+        message="Detecção antiga.",
+    )
+    async_db_session.add_all([reviewed, stale])
+    await async_db_session.flush()
+
+    detector_call: dict[str, datetime] = {}
+
+    async def fake_load(_db, _probe, readings_since, readings_until):
+        detector_call["readings_since"] = readings_since
+        detector_call["readings_until"] = readings_until
+        return [
+            DepthReadings(
+                depth_cm=20,
+                readings=[TimeSeriesPoint(timestamp=now, vwc=0.25, quality="ok")],
+            )
+        ]
+
+    async def fake_detect(*, depths, since, until):
+        assert depths
+        detector_call["detection_since"] = since
+        detector_call["detection_until"] = until
+        return [
+            ProbeDetectedEvent(
+                id="wetting-test",
+                timestamp=reviewed_at + timedelta(minutes=30),
+                kind="unlogged",
+                confidence="high",
+                depths_cm=[20],
+                delta_vwc=0.02,
+                score=0.9,
+                probability_unlogged=0.9,
+                message="Entrada de água provável detectada pela sonda.",
+            )
+        ]
+
+    monkeypatch.setattr(water_event_service, "_load_readings_window", fake_load)
+    monkeypatch.setattr(water_event_service, "detect_water_events", fake_detect)
+
+    result = await detect_and_persist_water_events(
+        probe.id,
+        async_db_session,
+        since=now - timedelta(hours=12),
+        until=now,
+    )
+
+    assert result == []
+    assert detector_call["readings_since"] == now - timedelta(hours=60)
+    assert detector_call["detection_since"] == now - timedelta(hours=48)
+    assert detector_call["readings_until"] == now
+    assert detector_call["detection_until"] == now
+    assert await async_db_session.get(DetectedWaterEvent, reviewed.id) is reviewed
+    assert await async_db_session.get(DetectedWaterEvent, stale.id) is None

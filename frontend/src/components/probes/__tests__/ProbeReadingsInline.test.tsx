@@ -179,4 +179,40 @@ describe("ProbeReadingsInline", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("presents automatic detections as unclassified water entries", () => {
+    mockData = {
+      ...baseData,
+      events: [
+        {
+          id: "event-1",
+          timestamp: "2026-06-26T08:30:00Z",
+          kind: "unlogged",
+          confidence: "medium",
+          depths_cm: [30],
+          delta_vwc: 0.013,
+          score: 0.72,
+          status: "active",
+          message: "Entrada de água provável detectada pela sonda.",
+        },
+      ],
+    };
+    render(
+      <ProbeReadingsInline
+        probeId="probe-1"
+        externalId="P-1"
+        href="/probes/probe-1"
+        sectorId="sector-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByText("P-1"));
+    fireEvent.click(screen.getByText("Entradas de água detectadas"));
+
+    expect(screen.getByText("Entrada de água")).toBeInTheDocument();
+    expect(screen.getByText("Reanalisar")).toBeInTheDocument();
+    expect(screen.getByText(/aumento acumulado 1,3%/)).toBeInTheDocument();
+    expect(screen.getByText("Confirmar rega")).toBeInTheDocument();
+    expect(screen.getByText("Confirmar chuva")).toBeInTheDocument();
+  });
 });

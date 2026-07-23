@@ -322,9 +322,6 @@ async def get_probe_readings(
     # produce inline events (e.g. seeded but never persisted), surface those.
     if not events:
         events = await detect_water_events(
-            db=db,
-            sector=sector,
-            plot=plot,
             depths=event_source_depths,
             since=since,
             until=until,
@@ -466,6 +463,7 @@ async def confirm_water_event(
 ):
     event = await access.water_event(event_id)
     event.status = "confirmed"
+    event.confirmed_by = access.current_user.id
     event.confirmed_at = datetime.now(UTC)
     if body.notes:
         event.notes = body.notes
@@ -485,6 +483,7 @@ async def reject_water_event(
 ):
     event = await access.water_event(event_id)
     event.status = "rejected"
+    event.confirmed_by = access.current_user.id
     event.confirmed_at = datetime.now(UTC)
     if body.notes:
         event.notes = body.notes

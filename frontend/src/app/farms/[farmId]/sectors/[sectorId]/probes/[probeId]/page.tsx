@@ -116,14 +116,14 @@ export default function ProbeDetailPage({ params }: Props) {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
-                <CardTitle>Rega / chuva detectada</CardTitle>
+                <CardTitle>Entradas de água detectadas</CardTitle>
                 <button
                   type="button"
                   onClick={refreshWaterEvents}
                   disabled={refreshingEvents}
                   className="rounded-md border border-rule bg-paper px-3 py-1.5 text-[11.5px] text-ink-2 hover:bg-paper-in disabled:opacity-40"
                 >
-                  {refreshingEvents ? "A recalcular..." : "Recalcular"}
+                  {refreshingEvents ? "A analisar..." : "Reanalisar"}
                 </button>
               </div>
             </CardHeader>
@@ -203,11 +203,16 @@ function DetectedEvents({
 }) {
   const [actionId, setActionId] = useState<string | null>(null);
 
-  async function updateEvent(eventId: string, action: "confirm" | "reject") {
-    setActionId(`${action}:${eventId}`);
+  async function updateEvent(
+    eventId: string,
+    action: "confirm" | "reject",
+    kind?: "irrigation" | "rain",
+  ) {
+    const actionKey = kind ? `${action}:${kind}:${eventId}` : `${action}:${eventId}`;
+    setActionId(actionKey);
     try {
       if (action === "confirm") {
-        await waterEventsApi.confirm(eventId);
+        await waterEventsApi.confirm(eventId, kind ? { kind } : {});
       } else {
         await waterEventsApi.reject(eventId);
       }
@@ -220,7 +225,7 @@ function DetectedEvents({
   if (events.length === 0) {
     return (
       <p className="text-[12.5px] text-ink-3">
-        Sem aumentos rápidos de humidade no período seleccionado.
+        Sem entradas de água prováveis no período seleccionado.
       </p>
     );
   }
@@ -233,7 +238,7 @@ function DetectedEvents({
           <li key={event.id} className="py-3 first:pt-0 last:pb-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${event.kind === "rain" ? "bg-[#0284c7]/10 text-[#0284c7]" : event.kind === "irrigation" ? "bg-olive/10 text-olive" : "bg-[#c9a34a]/10 text-[#c9a34a]"}`}>
-                {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Sem registo"}
+                {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Entrada de água"}
               </span>
               <span className="font-mono text-[11px] text-ink-3">
                 {new Date(event.timestamp).toLocaleString("pt-PT", {
@@ -243,20 +248,17 @@ function DetectedEvents({
                   minute: "2-digit",
                 })}
               </span>
-              <span className="font-mono text-[11px] text-ink-3">conf. {event.confidence}</span>
+              <span className="font-mono text-[11px] text-ink-3">
+                {formatWaterEventConfidence(event)}
+              </span>
               {event.status && event.status !== "active" && (
                 <span className="font-mono text-[11px] text-ink-3">
                   {event.status === "confirmed" ? "confirmado" : "rejeitado"}
                 </span>
               )}
-              {event.score != null && (
-                <span className="font-mono text-[11px] text-ink-3">
-                  score {(event.score * 100).toFixed(0)}%
-                </span>
-              )}
             </div>
             <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
-              {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {formatDecimal((event.delta_vwc * 100), 1)}%.
+              {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento acumulado {formatDecimal((event.delta_vwc * 100), 1)}%.
               {event.rainfall_mm != null ? ` Chuva: ${formatDecimal(event.rainfall_mm, 1)} mm.` : ""}
               {event.irrigation_mm != null ? ` Rega: ${formatDecimal(event.irrigation_mm, 1)} mm.` : ""}
             </p>
@@ -264,11 +266,19 @@ function DetectedEvents({
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => updateEvent(event.id, "confirm")}
+                  onClick={() => updateEvent(event.id, "confirm", "irrigation")}
                   disabled={actionId != null}
                   className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 disabled:opacity-50"
                 >
-                  {actionId === `confirm:${event.id}` ? "A guardar..." : event.kind === "rain" ? "Confirmar chuva" : "Confirmar rega"}
+                  {actionId === `confirm:irrigation:${event.id}` ? "A guardar..." : "Confirmar rega"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateEvent(event.id, "confirm", "rain")}
+                  disabled={actionId != null}
+                  className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 disabled:opacity-50"
+                >
+                  {actionId === `confirm:rain:${event.id}` ? "A guardar..." : "Confirmar chuva"}
                 </button>
                 <button
                   type="button"
@@ -290,4 +300,16 @@ function DetectedEvents({
       })}
     </ul>
   );
+}
+
+function formatWaterEventConfidence(event: ProbeDetectedEvent): string {
+  if (event.score != null) {
+    return `Confiança ${formatDecimal(event.score * 100, 0)}%`;
+  }
+  const label = {
+    low: "baixa",
+    medium: "média",
+    high: "alta",
+  }[event.confidence] ?? event.confidence;
+  return `Confiança ${label}`;
 }

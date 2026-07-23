@@ -240,6 +240,7 @@ export function ProbeReadingsInline({
               <DetectedEvents
                 events={visibleEvents}
                 probeId={probeId}
+                since={since}
                 hoveredEventId={hoveredEventId}
                 onHover={setHoveredEventId}
                 onEventUpdated={refetch}
@@ -458,9 +459,10 @@ export function ProbeReadingsInline({
   );
 }
 
-function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdated }: {
+function DetectedEvents({ events, probeId, since, hoveredEventId, onHover, onEventUpdated }: {
   events: ProbeDetectedEvent[];
   probeId: string;
+  since: string;
   hoveredEventId: string | null;
   onHover: (id: string | null) => void;
   onEventUpdated: () => void | Promise<void>;
@@ -475,7 +477,7 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
       let persistedId = event.id;
       if (event.id.startsWith("wetting-")) {
         // Temp event — persist first, then find the matching row by timestamp+kind
-        const persisted = await probesApi.refreshWaterEvents(probeId);
+        const persisted = await probesApi.refreshWaterEvents(probeId, { since });
         const match = persisted.find(
           (e) => e.kind === event.kind && Math.abs(new Date(e.timestamp).getTime() - new Date(event.timestamp).getTime()) < 60_000
         );
@@ -493,6 +495,16 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
     }
   }
 
+  async function refreshEvents() {
+    setActionId("refresh");
+    try {
+      await probesApi.refreshWaterEvents(probeId, { since });
+      await onEventUpdated();
+    } finally {
+      setActionId(null);
+    }
+  }
+
   return (
     <div className="rounded-md border border-rule-soft bg-card">
       <button
@@ -501,7 +513,7 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
         className="flex w-full items-center justify-between px-4 py-3 text-left"
       >
         <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3">
-          Rega / chuva detectada
+          Entradas de água detectadas
         </span>
         <span className="flex items-center gap-2 shrink-0">
           {events.length > 0 && (
@@ -513,9 +525,22 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
 
       {open && (
         <div className="border-t border-rule-soft px-4 pb-3 pt-2">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-[11.5px] text-ink-3">
+              A sonda detecta a entrada; confirma abaixo se foi rega ou chuva.
+            </p>
+            <button
+              type="button"
+              onClick={refreshEvents}
+              disabled={actionId != null}
+              className="shrink-0 rounded-md border border-rule px-2.5 py-1 font-mono text-[10.5px] text-ink-2 disabled:opacity-50"
+            >
+              {actionId === "refresh" ? "A analisar..." : "Reanalisar"}
+            </button>
+          </div>
           {events.length === 0 ? (
             <p className="text-[12.5px] text-ink-3">
-              Sem aumentos rápidos de humidade no período seleccionado.
+              Sem entradas de água prováveis no período seleccionado.
             </p>
           ) : (
             <ul className="divide-y divide-rule-soft">
@@ -529,7 +554,7 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
                   >
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${event.kind === "rain" ? "bg-[#0284c7]/10 text-[#0284c7]" : event.kind === "irrigation" ? "bg-olive/10 text-olive" : "bg-[#c9a34a]/10 text-[#c9a34a]"}`}>
-                        {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Sem registo"}
+                        {event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : "Entrada de água"}
                       </span>
                       <span className="font-mono text-[11px] text-ink-3">
                         {new Date(event.timestamp).toLocaleString("pt-PT", {
@@ -540,21 +565,16 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
                         })}
                       </span>
                       <span className="font-mono text-[11px] text-ink-3">
-                        conf. {event.confidence}
+                        {formatWaterEventConfidence(event)}
                       </span>
                       {event.status && event.status !== "active" && (
                         <span className="font-mono text-[11px] text-ink-3">
                           {event.status === "confirmed" ? "confirmado" : "rejeitado"}
                         </span>
                       )}
-                      {event.score != null && (
-                        <span className="font-mono text-[11px] text-ink-3">
-                          score {(event.score * 100).toFixed(0)}%
-                        </span>
-                      )}
                     </div>
                     <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
-                      {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento soma {formatDecimal((event.delta_vwc * 100), 1)}%.
+                      {event.message} Prof.: {event.depths_cm.join(", ")} cm; aumento acumulado {formatDecimal((event.delta_vwc * 100), 1)}%.
                       {event.rainfall_mm != null ? ` Chuva: ${formatDecimal(event.rainfall_mm, 1)} mm.` : ""}
                       {event.irrigation_mm != null ? ` Rega: ${formatDecimal(event.irrigation_mm, 1)} mm.` : ""}
                     </p>
@@ -595,4 +615,16 @@ function DetectedEvents({ events, probeId, hoveredEventId, onHover, onEventUpdat
       )}
     </div>
   );
+}
+
+function formatWaterEventConfidence(event: ProbeDetectedEvent): string {
+  if (event.score != null) {
+    return `Confiança ${formatDecimal(event.score * 100, 0)}%`;
+  }
+  const label = {
+    low: "baixa",
+    medium: "média",
+    high: "alta",
+  }[event.confidence] ?? event.confidence;
+  return `Confiança ${label}`;
 }

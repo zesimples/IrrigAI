@@ -170,7 +170,7 @@ export function ProbeSumChart({
                 strokeWidth={hovered ? 2 : 1}
                 strokeOpacity={hovered ? 1 : 0.6}
                 label={{
-                  value: event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : `+${formatDecimal((event.delta_vwc * 100), 1)}%`,
+                  value: event.kind === "rain" ? "Chuva" : event.kind === "irrigation" ? "Rega" : `Água +${formatDecimal((event.delta_vwc * 100), 1)}%`,
                   fontSize: hovered ? 11 : 10,
                   fontWeight: hovered ? 600 : 400,
                   fill: color,
