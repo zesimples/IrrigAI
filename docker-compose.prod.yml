@@ -23,6 +23,17 @@ services:
     environment:
       DEBUG: "false"
       LOG_LEVEL: INFO
+      # The backend has no direct port exposure in prod (see below) — the only
+      # peer that can ever connect is the reverse proxy on the same host
+      # (nginx here, or systemd Caddy via the loopback-only publication in the
+      # production-local docker-compose.caddy.yml). That connection is NATed
+      # through Docker's bridge network, so uvicorn's immediate TCP peer is
+      # the docker gateway, never the real client or 127.0.0.1 — uvicorn's
+      # default `forwarded_allow_ips=127.0.0.1` therefore never trusts
+      # X-Forwarded-For, and every request (including rate-limited ones like
+      # /auth/token) collapses onto one shared IP bucket. Trusting all peers
+      # here is safe precisely because nothing else can reach this port.
+      FORWARDED_ALLOW_IPS: "*"
     # No direct port exposure — all traffic goes through nginx
     ports: !reset []
 

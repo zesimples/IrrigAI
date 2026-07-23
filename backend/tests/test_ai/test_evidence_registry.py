@@ -24,6 +24,23 @@ def test_registry_assigns_stable_ids_to_exact_scalar_paths():
     assert first.entry_for_path("weather.forecast[0].rainfall_mm") is not None
 
 
+def test_whole_number_float_values_are_not_truncated():
+    context = {
+        "water_balance": {
+            "units": {"depletion_mm": "mm", "taw_mm": "mm"},
+            "depletion_mm": 40.0,
+            "taw_mm": 100.0,
+        },
+    }
+
+    registry = build_evidence_registry(context)
+
+    depletion = registry.entry_for_path("water_balance.depletion_mm")
+    taw = registry.entry_for_path("water_balance.taw_mm")
+    assert depletion is not None and depletion.value == "40 mm"
+    assert taw is not None and taw.value == "100 mm"
+
+
 def test_registry_excludes_raw_vwc_values_from_citable_evidence():
     registry = build_evidence_registry(
         {

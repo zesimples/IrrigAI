@@ -413,8 +413,10 @@ def _display_value(
     if isinstance(value, bool):
         display = "Sim" if value else "Não"
     elif isinstance(value, float):
-        digits = 0 if value.is_integer() else 2
-        display = fmt_pt(value, digits).rstrip("0").rstrip(",")
+        if value.is_integer():
+            display = fmt_pt(value, 0)
+        else:
+            display = fmt_pt(value, 2).rstrip("0").rstrip(",")
     elif isinstance(value, int):
         display = str(value)
     else:

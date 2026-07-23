@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { ChatPanel } from "./ChatPanel";
 
 // jsdom does not implement scrollIntoView
@@ -74,6 +74,86 @@ describe("ChatPanel", () => {
     await screen.findByText("Correr a calibração inteligente.");
     fireEvent.click(screen.getByText("Confirmar"));
     await waitFor(() => expect(calibrationApi.run).toHaveBeenCalledWith("sec-9"));
+  });
+
+  it("does not let a slow conversation-resume overwrite a message the user already sent", async () => {
+    let resolveConversations: (rows: unknown[]) => void = () => {};
+    (chatApi.conversations as any).mockReturnValue(
+      new Promise((resolve) => {
+        resolveConversations = resolve;
+      }),
+    );
+    (chatApi.streamChat as any).mockImplementation(
+      async (_farmId: string, _body: unknown, callbacks: { onDelta: (text: string) => void }) => {
+        callbacks.onDelta("resposta rápida");
+        return {
+          reply: "resposta rápida",
+          conversation_id: "conv-new",
+          message_id: "msg-new",
+          proposed_action: null,
+          degraded: false,
+          model_name: "mock",
+        };
+      },
+    );
+
+    render(<ChatPanel farmId="f1" onClose={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "primeira" } });
+    fireEvent.click(screen.getByLabelText("Enviar"));
+    await screen.findByText("resposta rápida");
+
+    // The resume fetch (in flight since mount) only resolves after the send
+    // above already completed — it must not clobber the sent exchange.
+    await act(async () => {
+      resolveConversations([
+        {
+          id: "conv-old",
+          sector_id: null,
+          title: null,
+          last_message_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      (chatApi.conversation as any).mockResolvedValue({
+        id: "conv-old",
+        messages: [
+          { id: "old-1", role: "user", content: "mensagem antiga", proposed_action: null, degraded: false },
+        ],
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("primeira")).toBeInTheDocument();
+    expect(screen.getByText("resposta rápida")).toBeInTheDocument();
+    expect(screen.queryByText("mensagem antiga")).not.toBeInTheDocument();
+  });
+
+  it("clears the transcript when the active sector changes", async () => {
+    (chatApi.conversations as any).mockResolvedValue([]);
+    const { rerender } = render(<ChatPanel farmId="f1" sectorId="sec-1" onClose={() => {}} />);
+
+    (chatApi.streamChat as any).mockImplementation(
+      async (_farmId: string, _body: unknown, callbacks: { onDelta: (text: string) => void }) => {
+        callbacks.onDelta("resposta do sector 1");
+        return {
+          reply: "resposta do sector 1",
+          conversation_id: "conv-sec-1",
+          message_id: "msg-1",
+          proposed_action: null,
+          degraded: false,
+          model_name: "mock",
+        };
+      },
+    );
+    fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "pergunta do sector 1" } });
+    fireEvent.click(screen.getByLabelText("Enviar"));
+    await screen.findByText("resposta do sector 1");
+
+    rerender(<ChatPanel farmId="f1" sectorId="sec-2" onClose={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("pergunta do sector 1")).not.toBeInTheDocument();
+      expect(screen.queryByText("resposta do sector 1")).not.toBeInTheDocument();
+    });
   });
 
   it("dispatches regenerate_recommendation via sectorsApi", async () => {

@@ -32,9 +32,19 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
   const [loading, setLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Guards the resume fetch below from clobbering a send that started in this
+  // scope before the fetch resolved — without it, the resume's setMessages
+  // can overwrite an in-flight/completed turn and fork a second conversation.
+  const hasSentRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
+    // Farm/sector are the conversation's scope key. Next.js can keep this
+    // component mounted across a param-only navigation, so state from the
+    // previous scope must not leak into the new one.
+    hasSentRef.current = false;
+    setConversationId(null);
+    setMessages([]);
     if (typeof chatApi.conversations !== "function") return;
     chatApi
       .conversations(farmId)
@@ -42,9 +52,9 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
         rows.find((row) => row.sector_id === (sectorId ?? null)),
       )
       .then((conversation) => {
-        if (!conversation || cancelled) return;
+        if (!conversation || cancelled || hasSentRef.current) return;
         return chatApi.conversation(farmId, conversation.id).then((detail) => {
-          if (cancelled) return;
+          if (cancelled || hasSentRef.current) return;
           setConversationId(detail.id);
           setMessages(
             detail.messages.map((message) => ({
@@ -125,6 +135,7 @@ export function ChatPanel({ farmId, sectorId, onClose }: ChatPanelProps) {
   async function sendMessage() {
     const text = input.trim();
     if (!text || loading) return;
+    hasSentRef.current = true;
     setInput("");
     pushUser(text);
     setMessages((prev) => [...prev, { role: "assistant", text: "" }]);
