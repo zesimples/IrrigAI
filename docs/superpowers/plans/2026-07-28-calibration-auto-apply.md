@@ -10,6 +10,25 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-28-calibration-auto-apply-design.md`
 
+> **Post-implementation amendment (2026-07-28 final review) — the gate keys on the RESOLVED soil-bound source.**
+> The snippets below (and the spec's original policy table) gated on raw DB flags: `SectorCropProfile.is_customized`
+> and "a `probe_calibration` row exists". **That wording is superseded.** `soil_bounds` honours `scp_override` only
+> when BOTH `scp_fc` and `scp_pwp` are set, and it *ignores* a calibration older than `CALIB_MAX_AGE_DAYS` (90) —
+> so the raw flags blocked two populations forever, in both cases against the design's stated intent: a `mad`-only
+> profile edit reported `manual_override` every Monday on a sector still governed by the clamping preset, and a
+> stale calibration made `before.fc` the preset, turning the real fix into `delta_exceeds_cap` on a row that can
+> only get staler. Gate 1 now fires on `before.source == "scp_override"` and gate 4 applies on
+> `before.source == "probe_calibrated"`; the parameters are `bounds_from_manual_override` /
+> `bounds_from_prior_calibration`, derived in the service from `before.source` (the policy module stays pure).
+> `soil_bounds` exports `SOURCE_*` constants for the coupling. The snippets in this plan have been updated in
+> place. **The invariant is unchanged: the auto path never writes `SectorCropProfile.is_customized`.**
+>
+> Two further review fixes, also reflected below: `compute_and_auto_apply` returns an `AutoApplyOutcome`
+> (decision + before/candidate FC & refill + resolved source + method) so the sweep can emit the spec's
+> per-sector INFO/WARNING lines, and all counters/metrics/logs now run *after* the per-sector savepoint has
+> released (a `RELEASE SAVEPOINT` failure could otherwise count one sector as both `applied` and `error`).
+> `CalibrationSweepCounts.total` was deleted — it never reconciled against `len(sectors)`.
+
 ## Global Constraints
 
 - Python: ruff, line-length 100, target py312. Rules E, F, I (isort), UP, B, SIM.
@@ -60,7 +79,7 @@ Both reduce work and are already reflected in the tasks below:
   - `REASON_APPLIED`, `REASON_MANUAL_OVERRIDE`, `REASON_PROBE_STALE`, `REASON_FLATLINE`, `REASON_DELTA_EXCEEDS_CAP`, `REASON_NO_CANDIDATE` (str constants)
   - `CalibrationQuality(probe_hours_since_reading: float | None, all_depths_flatlined: bool)` — frozen dataclass
   - `AutoApplyDecision(apply: bool, reason: str)` — frozen dataclass
-  - `evaluate_auto_apply(candidate, before, quality, *, is_customized: bool, has_prior_calibration: bool) -> AutoApplyDecision`
+  - `evaluate_auto_apply(candidate, before, quality, *, bounds_from_manual_override: bool, bounds_from_prior_calibration: bool) -> AutoApplyDecision`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -105,7 +124,7 @@ def _quality(hours: float | None = 5.0, flat: bool = False):
 def test_healthy_candidate_applies():
     decision = evaluate_auto_apply(
         _candidate(), _before(), _quality(),
-        is_customized=False, has_prior_calibration=True,
+        bounds_from_manual_override=False, bounds_from_prior_calibration=True,
     )
     assert decision.apply is True
     assert decision.reason == REASON_APPLIED
@@ -114,17 +133,17 @@ def test_healthy_candidate_applies():
 def test_manual_override_blocks():
     decision = evaluate_auto_apply(
         _candidate(), _before(fc=0.30, pwp=0.19, source="scp_override"), _quality(),
-        is_customized=True, has_prior_calibration=True,
+        bounds_from_manual_override=True, bounds_from_prior_calibration=True,
     )
     assert decision.apply is False
     assert decision.reason == REASON_MANUAL_OVERRIDE
 
 
 def test_manual_override_wins_over_staleness():
-    """Gate precedence: a customized AND stale sector reports manual_override."""
+    """Gate precedence: an override-governed AND stale sector reports manual_override."""
     decision = evaluate_auto_apply(
         _candidate(), _before(), _quality(hours=500.0),
-        is_customized=True, has_prior_calibration=True,
+        bounds_from_manual_override=True, bounds_from_prior_calibration=True,
     )
     assert decision.reason == REASON_MANUAL_OVERRIDE
 
@@ -132,7 +151,7 @@ def test_manual_override_wins_over_staleness():
 def test_stale_probe_blocks():
     decision = evaluate_auto_apply(
         _candidate(), _before(), _quality(hours=73.0),
-        is_customized=False, has_prior_calibration=True,
+        bounds_from_manual_override=False, bounds_from_prior_calibration=True,
     )
     assert decision.apply is False
     assert decision.reason == REASON_PROBE_STALE
@@ -141,7 +160,7 @@ def test_stale_probe_blocks():
 def test_missing_last_reading_treated_as_stale():
     decision = evaluate_auto_apply(
         _candidate(), _before(), _quality(hours=None),
-        is_customized=False, has_prior_calibration=True,
+        bounds_from_manual_override=False, bounds_from_prior_calibration=True,
     )
     assert decision.reason == REASON_PROBE_STALE
 
@@ -150,7 +169,7 @@ def test_fresh_boundary_at_threshold_applies():
     """72.0h is still 'fresh enough' — only strictly beyond it vetoes."""
     decision = evaluate_auto_apply(
         _candidate(), _before(), _quality(hours=72.0),
-        is_customized=False, has_prior_calibration=True,
+        bounds_from_manual_override=False, bounds_from_prior_calibration=True,
     )
     assert decision.apply is True
 
@@ -158,7 +177,7 @@ def test_fresh_boundary_at_threshold_applies():
 def test_all_depths_flatlined_blocks():
     decision = evaluate_auto_apply(
         _candidate(), _before(), _quality(flat=True),
-        is_customized=False, has_prior_calibration=True,
+        bounds_from_manual_override=False, bounds_from_prior_calibration=True,
     )
     assert decision.apply is False
     assert decision.reason == REASON_FLATLINE
@@ -167,7 +186,7 @@ def test_all_depths_flatlined_blocks():
 def test_delta_cap_blocks_large_fc_move_on_calibrated_sector():
     decision = evaluate_auto_apply(
         _candidate(fc=0.42), _before(fc=0.29), _quality(),
-        is_customized=False, has_prior_calibration=True,
+        bounds_from_manual_override=False, bounds_from_prior_calibration=True,
     )
     assert decision.apply is False
     assert decision.reason == REASON_DELTA_EXCEEDS_CAP
@@ -177,7 +196,7 @@ def test_delta_cap_blocks_refill_only_move():
     """TAW is the spread — a steady FC with a collapsing refill must still block."""
     decision = evaluate_auto_apply(
         _candidate(fc=0.30, refill=0.11), _before(fc=0.30, pwp=0.19), _quality(),
-        is_customized=False, has_prior_calibration=True,
+        bounds_from_manual_override=False, bounds_from_prior_calibration=True,
     )
     assert decision.apply is False
     assert decision.reason == REASON_DELTA_EXCEEDS_CAP
@@ -188,7 +207,7 @@ def test_delta_exactly_at_cap_applies():
         _candidate(fc=0.30 + AUTO_APPLY_MAX_DELTA_M3M3, refill=0.19),
         _before(fc=0.30, pwp=0.19),
         _quality(),
-        is_customized=False, has_prior_calibration=True,
+        bounds_from_manual_override=False, bounds_from_prior_calibration=True,
     )
     assert decision.apply is True
 
@@ -202,7 +221,7 @@ def test_first_ever_application_is_uncapped():
     decision = evaluate_auto_apply(
         _candidate(fc=0.31, refill=0.20), _before(fc=0.16, pwp=0.07, source="plot_preset"),
         _quality(),
-        is_customized=False, has_prior_calibration=False,
+        bounds_from_manual_override=False, bounds_from_prior_calibration=False,
     )
     assert decision.apply is True
     assert decision.reason == REASON_APPLIED
@@ -212,7 +231,7 @@ def test_envelope_method_is_eligible():
     """Gating on method='cycles' would reject the population this feature targets."""
     decision = evaluate_auto_apply(
         _candidate(method="envelope"), _before(), _quality(),
-        is_customized=False, has_prior_calibration=True,
+        bounds_from_manual_override=False, bounds_from_prior_calibration=True,
     )
     assert decision.apply is True
 ```
@@ -283,8 +302,8 @@ def evaluate_auto_apply(
     before: ResolvedSoilBounds,
     quality: CalibrationQuality,
     *,
-    is_customized: bool,
-    has_prior_calibration: bool,
+    bounds_from_manual_override: bool,   # before.source == "scp_override"
+    bounds_from_prior_calibration: bool,  # before.source == "probe_calibrated"
 ) -> AutoApplyDecision:
     """Decide whether `candidate` may replace the sector's live bounds unattended.
 
@@ -292,10 +311,10 @@ def evaluate_auto_apply(
     here — compute_sector_calibration returns None rather than an implausible
     result, so a candidate reaching this function has already cleared them.
     """
-    # 1. A deliberate human soil edit outranks measurement. Note the caller must
-    #    also leave `is_customized` untouched — unlike the manual endpoints, the
-    #    scheduler never clears an agronomist's choice.
-    if is_customized:
+    # 1. A deliberate human soil edit outranks measurement — i.e. the resolver chose
+    #    scp_override. The caller must also leave `SectorCropProfile.is_customized`
+    #    untouched: unlike the manual endpoints, the scheduler never clears it.
+    if bounds_from_manual_override:
         return AutoApplyDecision(False, REASON_MANUAL_OVERRIDE)
 
     # 2. A dead probe's window may be mostly frozen or missing data. Missing
@@ -310,10 +329,11 @@ def evaluate_auto_apply(
         return AutoApplyDecision(False, REASON_FLATLINE)
 
     # 4. Drift guard. Only meaningful against a previously trusted probe-derived
-    #    value: for a never-calibrated sector `before` is a soil-texture table
-    #    lookup, so a large distance means the preset is wrong (the clamp bug),
-    #    not that the measurement is anomalous. Hence first application is uncapped.
-    if has_prior_calibration:
+    #    value: when `before` is a soil-texture table lookup (never calibrated, or
+    #    calibrated so long ago the resolver ignores it), a large distance means the
+    #    preset is wrong (the clamp bug), not that the measurement is anomalous.
+    #    Hence a first — or post-staleness — application is uncapped.
+    if bounds_from_prior_calibration:
         fc_move = abs(candidate.observed_fc - before.fc)
         refill_move = abs(candidate.observed_refill - before.pwp)
         if (
@@ -1008,36 +1028,37 @@ In `compute_and_record`, the body between `now = datetime.now(UTC)` and `db.add(
 Add to `ProbeCalibrationService`:
 
 ```python
-    async def compute_and_auto_apply(self, sector_id: str, db: AsyncSession):
+    async def compute_and_auto_apply(
+        self, sector_id: str, db: AsyncSession
+    ) -> AutoApplyOutcome:
         """Compute a candidate and promote it only if the policy allows.
 
         A blocked candidate persists NOTHING — no history row, no projection
         change. Unlike the manual endpoints, this path never clears
         SectorCropProfile.is_customized: a deliberate human soil edit outranks
         unattended measurement.
+
+        Returns an AutoApplyOutcome so the caller can log the before/candidate
+        values once the sector's savepoint has released.
         """
         from sqlalchemy import select
 
         from app.engine.calibration_policy import (
             REASON_NO_CANDIDATE,
-            AutoApplyDecision,
             evaluate_auto_apply,
         )
         from app.engine.pipeline import resolve_sector_soil_bounds
+        from app.engine.soil_bounds import SOURCE_PROBE_CALIBRATED, SOURCE_SCP_OVERRIDE
         from app.models import ProbeCalibration
-        from app.models.sector_crop_profile import SectorCropProfile
         from app.services.audit_service import audit
 
         result = await self._calibrator.compute_sector_calibration(sector_id, db)
         if result is None:
-            return AutoApplyDecision(False, REASON_NO_CANDIDATE)
+            return AutoApplyOutcome(AutoApplyDecision(False, REASON_NO_CANDIDATE))
 
         before = await resolve_sector_soil_bounds(sector_id, db)
         existing = (await db.execute(
             select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
-        )).scalar_one_or_none()
-        scp = (await db.execute(
-            select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
         )).scalar_one_or_none()
         quality = await self.build_quality(sector_id, db)
 
@@ -1045,11 +1066,21 @@ Add to `ProbeCalibrationService`:
             result,
             before,
             quality,
-            is_customized=bool(scp and scp.is_customized),
-            has_prior_calibration=existing is not None,
+            # Gate on the source the resolver actually chose, not on raw DB flags.
+            bounds_from_manual_override=before.source == SOURCE_SCP_OVERRIDE,
+            bounds_from_prior_calibration=before.source == SOURCE_PROBE_CALIBRATED,
+        )
+        outcome = AutoApplyOutcome(
+            decision,
+            before_fc=before.fc,
+            before_refill=before.pwp,
+            before_source=before.source,
+            candidate_fc=result.observed_fc,
+            candidate_refill=result.observed_refill,
+            method=result.method,
         )
         if not decision.apply:
-            return decision
+            return outcome
 
         now = datetime.now(UTC)
         run = self._new_run(
@@ -1074,8 +1105,14 @@ Add to `ProbeCalibrationService`:
                 "run_id": str(run.id),
             },
         )
-        return decision
+        return outcome
 ```
+
+`AutoApplyOutcome` is a small frozen dataclass in the service module (decision +
+before/candidate FC & refill + resolved source + method, with `apply`/`reason` properties
+delegating to the decision). The values deliberately do NOT go on the frozen
+`AutoApplyDecision`: keeping the pure policy a function of thresholds only is what makes its
+tests fixture-free.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -1208,14 +1245,11 @@ class CalibrationSweepCounts:
     no_candidate: int = 0
     candidates: int = 0
     failed: int = 0
-
-    @property
-    def total(self) -> int:
-        return (
-            self.applied + self.skipped + self.no_candidate
-            + self.candidates + self.failed
-        )
 ```
+
+(The final review deleted the `total` property this plan originally added: it never
+reconciles against `len(sectors)` — no-candidate sectors are uncounted on the flag-off
+path — so it was a false invariant inviting wrong assumptions.)
 
 Add `from dataclasses import dataclass` to the imports.
 
@@ -1254,38 +1288,37 @@ Replace the whole method body:
         counts = CalibrationSweepCounts()
         for sector in sectors:
             sector_id = str(sector.id)
+            outcome: AutoApplyOutcome | None = None
+            recorded_candidate = False
             try:
                 async with db.begin_nested():
-                    if not auto_apply:
+                    if auto_apply:
+                        outcome = await self.compute_and_auto_apply(sector_id, db)
+                    else:
                         recorded = await self.compute_and_record(
                             sector_id, db, apply=False, source="scheduled"
                         )
-                        if recorded is not None:
-                            counts.candidates += 1
-                        continue
-
-                    decision = await self.compute_and_auto_apply(sector_id, db)
-                    if decision.apply:
-                        counts.applied += 1
-                        calibration_auto_apply_total.labels(
-                            "applied", decision.reason, "any"
-                        ).inc()
-                    elif decision.reason == REASON_NO_CANDIDATE:
-                        counts.no_candidate += 1
-                        calibration_auto_apply_total.labels(
-                            "no_candidate", decision.reason, "none"
-                        ).inc()
-                    else:
-                        counts.skipped += 1
-                        calibration_auto_apply_total.labels(
-                            "skipped", decision.reason, "any"
-                        ).inc()
+                        recorded_candidate = recorded is not None
             except Exception:
-                counts.failed += 1
-                calibration_auto_apply_total.labels("error", "exception", "none").inc()
-                logger.exception("Probe calibration failed for sector %s", sector.id)
+                self._count_failure(sector_id, counts)
+                continue
+
+            # Savepoint released — the work below can no longer be rolled back, so
+            # counters and logs describe what actually persisted. (Final-review fix:
+            # increments used to sit inside the block, so a RELEASE SAVEPOINT failure
+            # counted one sector as both applied and error.)
+            if auto_apply and outcome is not None:
+                self._record_outcome(sector_id, outcome, counts)
+            elif recorded_candidate:
+                counts.candidates += 1
         return counts
 ```
+
+`_record_outcome` owns the tally, the metric and the spec's per-sector logging: one INFO with
+`fc before -> after`, `refill before -> after`, the method and the resolved source that
+governed the live bounds for an applied sector; one WARNING with the reason and both value
+pairs for a quality-blocked one (blocked runs persist no row, so that line is the only trace).
+`_count_failure` owns the `error` metric plus `logger.exception`.
 
 Note on the `method` label: `AutoApplyDecision` carries no method, so this task labels it `"any"` / `"none"`. Threading the real `cycles`/`envelope` value through would mean widening the decision object; the label exists to spot a sudden shift in which path dominates, and can be enriched later without a breaking change.
 

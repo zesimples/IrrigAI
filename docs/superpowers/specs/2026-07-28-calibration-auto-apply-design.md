@@ -1,8 +1,42 @@
 # Probe-calibration auto-apply — design
 
 **Date:** 2026-07-28
-**Status:** approved, not implemented
+**Status:** implemented; gate inputs amended by the final review (see *Amendment*)
 **Scope:** backend only (engine, service, scheduler, one migration, one API field)
+
+## Amendment (2026-07-28, final whole-branch review) — gates key on the RESOLVED source
+
+Gates 1 and 4 below were originally specified against raw DB flags
+(`SectorCropProfile.is_customized`, "a `probe_calibration` row exists"). **That wording is
+superseded: both gates now key on `before.source`, the source `resolve_soil_bounds` actually
+chose** — `scp_override` for gate 1, `probe_calibrated` for gate 4. The tables and prose in
+this document have been updated in place; this note records why.
+
+The raw flags deadlocked two real populations, in both cases *against* this design's stated
+intent:
+
+- **A stale calibration blocked its own replacement forever.** `soil_bounds` ignores a
+  calibration older than `CALIB_MAX_AGE_DAYS` (90) and falls through to the preset. So for a
+  sector calibrated in April whose probe went offline 100 days and is now back with 30 clean
+  days, `before.fc` is the preset 0.16 while the candidate is 0.44 — a 0.28 move measured
+  against a preset the sector was never measured on, i.e. `delta_exceeds_cap`, and the row
+  can only get staler. Gate 4 exists to guard *movement away from a previously trusted
+  probe-derived value*; a calibration the engine has stopped trusting is not that value.
+- **`is_customized` often does not govern soil bounds.** `PUT /crop-profile` sets it on ANY
+  profile edit, but `soil_bounds` honours `scp_override` only when BOTH `scp_fc` and
+  `scp_pwp` are non-null. An agronomist bumping `mad` on a clamped sector whose soil fields
+  are NULL made the gate report `manual_override` every Monday while the sector stayed pinned
+  at ~0% depletion — the exact bug this feature exists to fix. Gate 1 exists because *a
+  deliberate human soil edit* outranks measurement; a `mad` edit is not a soil edit.
+
+Keying on the resolved source is therefore strictly more faithful to the intent: it gates on
+the value the engine computes depletion from. The policy parameters were renamed
+`bounds_from_manual_override` / `bounds_from_prior_calibration` so the names stop lying, and
+`soil_bounds` now exports named `SOURCE_*` constants for the coupling.
+
+**The invariant is unchanged and still absolute:** the auto path never writes
+`SectorCropProfile.is_customized`. A human's non-soil customization simply no longer blocks a
+sector whose bounds it does not govern.
 
 ## Problem
 
@@ -72,16 +106,23 @@ def evaluate_auto_apply(
     before: ResolvedSoilBounds,
     quality: CalibrationQuality,
     *,
-    is_customized: bool,
-    has_prior_calibration: bool,
+    bounds_from_manual_override: bool,    # before.source == "scp_override"
+    bounds_from_prior_calibration: bool,  # before.source == "probe_calibrated"
 ) -> AutoApplyDecision
 ```
+
+Both flags describe the *resolved* source of `before`, not raw DB rows — see **Amendment**.
+The service derives them from `before.source`; the policy stays pure and takes booleans, so
+the thresholds remain testable without fixtures.
 
 ### Changed: `ProbeCalibrationService`
 
 - New `compute_and_auto_apply(sector_id, db)`: resolves before-bounds, builds
-  `CalibrationQuality`, calls the policy, then either promotes through the existing
-  `apply_run()` or returns the decision having persisted nothing.
+  `CalibrationQuality`, derives the two gate flags from `before.source`, calls the policy,
+  then either promotes through the existing `apply_run()` or returns having persisted nothing.
+  It returns an `AutoApplyOutcome` (the decision plus before/candidate FC+refill, the resolved
+  source and the method) so the sweep can log those values *after* the sector's savepoint has
+  released — a rolled-back sector must never leave a line claiming it was applied.
 - `compute_all_for_farm(farm_id, db, *, auto_apply: bool)` routes per sector and returns
   counts instead of a bare int.
 
@@ -112,11 +153,14 @@ Evaluation order, first match wins:
 | # | Condition | Reason |
 |---|---|---|
 | 0 | `compute_sector_calibration` returned `None` | *no candidate; counted, nothing persisted* |
-| 1 | `is_customized` is true | `manual_override` |
+| 1 | `before.source == "scp_override"` (a human soil edit governs the bounds) | `manual_override` |
 | 2 | `probe.last_reading_at` older than `PROBE_VERY_STALE_H` (72h), or `None` | `probe_stale` |
 | 3 | Every usable depth flatlined (std < 0.003) | `flatline` |
-| 4 | Prior calibration exists **and** (\|Δfc\| > 0.05 or \|Δrefill\| > 0.05) | `delta_exceeds_cap` |
+| 4 | `before.source == "probe_calibrated"` **and** (\|Δfc\| > 0.05 or \|Δrefill\| > 0.05) | `delta_exceeds_cap` |
 | — | otherwise | `applied` |
+
+Gates 1 and 4 read the resolved source, not `is_customized` / "a `probe_calibration` row
+exists" as first drafted — see **Amendment** for the two deadlocks that wording caused.
 
 Gate 0 is free: the plausibility guard (`is_plausible_calibration`: FC ∈ [0.10, 0.60],
 spread ≥ 0.03) and the 48-reading floor already live inside `compute_sector_calibration`,
@@ -149,11 +193,13 @@ Both FC and refill are checked because TAW is the spread `(FC − PWP) × root_d
 candidate could hold FC steady, drop refill by 0.08, and inflate TAW by a third while every
 absolute value stays plausible.
 
-**The cap applies only when a prior `probe_calibration` row exists.** For a never-calibrated
-sector, `before` is a soil-texture table lookup that was never measured on that sector.
+**The cap applies only while the live bounds ARE probe-derived** (`before.source ==
+"probe_calibrated"`). When `before` is a soil-texture table lookup — never calibrated, or
+calibrated so long ago that the resolver ignores it — it was never measured on that sector.
 Treating distance from an unmeasured guess as evidence of anomaly inverts the logic — the
 larger that distance, the more likely the preset is the thing that is wrong, which *is* the
-clamp bug. So the first application is uncapped and the cap guards from the second run on.
+clamp bug. So a first (or post-staleness) application is uncapped, and the cap guards every
+run made against a value the engine currently trusts.
 
 For calibration: 0.05 m³/m³ over a 0.8 m olive root zone is ~40 mm of TAW, comparable to a
 whole dose. The cap is a catastrophe bound, not a fine filter.
@@ -244,6 +290,12 @@ quality-blocked sector with both value pairs; one per-farm summary
 (`farm=X applied=N skipped=M no_candidate=K failed=F`) so the worker log answers "did Monday
 do anything" at a glance.
 
+**Counters, metrics and per-sector logs are emitted only after the sector's savepoint has
+released.** A failure in `RELEASE SAVEPOINT` surfaces at `__aexit__`, so incrementing inside
+the block let one sector count as both `applied` and `error` (`counts.applied` never
+decrements) and made the summary claim `applied=N` for bounds that were rolled back. Data
+integrity was never at risk — this is about the observability not lying.
+
 No new alert producer. Per the alert-ownership rule a new producer needs its own `source` and
 `rule_key`s, and blocked runs are informational rather than actionable — the metric plus the
 manual button covers it.
@@ -274,9 +326,13 @@ TDD: a failing test per gate before the policy exists.
 
 **Pure unit tests on `evaluate_auto_apply`** — table-driven, no fixtures, no DB:
 
-- gate precedence: customized *and* stale reports `manual_override`, not `probe_stale`
-- bootstrap exemption: Δ0.15 with `has_prior_calibration=False` applies; identical input with
-  `True` gives `delta_exceeds_cap`
+- gate precedence: override-governed *and* stale reports `manual_override`, not `probe_stale`
+- bootstrap exemption: Δ0.15 with `bounds_from_prior_calibration=False` applies; identical
+  input with `True` gives `delta_exceeds_cap`
+- **stale prior calibration**: `before` is a preset (the resolver ignored the old row), so the
+  cap must NOT apply — the deadlock guard from the Amendment
+- **customized profile that does not govern bounds**: `bounds_from_manual_override=False`, so
+  the override gate must NOT fire — the second deadlock guard
 - `method="envelope"` applies (guards against reinstating the cycles veto)
 - delta of exactly 0.05 applies
 - refill-only violation with FC steady blocks
@@ -290,8 +346,15 @@ documents, which breaks `test_ctx_mad_in_range`.
 - flag off → `candidate` row, projection untouched (opt-out path unchanged)
 - flag on, passing → `applied` row, prior `superseded`, projection upserted, audit row with
   `user_id IS NULL`
-- **flag on, `is_customized=True` → nothing recorded and the flag still `True`** — the most
-  important regression guard in this design
+- **flag on, `is_customized=True` with soil FC/PWP set (resolved source `scp_override`) →
+  nothing recorded and the flag still `True`** — the most important regression guard in this
+  design
+- flag on, `is_customized=True` with soil fields NULL (resolved source `plot_preset`) →
+  applies, and the flag is still `True` afterwards
+- flag on, a >90-day-old `probe_calibration` row + a far candidate → applies (not
+  `delta_exceeds_cap`)
+- flag on, every depth flatlined but a plausible pooled candidate → `flatline` (proves the
+  gate, not gate 0)
 - savepoint isolation: two sectors, first forced to raise, second still applies
 - returned counts reflect `failed`
 
