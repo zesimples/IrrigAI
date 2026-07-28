@@ -847,3 +847,55 @@ async def test_failed_sector_appears_in_outcomes_as_error(db: AsyncSession):
     assert errored[0].sector_name == "Boom"
     assert errored[0].applied is False
     await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_on_sector_done_fires_once_per_sector_with_live_counts(db: AsyncSession):
+    from sqlalchemy import select as _select
+
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
+    plot = (await db.execute(_select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
+    db.add(Sector(plot_id=plot.id, name="Second", crop_type="almond"))
+    await db.flush()
+
+    seen: list[tuple[int, int]] = []
+
+    async def on_done(done, counts):
+        seen.append((done, counts.applied + counts.skipped + counts.no_candidate))
+
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=True, on_sector_done=on_done
+    )
+
+    # One call per sector, numbered 1..N, and the tally is already updated when
+    # the callback runs (it fires after the savepoint releases, not before).
+    assert [d for d, _ in seen] == [1, 2]
+    assert seen[-1][1] == 2
+    assert len(counts.outcomes) == 2
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_on_sector_done_failure_does_not_abort_the_sweep(db: AsyncSession):
+    """Progress reporting is telemetry — a broken callback must not lose the sweep."""
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
+
+    async def boom(done, counts):
+        raise RuntimeError("progress write failed")
+
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=True, on_sector_done=boom
+    )
+
+    assert counts.applied == 1
+    assert counts.failed == 0          # the SECTOR did not fail
+    assert len(counts.outcomes) == 1
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_sweep_without_callback_is_unchanged(db: AsyncSession):
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
+    counts = await ProbeCalibrationService().compute_all_for_farm(farm_id, db, auto_apply=True)
+    assert counts.applied == 1
+    await db.rollback()

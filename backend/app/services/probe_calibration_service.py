@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import statistics
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -364,7 +365,12 @@ class ProbeCalibrationService:
         )
 
     async def compute_all_for_farm(
-        self, farm_id: str, db: AsyncSession, *, auto_apply: bool = False
+        self,
+        farm_id: str,
+        db: AsyncSession,
+        *,
+        auto_apply: bool = False,
+        on_sector_done: Callable[[int, CalibrationSweepCounts], Awaitable[None]] | None = None,
     ) -> CalibrationSweepCounts:
         """Recompute calibration for every active sector in a farm. Caller commits.
 
@@ -379,6 +385,11 @@ class ProbeCalibrationService:
         savepoint has released: a failure in `RELEASE SAVEPOINT` itself surfaces at
         `__aexit__`, so incrementing inside the block could count one sector as both
         applied and error, and log bounds that were rolled back as applied.
+
+        `on_sector_done`, if given, is called once per sector after that same
+        release point with (sectors-finished-so-far, live counts) — telemetry only;
+        the sweep reports progress, the caller decides what to do with it. A
+        failing callback is logged and does not abort the sweep.
         """
         from sqlalchemy import select
 
@@ -443,6 +454,17 @@ class ProbeCalibrationService:
                         applied=False,
                     )
                 )
+
+            # Report progress only after the savepoint released and the tally is
+            # updated, so a rolled-back sector is never reported as done.
+            # Telemetry must never cost us the sweep, hence the bare except.
+            if on_sector_done is not None:
+                try:
+                    await on_sector_done(len(counts.outcomes), counts)
+                except Exception:
+                    logger.warning(
+                        "Sweep progress callback failed for sector %s", sector_id, exc_info=True
+                    )
         return counts
 
     @staticmethod
