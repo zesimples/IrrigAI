@@ -784,7 +784,7 @@ freshness from Probe.last_reading_at. Two queries per sector per week."
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `backend/tests/test_engine/test_calibration_auto_apply_db.py` (and extend the import block at the top with `ProbeCalibration`, `ProbeCalibrationRun`, `SectorCropProfile` from `app.models`, plus `from sqlalchemy import select` and `from app.engine.calibration_policy import REASON_APPLIED, REASON_FLATLINE, REASON_MANUAL_OVERRIDE, REASON_NO_CANDIDATE, REASON_PROBE_STALE`):
+Append to `backend/tests/test_engine/test_calibration_auto_apply_db.py` (and extend the import block at the top with `ProbeCalibration`, `ProbeCalibrationRun`, `SectorCropProfile` from `app.models`, plus `from sqlalchemy import select` and `from app.engine.calibration_policy import REASON_APPLIED, REASON_MANUAL_OVERRIDE, REASON_NO_CANDIDATE, REASON_PROBE_STALE`):
 
 ```python
 async def _runs(db: AsyncSession, sector_id: str) -> list:
@@ -865,13 +865,20 @@ async def test_blocked_run_is_not_recorded(db: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_flatlined_sector_yields_no_candidate_or_flatline_block(db: AsyncSession):
-    """A dead-constant series fails the plausibility spread, so gate 0 fires first."""
+async def test_flatlined_sector_yields_no_candidate(db: AsyncSession):
+    """A dead-constant series never even reaches the flatline gate.
+
+    compute_envelope_points returns fc == refill, so the spread is 0, which fails
+    is_plausible_calibration -> compute_sector_calibration returns None -> gate 0.
+    The flatline gate itself is covered by the pure policy test and by
+    test_quality_flags_flatline_when_all_depths_frozen; this asserts the
+    deterministic real-world path for a stuck sensor.
+    """
     sector_id, _ = await _make_sector(db, flat=True)
     decision = await ProbeCalibrationService().compute_and_auto_apply(sector_id, db)
 
     assert decision.apply is False
-    assert decision.reason in (REASON_NO_CANDIDATE, REASON_FLATLINE)
+    assert decision.reason == REASON_NO_CANDIDATE
     assert await _runs(db, sector_id) == []
     await db.rollback()
 
