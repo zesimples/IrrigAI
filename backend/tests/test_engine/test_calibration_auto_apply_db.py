@@ -7,16 +7,26 @@ local dev DB and breaks test_context_loading::test_ctx_mad_in_range).
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
+from app.engine.calibration_policy import (
+    REASON_APPLIED,
+    REASON_MANUAL_OVERRIDE,
+    REASON_NO_CANDIDATE,
+    REASON_PROBE_STALE,
+)
 from app.models import (
     Farm,
     Plot,
     Probe,
+    ProbeCalibration,
+    ProbeCalibrationRun,
     ProbeDepth,
     ProbeReading,
     Sector,
+    SectorCropProfile,
     User,
 )
 from app.services.probe_calibration_service import ProbeCalibrationService
@@ -165,4 +175,159 @@ async def test_quality_without_probe_reports_no_reading(db: AsyncSession):
     quality = await ProbeCalibrationService().build_quality(sector.id, db)
     assert quality.probe_hours_since_reading is None
     assert quality.all_depths_flatlined is False
+    await db.rollback()
+
+
+async def _runs(db: AsyncSession, sector_id: str) -> list:
+    return (await db.execute(
+        select(ProbeCalibrationRun).where(ProbeCalibrationRun.sector_id == sector_id)
+    )).scalars().all()
+
+
+async def _projection(db: AsyncSession, sector_id: str):
+    return (await db.execute(
+        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
+    )).scalar_one_or_none()
+
+
+@pytest.mark.asyncio
+async def test_auto_apply_promotes_first_calibration_on_clamped_sector(db: AsyncSession):
+    """Plot preset FC 0.16 vs probe near 0.44: the uncapped first apply must land."""
+    sector_id, _ = await _make_sector(db, vwc=0.44)
+    decision = await ProbeCalibrationService().compute_and_auto_apply(sector_id, db)
+
+    assert decision.apply is True
+    assert decision.reason == REASON_APPLIED
+
+    runs = await _runs(db, sector_id)
+    assert len(runs) == 1
+    assert runs[0].status == "applied"
+    assert runs[0].applied_at is not None
+    assert runs[0].source == "scheduled"
+
+    projection = await _projection(db, sector_id)
+    assert projection is not None
+    assert 0.43 <= projection.observed_fc <= 0.46
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_auto_apply_never_clears_manual_customization(db: AsyncSession):
+    """THE critical invariant: the scheduler must not discard an agronomist's edit."""
+    sector_id, _ = await _make_sector(db, vwc=0.44)
+    # crop_type, mad, both root depths and stages are all non-null on this model.
+    scp = SectorCropProfile(
+        sector_id=sector_id,
+        crop_type="almond",
+        mad=0.45,
+        root_depth_mature_m=0.9,
+        root_depth_young_m=0.4,
+        stages={},
+        field_capacity=0.22,
+        wilting_point=0.11,
+        is_customized=True,
+    )
+    db.add(scp)
+    await db.flush()
+
+    decision = await ProbeCalibrationService().compute_and_auto_apply(sector_id, db)
+
+    assert decision.apply is False
+    assert decision.reason == REASON_MANUAL_OVERRIDE
+    assert await _runs(db, sector_id) == []
+    assert await _projection(db, sector_id) is None
+
+    await db.refresh(scp)
+    assert scp.is_customized is True
+    assert scp.field_capacity == pytest.approx(0.22)
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_blocked_run_is_not_recorded(db: AsyncSession):
+    sector_id, _ = await _make_sector(db, last_reading_age_h=200.0)
+    decision = await ProbeCalibrationService().compute_and_auto_apply(sector_id, db)
+
+    assert decision.apply is False
+    assert decision.reason == REASON_PROBE_STALE
+    assert await _runs(db, sector_id) == []
+    assert await _projection(db, sector_id) is None
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_flatlined_sector_yields_no_candidate(db: AsyncSession):
+    """A dead-constant series never even reaches the flatline gate.
+
+    compute_envelope_points returns fc == refill, so the spread is 0, which fails
+    is_plausible_calibration -> compute_sector_calibration returns None -> gate 0.
+    The flatline gate itself is covered by the pure policy test and by
+    test_quality_flags_flatline_when_all_depths_frozen; this asserts the
+    deterministic real-world path for a stuck sensor.
+    """
+    sector_id, _ = await _make_sector(db, flat=True)
+    decision = await ProbeCalibrationService().compute_and_auto_apply(sector_id, db)
+
+    assert decision.apply is False
+    assert decision.reason == REASON_NO_CANDIDATE
+    assert await _runs(db, sector_id) == []
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_no_candidate_when_sector_has_no_probe(db: AsyncSession):
+    stamp = datetime.now(UTC).timestamp()
+    user = User(email=f"nc-{stamp}@t.dev", name="NC", hashed_password="x", role="admin")
+    db.add(user)
+    await db.flush()
+    farm = Farm(name="NC", owner_id=user.id, calibration_auto_apply=True)
+    db.add(farm)
+    await db.flush()
+    plot = Plot(farm_id=farm.id, name="P")
+    db.add(plot)
+    await db.flush()
+    sector = Sector(plot_id=plot.id, name="No probe", crop_type="almond")
+    db.add(sector)
+    await db.flush()
+
+    decision = await ProbeCalibrationService().compute_and_auto_apply(sector.id, db)
+    assert decision.apply is False
+    assert decision.reason == REASON_NO_CANDIDATE
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_auto_applied_run_is_audited_without_a_user(db: AsyncSession):
+    """user_id IS NULL is how scheduler-applied bounds stay distinguishable
+    from human-applied ones after the fact."""
+    from app.models import AuditLog
+
+    sector_id, _ = await _make_sector(db, vwc=0.44)
+    await ProbeCalibrationService().compute_and_auto_apply(sector_id, db)
+
+    entries = (await db.execute(
+        select(AuditLog).where(
+            AuditLog.action == "probe_calibration_auto_applied",
+            AuditLog.entity_id == sector_id,
+        )
+    )).scalars().all()
+    assert len(entries) == 1
+    assert entries[0].user_id is None
+    assert entries[0].entity_type == "sector"
+    assert entries[0].after_data["method"] == "envelope"
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_second_apply_supersedes_the_first(db: AsyncSession):
+    sector_id, _ = await _make_sector(db, vwc=0.44)
+    svc = ProbeCalibrationService()
+    await svc.compute_and_auto_apply(sector_id, db)
+    # Same window, so the second candidate is within the delta cap and applies.
+    await svc.compute_and_auto_apply(sector_id, db)
+
+    runs = await _runs(db, sector_id)
+    assert len(runs) == 2
+    statuses = sorted(r.status for r in runs)
+    assert statuses == ["applied", "superseded"]
     await db.rollback()

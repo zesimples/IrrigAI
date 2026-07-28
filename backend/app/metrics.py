@@ -55,6 +55,13 @@ dose_fingerprint_lookup_failures_total = Counter(
     "(a sustained rise means more than a one-off migration lag — investigate)",
 )
 
+calibration_auto_apply_total = Counter(
+    "irrigai_calibration_auto_apply_total",
+    "Weekly probe-calibration auto-apply decisions (no_candidate tracks sectors "
+    "that cannot be calibrated at all — the coverage number for this feature)",
+    ["result", "reason", "method"],  # result: applied | skipped | no_candidate | error
+)
+
 # ── AI / LLM ─────────────────────────────────────────────────────────────────
 
 ai_requests_total = Counter(

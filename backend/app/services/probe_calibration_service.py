@@ -36,7 +36,7 @@ class ProbeCalibrationService:
         created_by_id: str | None = None,
     ):
         """Compute an immutable run and optionally promote it to active bounds."""
-        from app.models import ProbeCalibration, ProbeCalibrationRun
+        from app.models import ProbeCalibration
 
         result = await self._calibrator.compute_sector_calibration(sector_id, db)
         if result is None:
@@ -46,20 +46,9 @@ class ProbeCalibrationService:
             select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
         )).scalar_one_or_none()
         now = datetime.now(UTC)
-        run = ProbeCalibrationRun(
-            sector_id=sector_id,
-            observed_fc=result.observed_fc,
-            observed_refill=result.observed_refill,
-            method=result.method,
-            num_cycles=result.num_cycles,
-            consistency=result.consistency,
-            window_days=result.window_days,
-            computed_at=now,
-            source=source,
-            status="candidate",
-            previous_fc=existing.observed_fc if existing else None,
-            previous_refill=existing.observed_refill if existing else None,
-            created_by_id=created_by_id,
+        run = self._new_run(
+            sector_id, result, existing,
+            source=source, created_by_id=created_by_id, computed_at=now,
         )
         db.add(run)
         await db.flush()
@@ -88,6 +77,102 @@ class ProbeCalibrationService:
             return None
         active, _run = recorded
         return active
+
+    def _new_run(
+        self,
+        sector_id: str,
+        result,
+        existing,
+        *,
+        source: str,
+        created_by_id: str | None,
+        computed_at,
+    ):
+        from app.models import ProbeCalibrationRun
+
+        return ProbeCalibrationRun(
+            sector_id=sector_id,
+            observed_fc=result.observed_fc,
+            observed_refill=result.observed_refill,
+            method=result.method,
+            num_cycles=result.num_cycles,
+            consistency=result.consistency,
+            window_days=result.window_days,
+            computed_at=computed_at,
+            source=source,
+            status="candidate",
+            previous_fc=existing.observed_fc if existing else None,
+            previous_refill=existing.observed_refill if existing else None,
+            created_by_id=created_by_id,
+        )
+
+    async def compute_and_auto_apply(self, sector_id: str, db: AsyncSession):
+        """Compute a candidate and promote it only if the policy allows.
+
+        A blocked candidate persists NOTHING — no history row, no projection
+        change. Unlike the manual endpoints, this path never clears
+        SectorCropProfile.is_customized: a deliberate human soil edit outranks
+        unattended measurement.
+        """
+        from sqlalchemy import select
+
+        from app.engine.calibration_policy import (
+            REASON_NO_CANDIDATE,
+            AutoApplyDecision,
+            evaluate_auto_apply,
+        )
+        from app.engine.pipeline import resolve_sector_soil_bounds
+        from app.models import ProbeCalibration
+        from app.models.sector_crop_profile import SectorCropProfile
+        from app.services.audit_service import audit
+
+        result = await self._calibrator.compute_sector_calibration(sector_id, db)
+        if result is None:
+            return AutoApplyDecision(False, REASON_NO_CANDIDATE)
+
+        before = await resolve_sector_soil_bounds(sector_id, db)
+        existing = (await db.execute(
+            select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
+        )).scalar_one_or_none()
+        scp = (await db.execute(
+            select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
+        )).scalar_one_or_none()
+        quality = await self.build_quality(sector_id, db)
+
+        decision = evaluate_auto_apply(
+            result,
+            before,
+            quality,
+            is_customized=bool(scp and scp.is_customized),
+            has_prior_calibration=existing is not None,
+        )
+        if not decision.apply:
+            return decision
+
+        now = datetime.now(UTC)
+        run = self._new_run(
+            sector_id, result, existing,
+            source="scheduled", created_by_id=None, computed_at=now,
+        )
+        db.add(run)
+        await db.flush()
+        await self.apply_run(run, db)
+
+        await audit.log(
+            "probe_calibration_auto_applied",
+            "sector",
+            sector_id,
+            db,
+            user_id=None,
+            before_data={"source": before.source, "fc": before.fc, "pwp": before.pwp},
+            after_data={
+                "observed_fc": result.observed_fc,
+                "observed_refill": result.observed_refill,
+                "method": result.method,
+                "run_id": str(run.id),
+            },
+        )
+        return decision
 
     async def apply_run(self, run, db: AsyncSession):
         """Promote a history row, superseding the previously applied run."""
