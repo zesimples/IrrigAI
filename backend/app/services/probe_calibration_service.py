@@ -7,12 +7,17 @@ weekly per farm by the scheduler. Pure computation lives in engine/auto_calibrat
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+import statistics
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.auto_calibration import AutoCalibrationService
+from app.engine.calibration_policy import (
+    AUTO_APPLY_FLATLINE_STD_M3M3,
+    CalibrationQuality,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +133,69 @@ class ProbeCalibrationService:
         run.applied_at = now
         await db.flush()
         return row
+
+    async def build_quality(
+        self, sector_id: str, db: AsyncSession
+    ) -> CalibrationQuality:
+        """Deterministic trust signals for the calibration window.
+
+        Two queries: one join for the per-depth VWC series, one for the sector's
+        newest probe contact. Deliberately independent of
+        compute_sector_calibration, which does not expose the series it loaded —
+        refactoring that safety-critical function to share it is not worth the
+        risk for two cheap weekly queries.
+        """
+        from sqlalchemy import func, select
+
+        from app.engine.auto_calibration import CALIB_WINDOW_DAYS
+        from app.models import Probe, ProbeDepth, ProbeReading
+
+        since = datetime.now(UTC) - timedelta(days=CALIB_WINDOW_DAYS)
+
+        rows = (await db.execute(
+            select(
+                ProbeDepth.depth_cm,
+                ProbeReading.raw_value,
+                ProbeReading.calibrated_value,
+            )
+            .join(ProbeReading, ProbeReading.probe_depth_id == ProbeDepth.id)
+            .join(Probe, Probe.id == ProbeDepth.probe_id)
+            .where(
+                Probe.sector_id == sector_id,
+                # Real data uses "soil_moisture"; older/mock data uses "moisture".
+                ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
+                ProbeReading.timestamp >= since,
+                ProbeReading.unit == "vwc_m3m3",
+                ProbeReading.quality_flag == "ok",
+            )
+        )).all()
+
+        by_depth: dict[int, list[float]] = {}
+        for depth_cm, raw, calibrated in rows:
+            value = calibrated if calibrated is not None else raw
+            if value is not None:
+                by_depth.setdefault(depth_cm, []).append(float(value))
+
+        # A depth needs enough points to judge stability (same floor as probe_signal).
+        judgeable = [vals for vals in by_depth.values() if len(vals) >= 4]
+        all_flat = bool(judgeable) and all(
+            statistics.stdev(vals) < AUTO_APPLY_FLATLINE_STD_M3M3 for vals in judgeable
+        )
+
+        last_reading_at = (await db.execute(
+            select(func.max(Probe.last_reading_at)).where(Probe.sector_id == sector_id)
+        )).scalar()
+
+        hours: float | None = None
+        if last_reading_at is not None:
+            if last_reading_at.tzinfo is None:
+                last_reading_at = last_reading_at.replace(tzinfo=UTC)
+            hours = (datetime.now(UTC) - last_reading_at).total_seconds() / 3600
+
+        return CalibrationQuality(
+            probe_hours_since_reading=hours,
+            all_depths_flatlined=all_flat,
+        )
 
     async def compute_all_for_farm(self, farm_id: str, db: AsyncSession) -> int:
         """Recompute calibration for every sector in a farm. Caller commits.
