@@ -29,6 +29,14 @@ from app.models.user import User
 # ON DELETE CASCADE, so children must go first. Keeps API tests (which must
 # commit so the client connection sees the data) from accumulating junk farms.
 _FARM_SUBTREE_DELETES = (
+    # audit_log.entity_id is a bare UUID with no FK, so nothing cascades it: rows
+    # written on the farm AND on its sectors (e.g. the calibration sweep's
+    # probe_calibration_sweep_triggered / probe_calibration_auto_applied pair)
+    # outlive the rows they name. Deleted first, while the sector ids are still
+    # resolvable.
+    "DELETE FROM audit_log WHERE entity_id=:fid",
+    "DELETE FROM audit_log WHERE entity_id IN (SELECT s.id FROM sector s "
+    "JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",
     "DELETE FROM probe_reading WHERE probe_depth_id IN (SELECT pd.id FROM probe_depth pd "
     "JOIN probe p ON pd.probe_id=p.id JOIN sector s ON p.sector_id=s.id "
     "JOIN plot pl ON s.plot_id=pl.id WHERE pl.farm_id=:fid)",

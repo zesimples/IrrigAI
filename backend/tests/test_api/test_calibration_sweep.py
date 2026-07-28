@@ -2,7 +2,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditLog, Farm, Plot, Probe, ProbeDepth, ProbeReading, Sector, User
@@ -65,13 +65,11 @@ async def _farm_with_calibratable_sector(
 
 
 async def _teardown(db: AsyncSession, farm_id: str) -> None:
-    """delete_farm_subtree does not cover audit_log (entity_id has no FK to farm,
-    so a sweep's "probe_calibration_sweep_triggered" row would outlive the farm
-    it references). probe_calibration_run rows DO get cleaned up implicitly:
-    sector_id there is ON DELETE CASCADE, and delete_farm_subtree's raw DELETE
-    FROM sector still triggers that DB-level cascade.
+    """delete_farm_subtree now covers audit_log for the farm AND its sectors, so
+    no local workaround is needed. probe_calibration_run rows are cleaned up
+    implicitly: sector_id there is ON DELETE CASCADE, and delete_farm_subtree's
+    raw DELETE FROM sector still triggers that DB-level cascade.
     """
-    await db.execute(delete(AuditLog).where(AuditLog.entity_id == farm_id))
     await delete_farm_subtree(db, farm_id)
     await db.commit()
 
@@ -173,6 +171,38 @@ async def test_blocked_sector_reports_reason_and_candidate(client, db: AsyncSess
         assert o["fc_candidate"] is not None   # measured, then withheld
     finally:
         await _teardown(db, farm_id)
+
+
+@pytest.mark.asyncio
+async def test_subtree_teardown_leaves_no_orphan_audit_rows(client, db: AsyncSession):
+    """Dev-DB hygiene: audit_log.entity_id has no FK, so nothing deletes its rows
+    when the referenced farm/sector goes. A flag-on sweep writes BOTH a farm-level
+    `probe_calibration_sweep_triggered` and a sector-level
+    `probe_calibration_auto_applied` row, so every API test run used to leave
+    orphans pointing at rows that no longer exist. The shared teardown must cover
+    the farm id and every sector id beneath it.
+    """
+    farm_id, sector_id = await _farm_with_calibratable_sector(db, auto_apply=True)
+    await db.commit()
+    try:
+        await client.post(f"/api/v1/farms/{farm_id}/calibration-sweep")
+
+        actions = {
+            row.entity_id: row.action
+            for row in (await db.execute(
+                select(AuditLog).where(AuditLog.entity_id.in_([farm_id, sector_id]))
+            )).scalars().all()
+        }
+        # Precondition: both scopes really were written, or the test proves nothing.
+        assert actions.get(farm_id) == "probe_calibration_sweep_triggered"
+        assert actions.get(sector_id) == "probe_calibration_auto_applied"
+    finally:
+        await delete_farm_subtree(db, farm_id)
+
+    orphans = (await db.execute(
+        select(AuditLog).where(AuditLog.entity_id.in_([farm_id, sector_id]))
+    )).scalars().all()
+    assert orphans == []
 
 
 @pytest.mark.asyncio
