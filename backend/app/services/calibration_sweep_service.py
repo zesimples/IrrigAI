@@ -12,13 +12,12 @@ telemetry, not part of the sweep's transaction.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
 import redis.asyncio as aioredis
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,19 +37,12 @@ SWEEP_STALE_MINUTES = 30
 ACTIVE_STATUSES = ("queued", "running")
 
 _redis: aioredis.Redis | None = None
-# The running loop the client above was built for. In production there is
-# exactly one event loop for the process lifetime, so this never changes.
-# Under pytest-asyncio (function-scoped loops, one per test) a cached client's
-# connections are bound to a now-closed loop, so we rebuild rather than reuse.
-_redis_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _get_redis() -> aioredis.Redis:
-    global _redis, _redis_loop
-    loop = asyncio.get_running_loop()
-    if _redis is None or _redis_loop is not loop:
+    global _redis
+    if _redis is None:
         _redis = aioredis.from_url(get_settings().REDIS_URL, decode_responses=True)
-        _redis_loop = loop
     return _redis
 
 
@@ -121,7 +113,7 @@ async def enqueue_sweep(
     db.add(run)
     try:
         await db.flush()
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
         active = (await db.execute(
             select(CalibrationSweepRun).where(
@@ -129,7 +121,14 @@ async def enqueue_sweep(
                 CalibrationSweepRun.status.in_(ACTIVE_STATUSES),
             ).order_by(CalibrationSweepRun.queued_at.desc()).limit(1)
         )).scalar_one_or_none()
-        raise SweepAlreadyRunning(str(active.id) if active else "") from None
+        if active is None:
+            # Not our unique-index violation (or the competing run finished
+            # between the violation and this SELECT) — an empty run_id would
+            # 409 the caller with nothing to poll. Surface the real error
+            # instead of masquerading an unrelated/vanished conflict as
+            # "already running".
+            raise
+        raise SweepAlreadyRunning(str(active.id)) from exc
 
     # Row first, queue second: a row with no queue entry goes stale and is
     # recoverable; a queue entry with no row is not.
@@ -149,19 +148,21 @@ async def requeue_run_id(run_id: str) -> None:
 async def mark_running(run_id: str, sectors_total: int) -> None:
     async with AsyncSessionLocal() as session:
         now = datetime.now(UTC)
-        await session.execute(
+        result = await session.execute(
             update(CalibrationSweepRun)
             .where(CalibrationSweepRun.id == run_id)
             .values(
                 status="running", started_at=now, heartbeat_at=now, sectors_total=sectors_total
             )
         )
+        if result.rowcount == 0:
+            logger.warning("mark_running: no CalibrationSweepRun row for id=%s", run_id)
         await session.commit()
 
 
 async def record_progress(run_id: str, sectors_done: int, counts) -> None:
     async with AsyncSessionLocal() as session:
-        await session.execute(
+        result = await session.execute(
             update(CalibrationSweepRun)
             .where(CalibrationSweepRun.id == run_id)
             .values(
@@ -174,13 +175,15 @@ async def record_progress(run_id: str, sectors_done: int, counts) -> None:
                 failed=counts.failed,
             )
         )
+        if result.rowcount == 0:
+            logger.warning("record_progress: no CalibrationSweepRun row for id=%s", run_id)
         await session.commit()
 
 
 async def finish_run(run_id: str, counts, *, status: str, error: str | None = None) -> None:
     async with AsyncSessionLocal() as session:
         now = datetime.now(UTC)
-        await session.execute(
+        result = await session.execute(
             update(CalibrationSweepRun)
             .where(CalibrationSweepRun.id == run_id)
             .values(
@@ -188,7 +191,14 @@ async def finish_run(run_id: str, counts, *, status: str, error: str | None = No
                 finished_at=now,
                 heartbeat_at=now,
                 error=error,
-                sectors_done=len(counts.outcomes),
+                # Never let the final write snap progress backwards: the
+                # failure path passes an empty CalibrationSweepCounts(), whose
+                # len(outcomes) is 0 — a run that had polled to 34/77 must not
+                # finish reporting 0/77. GREATEST is atomic (no read-then-write
+                # race against a concurrent record_progress).
+                sectors_done=func.greatest(
+                    CalibrationSweepRun.sectors_done, len(counts.outcomes)
+                ),
                 applied=counts.applied,
                 skipped=counts.skipped,
                 no_candidate=counts.no_candidate,
@@ -197,4 +207,6 @@ async def finish_run(run_id: str, counts, *, status: str, error: str | None = No
                 outcomes=outcomes_to_json(counts),
             )
         )
+        if result.rowcount == 0:
+            logger.warning("finish_run: no CalibrationSweepRun row for id=%s", run_id)
         await session.commit()

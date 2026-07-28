@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
@@ -41,7 +42,17 @@ async def _test_isolation():
        nothing to do with this module's logic. Disposing forces fresh
        connections in the current loop. Never happens in production, which has
        exactly one event loop for its lifetime.
-    2. Redis is a real, shared instance across the whole test run (not reset
+    2. `_get_redis()` mirrors job_lock.py's plain lazy-client idiom (create once,
+       cache forever) — correct in production, which has exactly one event loop
+       for the process lifetime. Under pytest-asyncio each test function gets
+       its OWN event loop, so a client cached from an earlier test is bound to
+       a now-closed loop and blows up with "attached to a different loop" on
+       the next test that touches Redis. Resetting the module-global client
+       before each test is the test-only fix for that; a loop-aware rebuild
+       inside the module itself was tried and reverted (2nd review) because it
+       leaked a connection pool per rebuild and made `_get_redis()` require a
+       running loop, unlike the sibling it was meant to mirror.
+    3. Redis is a real, shared instance across the whole test run (not reset
        per test). A couple of the tests below (`test_progress_is_visible_...`,
        `test_finish_run_...`) call `enqueue_sweep` — which pushes to the queue —
        without draining it, since draining isn't what they're testing. Left
@@ -50,11 +61,12 @@ async def _test_isolation():
        before each test keeps the suite order-independent without changing what
        any individual test asserts.
     """
+    import app.services.calibration_sweep_service as sweep_service
     from app.database import engine as shared_engine
-    from app.services.calibration_sweep_service import _get_redis
 
     await shared_engine.dispose()
-    await _get_redis().delete(QUEUE_KEY)
+    sweep_service._redis = None
+    await sweep_service._get_redis().delete(QUEUE_KEY)
     yield
 
 
@@ -141,6 +153,29 @@ async def test_second_enqueue_raises_with_the_active_run_id(db: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_enqueue_with_unrelated_integrity_error_does_not_masquerade_as_already_running(
+    db: AsyncSession,
+):
+    """A bad FK (or any non-unique-index violation) must not come back as
+    SweepAlreadyRunning("") — that would 409 the caller with an empty run_id
+    the UI then polls forever. It should surface as the real IntegrityError.
+    """
+    farm_id = await _farm(db)
+    try:
+        with pytest.raises(IntegrityError) as exc:
+            await enqueue_sweep(
+                farm_id,
+                db,
+                auto_apply=True,
+                triggered_by_id="00000000-0000-0000-0000-000000000000",  # no such user
+            )
+        assert not isinstance(exc.value, SweepAlreadyRunning)
+    finally:
+        await db.rollback()
+        await _cleanup(db, farm_id)
+
+
+@pytest.mark.asyncio
 async def test_progress_is_visible_to_another_session_before_the_sweep_commits(db: AsyncSession):
     """The whole point of the separate session: a poller must see movement."""
     farm_id = await _farm(db)
@@ -186,6 +221,32 @@ async def test_finish_run_writes_terminal_status_and_outcomes(db: AsyncSession):
         assert len(fresh.outcomes) == 2
         assert fresh.outcomes[0]["sector_name"] == "Talhão 0"
         assert fresh.outcomes[0]["fc_candidate"] == 0.31
+    finally:
+        await _cleanup(db, farm_id)
+
+
+@pytest.mark.asyncio
+async def test_finish_run_does_not_snap_sectors_done_backwards_on_failure(db: AsyncSession):
+    """The failure path calls finish_run with an empty CalibrationSweepCounts(),
+    whose len(outcomes) is 0. A run that had already polled to 34/77 must keep
+    reporting 34, not regress to 0 in the UI's last frame.
+    """
+    farm_id = await _farm(db)
+    try:
+        run = await enqueue_sweep(farm_id, db, auto_apply=True, triggered_by_id=None)
+        await db.commit()
+        run_id = str(run.id)
+
+        await mark_running(run_id, sectors_total=77)
+        await record_progress(run_id, 34, _counts(applied=5, outcomes=34))
+
+        await finish_run(run_id, CalibrationSweepCounts(), status="failure", error="boom")
+
+        db.expire_all()
+        fresh = await db.get(CalibrationSweepRun, run_id)
+        assert fresh.status == "failure"
+        assert fresh.error == "boom"
+        assert fresh.sectors_done == 34
     finally:
         await _cleanup(db, farm_id)
 
