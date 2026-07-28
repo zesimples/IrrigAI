@@ -724,3 +724,89 @@ async def test_job_handler_reads_the_per_farm_flag(db: AsyncSession):
     assert off_counts.candidates == 1
     assert off_counts.applied == 0
     await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_sweep_collects_one_outcome_per_sector_when_applying(db: AsyncSession):
+    sector_id, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=True
+    )
+
+    assert counts.applied == 1
+    assert len(counts.outcomes) == 1
+    o = counts.outcomes[0]
+    assert o.sector_id == sector_id
+    assert o.sector_name == "AA Sector"
+    assert o.reason == "applied"
+    assert o.applied is True
+    # The clamped preset it replaced, and the measured value it moved to.
+    assert o.fc_before == pytest.approx(0.16)
+    assert o.fc_candidate is not None and 0.43 <= o.fc_candidate <= 0.46
+    assert o.before_source == "plot_preset"
+    assert o.method == "envelope"
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_blocked_sector_outcome_carries_its_candidate_values(db: AsyncSession):
+    """The payload's whole point: 'we measured X but the gate blocked the move'."""
+    sector_id, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True,
+                                            last_reading_age_h=200.0)
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=True
+    )
+
+    assert counts.skipped == 1
+    assert len(counts.outcomes) == 1
+    o = counts.outcomes[0]
+    assert o.sector_id == sector_id
+    assert o.reason == "probe_stale"
+    assert o.applied is False
+    assert o.fc_before == pytest.approx(0.16)
+    assert o.fc_candidate is not None  # measured, then withheld
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_flag_off_sweep_reports_candidate_outcomes(db: AsyncSession):
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=False)
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=False
+    )
+
+    assert counts.candidates == 1
+    assert [o.reason for o in counts.outcomes] == ["candidate"]
+    assert counts.outcomes[0].applied is False
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_failed_sector_appears_in_outcomes_as_error(db: AsyncSession):
+    """counts.failed and the outcome list must not disagree."""
+    from sqlalchemy import select
+
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
+    plot = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
+    bad = Sector(plot_id=plot.id, name="Boom", crop_type="almond")
+    db.add(bad)
+    await db.flush()
+
+    svc = ProbeCalibrationService()
+    original = svc.compute_and_auto_apply
+
+    async def flaky(sector_id, session):
+        if sector_id == str(bad.id):
+            raise RuntimeError("boom")
+        return await original(sector_id, session)
+
+    svc.compute_and_auto_apply = flaky
+    counts = await svc.compute_all_for_farm(farm_id, db, auto_apply=True)
+
+    assert counts.failed == 1
+    assert len(counts.outcomes) == 2
+    errored = [o for o in counts.outcomes if o.reason == "error"]
+    assert len(errored) == 1
+    assert errored[0].sector_name == "Boom"
+    assert errored[0].applied is False
+    await db.rollback()

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -24,6 +24,29 @@ from app.engine.calibration_policy import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class SectorSweepOutcome:
+    """One sector's sweep result, in a shape the API can serialise.
+
+    Pairs the sector's identity with the numbers already carried by
+    AutoApplyOutcome. `fc_candidate` / `refill_candidate` are populated for
+    BLOCKED sectors too, not just applied ones: "we measured 0.44 but the cap
+    blocked the move from 0.16" is the most useful thing the UI can say about a
+    delta_exceeds_cap, and blocked runs persist no row to look it up from.
+    """
+
+    sector_id: str
+    sector_name: str
+    reason: str
+    applied: bool
+    fc_before: float | None = None
+    fc_candidate: float | None = None
+    refill_before: float | None = None
+    refill_candidate: float | None = None
+    method: str | None = None
+    before_source: str | None = None
+
+
 @dataclass
 class CalibrationSweepCounts:
     """Outcome tally for one farm's weekly calibration sweep."""
@@ -33,6 +56,7 @@ class CalibrationSweepCounts:
     no_candidate: int = 0
     candidates: int = 0
     failed: int = 0
+    outcomes: list[SectorSweepOutcome] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -372,6 +396,7 @@ class ProbeCalibrationService:
         counts = CalibrationSweepCounts()
         for sector in sectors:
             sector_id = str(sector.id)
+            sector_name = sector.name
             outcome: AutoApplyOutcome | None = None
             recorded_candidate = False
             try:
@@ -384,28 +409,46 @@ class ProbeCalibrationService:
                         )
                         recorded_candidate = recorded is not None
             except Exception:
-                self._count_failure(sector_id, counts)
+                self._count_failure(sector_id, sector_name, counts)
                 continue
 
             # Savepoint released — the work below can no longer be rolled back, so
-            # counters and logs describe what actually persisted.
+            # counters, logs and outcomes describe what actually persisted.
             if auto_apply and outcome is not None:
-                self._record_outcome(sector_id, outcome, counts)
+                self._record_outcome(sector_id, sector_name, outcome, counts)
             elif recorded_candidate:
                 counts.candidates += 1
+                counts.outcomes.append(
+                    SectorSweepOutcome(
+                        sector_id=sector_id,
+                        sector_name=sector_name,
+                        reason="candidate",
+                        applied=False,
+                    )
+                )
         return counts
 
     @staticmethod
-    def _count_failure(sector_id: str, counts: CalibrationSweepCounts) -> None:
+    def _count_failure(
+        sector_id: str, sector_name: str, counts: CalibrationSweepCounts
+    ) -> None:
         from app.metrics import calibration_auto_apply_total
 
         counts.failed += 1
         calibration_auto_apply_total.labels("error", "exception", "none").inc()
         logger.exception("Probe calibration failed for sector %s", sector_id)
+        counts.outcomes.append(
+            SectorSweepOutcome(
+                sector_id=sector_id,
+                sector_name=sector_name,
+                reason="error",
+                applied=False,
+            )
+        )
 
     @staticmethod
     def _record_outcome(
-        sector_id: str, outcome: AutoApplyOutcome, counts: CalibrationSweepCounts
+        sector_id: str, sector_name: str, outcome: AutoApplyOutcome, counts: CalibrationSweepCounts
     ) -> None:
         """Tally + log one released sector. Blocked runs leave no row: this is the trace."""
         from app.engine.calibration_policy import REASON_NO_CANDIDATE
@@ -444,3 +487,17 @@ class ProbeCalibrationService:
                 outcome.candidate_fc,
                 outcome.candidate_refill,
             )
+        counts.outcomes.append(
+            SectorSweepOutcome(
+                sector_id=sector_id,
+                sector_name=sector_name,
+                reason=reason,
+                applied=outcome.apply,
+                fc_before=outcome.before_fc,
+                fc_candidate=outcome.candidate_fc,
+                refill_before=outcome.before_refill,
+                refill_candidate=outcome.candidate_refill,
+                method=outcome.method,
+                before_source=outcome.before_source,
+            )
+        )
