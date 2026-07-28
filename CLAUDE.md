@@ -275,15 +275,17 @@ turning a farm's `calibration_auto_apply` off stops future scheduled runs.
   ledger — every review finding, deviation and ruling so far — is at
   `.superpowers/sdd/2026-07-28-calibration-sweep-background/progress.md` (git-ignored, still on
   disk; `git clean -fdx` would destroy it, recover from `git log` if so).
-- **State at handoff: Tasks 1–3 done, 4–7 not started.** Committed: `2188fc0` (run row +
-  migration `1c13f632d1a6`), `7759082` (progress hook), `3214af5` (sweep service). Task 3's fix
-  round was **implemented and green (10/10 targeted, ruff clean) but possibly uncommitted at
-  session end** — **verify with `git log --oneline` and `git status` before doing anything**, and
-  if the two modified files (`calibration_sweep_service.py`, its test) are still dirty, review and
-  commit them, then run the scoped re-review before starting Task 4.
+- **State at handoff: Tasks 1–3 COMPLETE and reviewed clean; 4–7 not started.** Commits:
+  `2188fc0` (run row + migration `1c13f632d1a6`), `7759082` (progress hook), `3214af5` (sweep
+  service), `9f9a72a` (Task 3 fix round — all four review findings addressed, scoped re-review
+  passed). Backend at handoff: **749 passed, 10 skipped, zero failures**; working tree clean.
+  Resume cleanly at **Task 4** — no loop is mid-flight.
 - **Remaining: Task 4** (POST → 202 + 409 carrying `run_id`; unlimited poll GET), **Task 5**
   (worker drain job + metrics + startup stale reclaim), **Task 6** (polling UI), **Task 7** (fold
   this section into a Done entry).
+- Note for Task 4: `enqueue_sweep`'s `IntegrityError` path calls `db.rollback()`, which discards
+  uncommitted caller work and expires loaded objects — so do not rely on pre-enqueue writes or on
+  already-loaded attributes (e.g. the `AccessController`'s `farm`) surviving a 409.
 
 **Four invariants in this design that must not be "simplified" later:**
 1. **`stale` is TERMINAL.** The partial unique index `uq_calibration_sweep_run_active` on
@@ -301,13 +303,12 @@ turning a farm's `calibration_auto_apply` off stops future scheduled runs.
    Monday pass, and the drain job **requeues rather than fails** when it cannot acquire — the
    request was valid, the farm is merely busy; `queued_at` staleness is the backstop.
 
-**Open findings carried forward** (detail in the ledger): `finish_run` must not lower
-`sectors_done` (a failure path with empty outcomes snapped 34/77 back to 0/77); failed sectors
-`continue` before the progress callback, so progress can skip numbers and a last-sector failure
-reports no final tally — `finish_run` writing the authoritative count is what covers it, so Task 5
-must keep that; `_get_redis()` must mirror `app/job_lock.py`'s plain lazy idiom (loop-awareness
-belongs in the test fixture — rebuilding without `aclose()` leaks a pool in any process running
-two event loops, and this repo has ~20 `asyncio.run()` entry points).
+**One finding carried into Task 5** (detail in the ledger): failed sectors `continue` before the
+progress callback fires, so the progress sequence a poller sees can skip numbers, and if the LAST
+sector fails no callback reports the final tally — a UI could look stalled at N-1. What covers it
+is `finish_run` writing the authoritative count at the end (now via
+`func.greatest(sectors_done, len(outcomes))`, so it can never lower it either). **Task 5 must keep
+calling `finish_run` on every exit path, including failure.**
 
 **Deploy when finished:** `alembic upgrade head` BEFORE swapping (migration `1c13f632d1a6`), then
 `--build backend worker frontend` — all three.
