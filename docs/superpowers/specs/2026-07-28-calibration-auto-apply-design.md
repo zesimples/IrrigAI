@@ -93,7 +93,8 @@ AUTO_APPLY_FLATLINE_STD_M3M3 = 0.003   # same floor as probe_signal._FLATLINE_ST
 class CalibrationQuality:
     probe_hours_since_reading: float | None
     all_depths_flatlined: bool
-    method: str                        # "cycles" | "envelope"
+    # No `method` field: ProbeCalibrationResult.method already carries it, and
+    # duplicating it would give the metric label two sources of truth.
 
 @dataclass(frozen=True)
 class AutoApplyDecision:
