@@ -366,15 +366,29 @@ async def test_sweep_records_candidates_only_when_flag_off(db: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_one_failing_sector_does_not_abort_the_farm(db: AsyncSession):
-    """Savepoint isolation: a flush failure on sector A must not poison sector B."""
+    """Savepoint isolation: a GENUINE failed flush on sector A must not poison sector B.
+
+    The patched method for the bad sector does not just raise a Python exception —
+    it performs a real DB write (a ProbeCalibrationRun pointing at a nonexistent
+    sector_id) and flushes it, which Postgres rejects with a foreign-key violation.
+    That is exactly how the real bug manifests: `compute_and_auto_apply`/`apply_run`
+    add() + flush() and a failed flush leaves the AsyncSession needing a rollback.
+    Without `db.begin_nested()` around each sector, this failure would invalidate
+    the whole session and the next sector's own flush would raise
+    PendingRollbackError instead of succeeding — so this test does NOT rely on
+    query ordering; it asserts the good sector still applies regardless of order,
+    and separately proves the session itself is still usable afterward.
+    """
+    from uuid import uuid4
+
     good_id, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
 
     # A second sector on the same farm, built the same way.
-    from sqlalchemy import select
     plot = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
     bad = Sector(plot_id=plot.id, name="Boom", crop_type="almond")
     db.add(bad)
     await db.flush()
+    bad_id = str(bad.id)
 
     svc = ProbeCalibrationService()
     original = svc.compute_and_auto_apply
@@ -382,8 +396,25 @@ async def test_one_failing_sector_does_not_abort_the_farm(db: AsyncSession):
 
     async def flaky(sector_id, session):
         calls.append(sector_id)
-        if sector_id == str(bad.id):
-            raise RuntimeError("simulated flush failure")
+        if sector_id == bad_id:
+            # Real DBAPI failure: FK violation on a nonexistent sector_id, not a
+            # Python-level raise. This is what actually aborts a Postgres
+            # transaction and requires a rollback before the session is reusable.
+            bogus_run = ProbeCalibrationRun(
+                sector_id=str(uuid4()),
+                observed_fc=0.30,
+                observed_refill=0.20,
+                method="envelope",
+                num_cycles=0,
+                consistency=0.0,
+                window_days=30,
+                computed_at=datetime.now(UTC),
+                source="scheduled",
+                status="candidate",
+            )
+            session.add(bogus_run)
+            await session.flush()  # raises IntegrityError (FK violation) here
+            raise AssertionError("unreachable: flush should have raised")
         return await original(sector_id, session)
 
     svc.compute_and_auto_apply = flaky
@@ -391,6 +422,16 @@ async def test_one_failing_sector_does_not_abort_the_farm(db: AsyncSession):
 
     assert counts.failed == 1
     assert counts.applied == 1
-    assert set(calls) == {good_id, str(bad.id)}
+    assert set(calls) == {good_id, bad_id}
+
+    # The good sector applied, regardless of which sector the sweep visited first.
     assert [r.status for r in await _runs(db, good_id)] == ["applied"]
+
+    # The session itself must still be usable after the bad sector's aborted
+    # flush — this is exactly the property a leaked PendingRollbackError breaks.
+    still_usable = (await db.execute(
+        select(Sector).where(Sector.id == good_id)
+    )).scalar_one()
+    assert still_usable.id == good_id
+
     await db.rollback()
