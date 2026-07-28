@@ -29,12 +29,14 @@ class FarmUpdate(BaseModel):
     elevation_m: float | None = Field(None, ge=-500, le=9000)
     region: str | None = None
     timezone: str | None = None
+    calibration_auto_apply: bool | None = None
 
 
 class FarmOut(FarmBase):
     id: str
     owner_id: str
     is_archived: bool = False
+    calibration_auto_apply: bool = False
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

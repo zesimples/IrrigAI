@@ -20,6 +20,13 @@ class Farm(Base, TimestampMixin):
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="Europe/Lisbon")
     owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("user.id"), nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    calibration_auto_apply: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        comment="opt-in: weekly calibration job may apply its own results unattended",
+    )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
