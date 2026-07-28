@@ -426,6 +426,23 @@ class ProbeCalibrationService:
                         applied=False,
                     )
                 )
+            else:
+                # Nothing computable (no probe, tension-only sensors, too few
+                # readings, implausible envelope). Counted and listed so the
+                # flag-off run is the preview it claims to be: without this a
+                # 77-sector farm reported "candidatas 12 · sem dados 0" with the
+                # other 65 sectors silently absent, while the SAME farm with the
+                # flag on reports them as no_candidate. Sweep-level reason string,
+                # deliberately equal to the gate's REASON_NO_CANDIDATE value.
+                counts.no_candidate += 1
+                counts.outcomes.append(
+                    SectorSweepOutcome(
+                        sector_id=sector_id,
+                        sector_name=sector_name,
+                        reason="no_candidate",
+                        applied=False,
+                    )
+                )
         return counts
 
     @staticmethod

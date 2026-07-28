@@ -133,6 +133,31 @@ async def test_sweep_with_flag_off_records_candidates_only(client, db: AsyncSess
 
 
 @pytest.mark.asyncio
+async def test_flag_off_payload_accounts_for_every_sector(client, db: AsyncSession):
+    """A preview that omits sectors is not a preview: the payload must name the
+    ones nothing could be computed for, not just the ones that produced a
+    candidate."""
+    farm_id, _ = await _farm_with_calibratable_sector(db, auto_apply=False)
+    plot = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
+    bare = Sector(plot_id=plot.id, name="Sem sonda", crop_type="almond")
+    db.add(bare)
+    await db.flush()
+    await db.commit()
+    try:
+        body = (await client.post(f"/api/v1/farms/{farm_id}/calibration-sweep")).json()
+
+        assert body["counts"]["candidates"] == 1
+        assert body["counts"]["no_candidate"] == 1
+        assert len(body["outcomes"]) == 2
+        blank = next(o for o in body["outcomes"] if o["sector_name"] == "Sem sonda")
+        assert blank["reason"] == "no_candidate"
+        assert blank["applied"] is False
+        assert blank["fc_candidate"] is None
+    finally:
+        await _teardown(db, farm_id)
+
+
+@pytest.mark.asyncio
 async def test_blocked_sector_reports_reason_and_candidate(client, db: AsyncSession):
     farm_id, _ = await _farm_with_calibratable_sector(
         db, auto_apply=True, stale_hours=200.0

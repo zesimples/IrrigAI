@@ -782,6 +782,43 @@ async def test_flag_off_sweep_reports_candidate_outcomes(db: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_flag_off_sweep_counts_and_lists_sectors_with_no_candidate(db: AsyncSession):
+    """The flag-off run is advertised as a safe preview of what Monday will do.
+
+    A sector that can compute nothing (no probe here; equally tension-only
+    sensors, too few readings, an implausible envelope) used to increment no
+    counter and append no outcome. On a 77-sector farm that reads
+    "candidatas 12 · sem dados 0" with 65 sectors silently absent — understating
+    exactly the coverage number this feature exists to expose, and disagreeing
+    with the same farm's flag-ON run, which reports them as no_candidate.
+    """
+    from sqlalchemy import select
+
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=False)
+    plot = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
+    bare = Sector(plot_id=plot.id, name="Sem sonda", crop_type="almond")
+    db.add(bare)
+    await db.flush()
+
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=False
+    )
+
+    assert counts.candidates == 1
+    assert counts.no_candidate == 1
+    # The invariant: exactly one outcome per sector, never disagreeing with a counter.
+    assert len(counts.outcomes) == 2
+    blank = [o for o in counts.outcomes if o.sector_id == str(bare.id)]
+    assert len(blank) == 1
+    assert blank[0].reason == REASON_NO_CANDIDATE
+    assert blank[0].sector_name == "Sem sonda"
+    assert blank[0].applied is False
+    assert blank[0].fc_candidate is None  # nothing was computed
+    assert blank[0].fc_before is None
+    await db.rollback()
+
+
+@pytest.mark.asyncio
 async def test_failed_sector_appears_in_outcomes_as_error(db: AsyncSession):
     """counts.failed and the outcome list must not disagree."""
     from sqlalchemy import select
