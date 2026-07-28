@@ -29,7 +29,7 @@
 - Backend lint: `docker compose exec -T backend ruff check <paths>`
 - Frontend has **no source mount even in dev** — but Vitest runs on the host: `cd frontend && npm run test:run`
 - Frontend lint/types: `cd frontend && npm run lint && npx tsc --noEmit`
-- Current backend baseline: **720 passed, 10 skipped**. Current frontend baseline: **83 passed**.
+- Current backend baseline: **720 passed, 10 skipped**. Current frontend baseline: **87 passed** (verified 2026-07-28; CLAUDE.md's "78/83 passed" figures are from earlier cycles and are stale).
 
 ## File Structure
 
@@ -1257,7 +1257,7 @@ Expected: PASS — 2 passed
 - [ ] **Step 5: Full frontend suite**
 
 Run: `cd frontend && npm run test:run`
-Expected: PASS — 94 passed (83 baseline + 9 from Task 3 + 2 here)
+Expected: PASS — 98 passed (87 baseline + 9 from Task 3 + 2 here)
 
 - [ ] **Step 6: Lint, types, production build**
 
