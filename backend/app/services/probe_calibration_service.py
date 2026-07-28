@@ -350,11 +350,14 @@ class ProbeCalibrationService:
 
         With `auto_apply` the policy may promote results unattended; without it the
         job records candidates only, exactly as before.
+
+        Counters, metrics and per-sector log lines are recorded only AFTER the
+        savepoint has released: a failure in `RELEASE SAVEPOINT` itself surfaces at
+        `__aexit__`, so incrementing inside the block could count one sector as both
+        applied and error, and log bounds that were rolled back as applied.
         """
         from sqlalchemy import select
 
-        from app.engine.calibration_policy import REASON_NO_CANDIDATE
-        from app.metrics import calibration_auto_apply_total
         from app.models import Plot, Sector
 
         sectors = (await db.execute(
@@ -369,34 +372,75 @@ class ProbeCalibrationService:
         counts = CalibrationSweepCounts()
         for sector in sectors:
             sector_id = str(sector.id)
+            outcome: AutoApplyOutcome | None = None
+            recorded_candidate = False
             try:
                 async with db.begin_nested():
-                    if not auto_apply:
+                    if auto_apply:
+                        outcome = await self.compute_and_auto_apply(sector_id, db)
+                    else:
                         recorded = await self.compute_and_record(
                             sector_id, db, apply=False, source="scheduled"
                         )
-                        if recorded is not None:
-                            counts.candidates += 1
-                        continue
-
-                    decision = await self.compute_and_auto_apply(sector_id, db)
-                    if decision.apply:
-                        counts.applied += 1
-                        calibration_auto_apply_total.labels(
-                            "applied", decision.reason, "any"
-                        ).inc()
-                    elif decision.reason == REASON_NO_CANDIDATE:
-                        counts.no_candidate += 1
-                        calibration_auto_apply_total.labels(
-                            "no_candidate", decision.reason, "none"
-                        ).inc()
-                    else:
-                        counts.skipped += 1
-                        calibration_auto_apply_total.labels(
-                            "skipped", decision.reason, "any"
-                        ).inc()
+                        recorded_candidate = recorded is not None
             except Exception:
-                counts.failed += 1
-                calibration_auto_apply_total.labels("error", "exception", "none").inc()
-                logger.exception("Probe calibration failed for sector %s", sector.id)
+                self._count_failure(sector_id, counts)
+                continue
+
+            # Savepoint released — the work below can no longer be rolled back, so
+            # counters and logs describe what actually persisted.
+            if auto_apply and outcome is not None:
+                self._record_outcome(sector_id, outcome, counts)
+            elif recorded_candidate:
+                counts.candidates += 1
         return counts
+
+    @staticmethod
+    def _count_failure(sector_id: str, counts: CalibrationSweepCounts) -> None:
+        from app.metrics import calibration_auto_apply_total
+
+        counts.failed += 1
+        calibration_auto_apply_total.labels("error", "exception", "none").inc()
+        logger.exception("Probe calibration failed for sector %s", sector_id)
+
+    @staticmethod
+    def _record_outcome(
+        sector_id: str, outcome: AutoApplyOutcome, counts: CalibrationSweepCounts
+    ) -> None:
+        """Tally + log one released sector. Blocked runs leave no row: this is the trace."""
+        from app.engine.calibration_policy import REASON_NO_CANDIDATE
+        from app.metrics import calibration_auto_apply_total
+
+        reason = outcome.reason
+        if outcome.apply:
+            counts.applied += 1
+            calibration_auto_apply_total.labels("applied", reason, "any").inc()
+            logger.info(
+                "Probe calibration applied: sector=%s method=%s "
+                "fc %s -> %s refill %s -> %s (was %s)",
+                sector_id,
+                outcome.method,
+                outcome.before_fc,
+                outcome.candidate_fc,
+                outcome.before_refill,
+                outcome.candidate_refill,
+                outcome.before_source,
+            )
+        elif reason == REASON_NO_CANDIDATE:
+            counts.no_candidate += 1
+            calibration_auto_apply_total.labels("no_candidate", reason, "none").inc()
+        else:
+            counts.skipped += 1
+            calibration_auto_apply_total.labels("skipped", reason, "any").inc()
+            logger.warning(
+                "Probe calibration blocked (%s): sector=%s method=%s "
+                "live fc=%s refill=%s (%s) vs candidate fc=%s refill=%s",
+                reason,
+                sector_id,
+                outcome.method,
+                outcome.before_fc,
+                outcome.before_refill,
+                outcome.before_source,
+                outcome.candidate_fc,
+                outcome.candidate_refill,
+            )
