@@ -85,6 +85,10 @@ export function FarmCalibrationControls({ farmId, initialEnabled }: Props) {
 
   async function runSweep() {
     setConfirming(false);
+    // Drop the previous tally first: left in place it sits beside the "a calibrar…"
+    // spinner and reads as this run's answer.
+    setResult(null);
+    setShowDetail(false);
     setRunning(true);
     try {
       const r = await calibrationApi.sweepFarm(farmId);
@@ -164,7 +168,11 @@ export function FarmCalibrationControls({ farmId, initialEnabled }: Props) {
         ) : (
           <button
             type="button"
-            disabled={running}
+            // Also blocked while the toggle write is in flight: `enabled` is
+            // optimistic, so mid-PUT it can disagree with the flag the backend
+            // will read — and the confirmation branch keys off `enabled`. Running
+            // then could apply live bounds farm-wide with no confirmation shown.
+            disabled={running || saving}
             onClick={handleTriggerClick}
             className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-paper px-2.5 py-1 text-[11.5px] text-ink-2 hover:bg-paper-in disabled:opacity-40 transition-colors"
           >
@@ -200,6 +208,14 @@ export function FarmCalibrationControls({ farmId, initialEnabled }: Props) {
               </button>
             )}
           </div>
+          {/* Applied bounds change the depletion denominator, but nothing on
+              screen moves until the 05:00 UTC recommendation run recomputes it —
+              say so, or the card and the sector pages look like they disagree. */}
+          {c.applied > 0 && (
+            <p className="mt-1 text-[11px] text-ink-3">
+              Os novos limites só se refletem na próxima recomendação (05:00 UTC).
+            </p>
+          )}
           {showDetail && (
             <div className="mt-1 divide-y divide-rule-soft">
               {result!.outcomes.map((o) => (

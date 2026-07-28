@@ -139,6 +139,75 @@ describe("FarmCalibrationControls", () => {
     await waitFor(() => expect(screen.getByText(/aplicadas 1/i)).toBeInTheDocument());
   });
 
+  it("disables the trigger while the TOGGLE write is in flight", async () => {
+    // The race this guards: the farm's flag is TRUE in the DB, the user switches
+    // it off (optimistic `enabled=false`) and hits `correr` before the PUT lands.
+    // With the trigger live, handleTriggerClick would see enabled=false, skip the
+    // confirmation, and the backend — still reading calibration_auto_apply=true —
+    // would apply new bounds on every sector with nothing confirmed.
+    let resolveToggle!: (v: unknown) => void;
+    mockToggle.mockReturnValue(new Promise((r) => { resolveToggle = r; }));
+    render(<FarmCalibrationControls farmId="f1" initialEnabled />);
+
+    fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /correr/i })).toBeDisabled(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /correr/i }));
+    expect(mockSweep).not.toHaveBeenCalled();
+
+    resolveToggle({ calibration_auto_apply: false });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /correr/i })).toBeEnabled(),
+    );
+  });
+
+  it("warns that applied limits only take effect on the next recommendation", async () => {
+    mockSweep.mockResolvedValue(sweep());
+    render(<FarmCalibrationControls farmId="f1" initialEnabled />);
+
+    fireEvent.click(screen.getByRole("button", { name: /correr/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirmar/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/próxima recomendação/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("does NOT claim a pending effect when nothing was applied", async () => {
+    mockSweep.mockResolvedValue(
+      sweep({
+        auto_apply: false,
+        counts: { applied: 0, skipped: 0, no_candidate: 2, candidates: 1, failed: 0 },
+      }),
+    );
+    render(<FarmCalibrationControls farmId="f1" initialEnabled={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /correr/i }));
+    await waitFor(() => expect(screen.getByText(/candidatas 1/i)).toBeInTheDocument());
+
+    expect(screen.queryByText(/próxima recomendação/i)).not.toBeInTheDocument();
+  });
+
+  it("clears the previous tally when re-running", async () => {
+    mockSweep.mockResolvedValue(sweep({ auto_apply: false }));
+    render(<FarmCalibrationControls farmId="f1" initialEnabled={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /correr/i }));
+    await waitFor(() => expect(screen.getByText(/aplicadas 1/i)).toBeInTheDocument());
+
+    // Second run still pending: the old numbers must not sit beside "a calibrar…"
+    // and be read as the new answer.
+    mockSweep.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: /correr/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /a calibrar/i })).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/aplicadas 1/i)).not.toBeInTheDocument();
+  });
+
   it("explains a rate-limit rejection", async () => {
     mockSweep.mockRejectedValue(new ApiError(429, "rate limited"));
     render(<FarmCalibrationControls farmId="f1" initialEnabled={false} />);
