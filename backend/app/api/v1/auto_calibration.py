@@ -7,7 +7,7 @@ POST /sectors/{sector_id}/auto-calibration/dismiss  — suppress for 30 days
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,7 @@ from app.engine.auto_calibration import (
     AutoCalibrationResult,
     AutoCalibrationService,
 )
+from app.limiter import limiter
 from app.models import Plot, ProbeCalibration, ProbeCalibrationRun, SectorCropProfile, SoilPreset
 from app.services.audit_service import audit
 from app.services.probe_calibration_service import ProbeCalibrationService
@@ -98,6 +99,34 @@ class ProbeCalibrationOut(BaseModel):
     # True when this run turned off a soil customization so the calibration could
     # take precedence (the recency rule: pressing the button overrides a manual edit).
     cleared_customization: bool = False
+
+
+class SectorSweepOutcomeOut(BaseModel):
+    sector_id: str
+    sector_name: str
+    reason: str
+    applied: bool
+    fc_before: float | None = None
+    fc_candidate: float | None = None
+    refill_before: float | None = None
+    refill_candidate: float | None = None
+    method: str | None = None
+    before_source: str | None = None
+
+
+class SweepCountsOut(BaseModel):
+    applied: int
+    skipped: int
+    no_candidate: int
+    candidates: int
+    failed: int
+
+
+class CalibrationSweepOut(BaseModel):
+    # Echoed so the UI never has to infer which mode ran.
+    auto_apply: bool
+    counts: SweepCountsOut
+    outcomes: list[SectorSweepOutcomeOut]
 
 
 class CalibrationHistoryOut(BaseModel):
@@ -428,4 +457,75 @@ def _to_out(result: AutoCalibrationResult) -> AutoCalibrationOut:
         suggestion_pt=result.suggestion_pt,
         suggestion_en=result.suggestion_en,
         generated_at=result.generated_at,
+    )
+
+
+@router.post("/farms/{farm_id}/calibration-sweep", response_model=CalibrationSweepOut)
+@limiter.limit("3/minute")
+async def run_farm_calibration_sweep(
+    request: Request,
+    farm_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    """Run the weekly calibration sweep for one farm, now, honouring its flag.
+
+    Deliberately the SAME path the scheduler runs: with the farm's
+    `calibration_auto_apply` off this records candidates and changes no bounds,
+    which makes the button a safe preview of what Monday 04:00 UTC will do. The
+    endpoint never overrides the flag.
+
+    Synchronous, like POST /farms/{id}/recommendations/generate — on a large farm
+    (77 sectors at Innoliva) this runs for tens of seconds.
+    """
+    farm = await access.farm(farm_id)
+    auto_apply = bool(farm.calibration_auto_apply)
+    try:
+        counts = await _calib_service.compute_all_for_farm(
+            farm_id, db, auto_apply=auto_apply
+        )
+    except Exception as exc:
+        raise HTTPException(500, detail=f"Calibration sweep error: {exc}") from exc
+
+    await audit.log(
+        "probe_calibration_sweep_triggered",
+        "farm",
+        farm_id,
+        db,
+        user_id=str(access.current_user.id),
+        after_data={
+            "auto_apply": auto_apply,
+            "applied": counts.applied,
+            "skipped": counts.skipped,
+            "no_candidate": counts.no_candidate,
+            "candidates": counts.candidates,
+            "failed": counts.failed,
+        },
+    )
+    await db.commit()
+
+    return CalibrationSweepOut(
+        auto_apply=auto_apply,
+        counts=SweepCountsOut(
+            applied=counts.applied,
+            skipped=counts.skipped,
+            no_candidate=counts.no_candidate,
+            candidates=counts.candidates,
+            failed=counts.failed,
+        ),
+        outcomes=[
+            SectorSweepOutcomeOut(
+                sector_id=o.sector_id,
+                sector_name=o.sector_name,
+                reason=o.reason,
+                applied=o.applied,
+                fc_before=o.fc_before,
+                fc_candidate=o.fc_candidate,
+                refill_before=o.refill_before,
+                refill_candidate=o.refill_candidate,
+                method=o.method,
+                before_source=o.before_source,
+            )
+            for o in counts.outcomes
+        ],
     )
