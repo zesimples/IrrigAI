@@ -253,6 +253,69 @@ Detailed tracking in `docs/handoff-codex-2026-06-17.md`.
 - **`worker` must be rebuilt, not just `backend frontend`:** the final-review fix wave changed `compute_all_for_farm` so the flag-OFF path also counts and lists `no_candidate` sectors, and the **scheduler** calls that same function. Without a worker rebuild the Monday per-farm summary keeps under-reporting `no_candidate` — the very number this cycle exists to surface. (Stale-worker images have bitten this project before; see the flowmeter 406 history.)
 - **Three findings the final whole-branch review caught, worth not regressing:** (1) the *correr* trigger must stay disabled while the toggle write is in flight — otherwise a user who flips the switch off and clicks within the round-trip skips the confirmation while the backend still reads the old flag, applying bounds farm-wide unconfirmed; (2) the flag-OFF sweep must count `no_candidate` or it silently hides every sector that cannot be calibrated, understating the coverage number; (3) an applied sweep discloses that new limits only take effect with the next recommendation (05:00 UTC) — the farm-wide path deliberately does NOT regenerate, unlike the single-sector `AiCalibrationButton`.
 
+**IN PROGRESS — background calibration sweep (2026-07-28, Claude Code; RESUME HERE next session):**
+
+**Why this exists — a live production defect.** The on-demand sweep button shipped in the
+2026-07-28 calibration-UI cycle and **fails in production right now**. First real use on Herdade
+do Esporão gave three browser 500s. Prod logs show the backend returned **200 every time** with
+`duration_ms` of **293180 / 443486 / 574027** (4.9 / 7.4 / 9.6 min), while the frontend container
+logged `Failed to proxy … Error: socket hang up  code: 'ECONNRESET'`. The Next.js rewrite proxy
+gives up around five minutes and returns 500; the sweep completes afterwards and its result is
+discarded. **Zero backend errors** — the work succeeded, only the reply was lost. Durations grew
+across the three clicks (4.9→9.6 min) because they ran concurrently with no lock. Local
+reproduction on a 77-sector farm was clean in seconds: the cost is real `probe_reading` hypertable
+volume, ~6 reading queries per sector. **The Monday scheduler job is unaffected** — it runs
+in-process in the worker with no proxy in front of it. Only the button is broken. Interim
+mitigation if a client hits it: nothing is corrupted (bounds were applied, three times over), and
+turning a farm's `calibration_auto_apply` off stops future scheduled runs.
+
+- **Spec:** `docs/superpowers/specs/2026-07-28-calibration-sweep-background-design.md`
+- **Plan:** `docs/superpowers/plans/2026-07-28-calibration-sweep-background.md` (7 tasks, 48 steps)
+- **Resume with:** `superpowers:subagent-driven-development` against that plan. The execution
+  ledger — every review finding, deviation and ruling so far — is at
+  `.superpowers/sdd/2026-07-28-calibration-sweep-background/progress.md` (git-ignored, still on
+  disk; `git clean -fdx` would destroy it, recover from `git log` if so).
+- **State at handoff: Tasks 1–3 done, 4–7 not started.** Committed: `2188fc0` (run row +
+  migration `1c13f632d1a6`), `7759082` (progress hook), `3214af5` (sweep service). Task 3's fix
+  round was **implemented and green (10/10 targeted, ruff clean) but possibly uncommitted at
+  session end** — **verify with `git log --oneline` and `git status` before doing anything**, and
+  if the two modified files (`calibration_sweep_service.py`, its test) are still dirty, review and
+  commit them, then run the scoped re-review before starting Task 4.
+- **Remaining: Task 4** (POST → 202 + 409 carrying `run_id`; unlimited poll GET), **Task 5**
+  (worker drain job + metrics + startup stale reclaim), **Task 6** (polling UI), **Task 7** (fold
+  this section into a Done entry).
+
+**Four invariants in this design that must not be "simplified" later:**
+1. **`stale` is TERMINAL.** The partial unique index `uq_calibration_sweep_run_active` on
+   `(farm_id) WHERE status IN ('queued','running')` is what makes duplicate requests impossible
+   across production's `uvicorn --workers 4` — a Python pre-check races. Terminal `stale` is how a
+   dead run leaves that predicate instead of locking the farm out of ever being swept again.
+2. **Progress is written on a SEPARATE short-lived session.** The sweep runs in one long
+   transaction; progress written on it is invisible to pollers until the end, so the bar would sit
+   at 0/N for ten minutes then jump to done. `mark_running`/`record_progress`/`finish_run` each
+   open their own `AsyncSessionLocal()` and commit immediately.
+3. **The poll endpoint must stay un-rate-limited.** A 2s poll across a ten-minute sweep is ~300
+   requests; every neighbouring endpoint carries `@limiter.limit`, so copying one would 429 the
+   client mid-sweep.
+4. **The per-farm lock `calibration_sweep:{farm_id}` is taken by BOTH** the drain job and the
+   Monday pass, and the drain job **requeues rather than fails** when it cannot acquire — the
+   request was valid, the farm is merely busy; `queued_at` staleness is the backstop.
+
+**Open findings carried forward** (detail in the ledger): `finish_run` must not lower
+`sectors_done` (a failure path with empty outcomes snapped 34/77 back to 0/77); failed sectors
+`continue` before the progress callback, so progress can skip numbers and a last-sector failure
+reports no final tally — `finish_run` writing the authoritative count is what covers it, so Task 5
+must keep that; `_get_redis()` must mirror `app/job_lock.py`'s plain lazy idiom (loop-awareness
+belongs in the test fixture — rebuilding without `aclose()` leaks a pool in any process running
+two event loops, and this repo has ~20 `asyncio.run()` entry points).
+
+**Deploy when finished:** `alembic upgrade head` BEFORE swapping (migration `1c13f632d1a6`), then
+`--build backend worker frontend` — all three.
+
+**Test-suite caveat for this repo:** the pass/skip **split** drifts between runs because
+`tests/test_engine/*_db.py` has data-dependent conditional skips reading the shared dev DB. Judge
+suite runs by zero failures and the total, not by matching an exact pass count.
+
 **Open, roughly prioritized:**
 0. **Per-plot-weather follow-ups** (Innoliva is deployed & live): add `ON DELETE SET NULL` to the weather `plot_id` FKs (so plot deletion isn't blocked); add an integration test for the `ingest_farm` per-plot vs farm-level branch dispatch; make the weather-freshness alert per-plot (`alerts/engine.py` `_check_weather_freshness` still takes the newest row farm-wide, so one fresh polo can hide another's stale iMetos — rain-skip is already per-plot); two more farm-wide weather stragglers found in the 2026-07-10 audit: `engine/water_event_detector.py` matches rain **farm-wide** when classifying probe-detected events (rain at one polo can mislabel an irrigation event at another) and `engine/soil_water_data.py` uses farm-wide weather (only affects probe-less+flowmeter sectors — none at Innoliva); consider per-depth envelopes for the *sector* calibration too (display-only per-depth envelopes exist since 2026-07-10; `compute_sector_calibration` still pools all shallow depths, which can widen FC-refill when depth baselines differ).
 1. **Rate limiting** on `/auth/*` (token, register) and `/chat/*` — only the recommendation endpoints are limited today (`app/limiter.py`); credential-stuffing and LLM-cost exposure. *(Next up.)*
