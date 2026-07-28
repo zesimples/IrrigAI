@@ -38,8 +38,8 @@ def test_healthy_candidate_applies():
         _candidate(),
         _before(),
         _quality(),
-        is_customized=False,
-        has_prior_calibration=True,
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=True,
     )
     assert decision.apply is True
     assert decision.reason == REASON_APPLIED
@@ -50,21 +50,21 @@ def test_manual_override_blocks():
         _candidate(),
         _before(fc=0.30, pwp=0.19, source="scp_override"),
         _quality(),
-        is_customized=True,
-        has_prior_calibration=True,
+        bounds_from_manual_override=True,
+        bounds_from_prior_calibration=True,
     )
     assert decision.apply is False
     assert decision.reason == REASON_MANUAL_OVERRIDE
 
 
 def test_manual_override_wins_over_staleness():
-    """Gate precedence: a customized AND stale sector reports manual_override."""
+    """Gate precedence: an override-governed AND stale sector reports manual_override."""
     decision = evaluate_auto_apply(
         _candidate(),
-        _before(),
+        _before(source="scp_override"),
         _quality(hours=500.0),
-        is_customized=True,
-        has_prior_calibration=True,
+        bounds_from_manual_override=True,
+        bounds_from_prior_calibration=True,
     )
     assert decision.reason == REASON_MANUAL_OVERRIDE
 
@@ -74,8 +74,8 @@ def test_stale_probe_blocks():
         _candidate(),
         _before(),
         _quality(hours=73.0),
-        is_customized=False,
-        has_prior_calibration=True,
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=True,
     )
     assert decision.apply is False
     assert decision.reason == REASON_PROBE_STALE
@@ -86,8 +86,8 @@ def test_missing_last_reading_treated_as_stale():
         _candidate(),
         _before(),
         _quality(hours=None),
-        is_customized=False,
-        has_prior_calibration=True,
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=True,
     )
     assert decision.reason == REASON_PROBE_STALE
 
@@ -98,8 +98,8 @@ def test_fresh_boundary_at_threshold_applies():
         _candidate(),
         _before(),
         _quality(hours=72.0),
-        is_customized=False,
-        has_prior_calibration=True,
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=True,
     )
     assert decision.apply is True
 
@@ -109,8 +109,8 @@ def test_all_depths_flatlined_blocks():
         _candidate(),
         _before(),
         _quality(flat=True),
-        is_customized=False,
-        has_prior_calibration=True,
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=True,
     )
     assert decision.apply is False
     assert decision.reason == REASON_FLATLINE
@@ -121,8 +121,8 @@ def test_delta_cap_blocks_large_fc_move_on_calibrated_sector():
         _candidate(fc=0.42),
         _before(fc=0.29),
         _quality(),
-        is_customized=False,
-        has_prior_calibration=True,
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=True,
     )
     assert decision.apply is False
     assert decision.reason == REASON_DELTA_EXCEEDS_CAP
@@ -134,8 +134,8 @@ def test_delta_cap_blocks_refill_only_move():
         _candidate(fc=0.30, refill=0.11),
         _before(fc=0.30, pwp=0.19),
         _quality(),
-        is_customized=False,
-        has_prior_calibration=True,
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=True,
     )
     assert decision.apply is False
     assert decision.reason == REASON_DELTA_EXCEEDS_CAP
@@ -146,8 +146,8 @@ def test_delta_exactly_at_cap_applies():
         _candidate(fc=0.30 + AUTO_APPLY_MAX_DELTA_M3M3, refill=0.19),
         _before(fc=0.30, pwp=0.19),
         _quality(),
-        is_customized=False,
-        has_prior_calibration=True,
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=True,
     )
     assert decision.apply is True
 
@@ -162,11 +162,57 @@ def test_first_ever_application_is_uncapped():
         _candidate(fc=0.31, refill=0.20),
         _before(fc=0.16, pwp=0.07, source="plot_preset"),
         _quality(),
-        is_customized=False,
-        has_prior_calibration=False,
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=False,
     )
     assert decision.apply is True
     assert decision.reason == REASON_APPLIED
+
+
+def test_stale_prior_calibration_is_not_capped():
+    """REGRESSION GUARD (stale-calibration deadlock).
+
+    A sector calibrated 100 days ago has a probe_calibration row, but
+    resolve_soil_bounds IGNORES a calibration past CALIB_MAX_AGE_DAYS, so `before`
+    is the clamping preset (0.16) — NOT the old probe value. Keying the cap on "a
+    row exists" therefore measured a 0.28 move against a preset the sector was
+    never measured on and returned delta_exceeds_cap every Monday, and the
+    calibration could only get staler: blocked forever. The cap must apply only
+    while the live bounds ARE probe-derived, which is what
+    `bounds_from_prior_calibration=False` encodes here.
+    """
+    decision = evaluate_auto_apply(
+        _candidate(fc=0.44, refill=0.24),
+        _before(fc=0.16, pwp=0.07, source="plot_preset"),
+        _quality(),
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=False,
+    )
+    assert decision.apply is True
+    assert decision.reason == REASON_APPLIED
+
+
+def test_customized_profile_that_does_not_govern_bounds_is_not_an_override():
+    """REGRESSION GUARD (is_customized that does not affect soil bounds).
+
+    PUT /crop-profile sets SectorCropProfile.is_customized=True on ANY edit — e.g.
+    bumping `mad` — but resolve_soil_bounds honours scp_override only when BOTH
+    scp_fc and scp_pwp are non-null. With soil fields NULL the sector is still
+    governed by the clamping preset, so gating on the raw flag reported
+    manual_override forever while the sector stayed pinned at ~0% depletion: the
+    exact bug this feature exists to fix. Only a resolved source of "scp_override"
+    is a real human soil decision. The service derives that from `before.source`;
+    this asserts the gate itself never fires without it.
+    """
+    decision = evaluate_auto_apply(
+        _candidate(fc=0.31, refill=0.20),
+        _before(fc=0.16, pwp=0.07, source="plot_preset"),
+        _quality(),
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=False,
+    )
+    assert decision.reason != REASON_MANUAL_OVERRIDE
+    assert decision.apply is True
 
 
 def test_envelope_method_is_eligible():
@@ -175,7 +221,7 @@ def test_envelope_method_is_eligible():
         _candidate(method="envelope"),
         _before(),
         _quality(),
-        is_customized=False,
-        has_prior_calibration=True,
+        bounds_from_manual_override=False,
+        bounds_from_prior_calibration=True,
     )
     assert decision.apply is True

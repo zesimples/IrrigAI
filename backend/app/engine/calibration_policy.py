@@ -55,19 +55,31 @@ def evaluate_auto_apply(
     before: ResolvedSoilBounds,
     quality: CalibrationQuality,
     *,
-    is_customized: bool,
-    has_prior_calibration: bool,
+    bounds_from_manual_override: bool,
+    bounds_from_prior_calibration: bool,
 ) -> AutoApplyDecision:
     """Decide whether `candidate` may replace the sector's live bounds unattended.
 
     First matching gate wins. Plausibility and the 48-reading floor are NOT checked
     here — compute_sector_calibration returns None rather than an implausible
     result, so a candidate reaching this function has already cleared them.
+
+    Both flags describe the RESOLVED source of `before` (i.e. what the engine
+    actually computes depletion from), not raw DB rows:
+
+    - `bounds_from_manual_override`: `before.source == "scp_override"` — a deliberate
+      human soil edit is governing the sector. `SectorCropProfile.is_customized`
+      alone is NOT this: it is set on any profile edit (e.g. `mad`), while
+      soil_bounds honours the override only when both scp_fc and scp_pwp are set.
+    - `bounds_from_prior_calibration`: `before.source == "probe_calibrated"` — the
+      live bounds are a trusted probe-derived value the cap can meaningfully guard
+      movement away from. A *stale* calibration is not this: soil_bounds ignores it
+      and `before` is then a preset, which the cap must never be measured against.
     """
     # 1. A deliberate human soil edit outranks measurement. Note the caller must
-    #    also leave `is_customized` untouched — unlike the manual endpoints, the
-    #    scheduler never clears an agronomist's choice.
-    if is_customized:
+    #    also leave `SectorCropProfile.is_customized` untouched — unlike the manual
+    #    endpoints, the scheduler never clears an agronomist's choice.
+    if bounds_from_manual_override:
         return AutoApplyDecision(False, REASON_MANUAL_OVERRIDE)
 
     # 2. A dead probe's window may be mostly frozen or missing data. Missing
@@ -82,10 +94,11 @@ def evaluate_auto_apply(
         return AutoApplyDecision(False, REASON_FLATLINE)
 
     # 4. Drift guard. Only meaningful against a previously trusted probe-derived
-    #    value: for a never-calibrated sector `before` is a soil-texture table
-    #    lookup, so a large distance means the preset is wrong (the clamp bug),
-    #    not that the measurement is anomalous. Hence first application is uncapped.
-    if has_prior_calibration:
+    #    value: when `before` is a soil-texture table lookup (never calibrated, or
+    #    calibrated so long ago that the resolver ignores it), a large distance means
+    #    the preset is wrong (the clamp bug), not that the measurement is anomalous.
+    #    Hence a first — or post-staleness — application is uncapped.
+    if bounds_from_prior_calibration:
         fc_move = abs(candidate.observed_fc - before.fc)
         refill_move = abs(candidate.observed_refill - before.pwp)
         if fc_move > AUTO_APPLY_MAX_DELTA_M3M3 or refill_move > AUTO_APPLY_MAX_DELTA_M3M3:

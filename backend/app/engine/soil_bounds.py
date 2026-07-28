@@ -22,6 +22,15 @@ from dataclasses import dataclass
 DEFAULT_FC = 0.28   # clay-loam last-resort fallback (matches water_balance.DEFAULT_FC)
 DEFAULT_PWP = 0.14
 
+# ResolvedSoilBounds.source values. Named because callers gate behaviour on them —
+# the calibration auto-apply policy keys its manual-override and delta-cap gates on
+# the resolved source rather than on the raw DB flags that only sometimes govern it.
+SOURCE_SCP_OVERRIDE = "scp_override"
+SOURCE_PROBE_CALIBRATED = "probe_calibrated"
+SOURCE_SCP = "scp"
+SOURCE_PLOT_PRESET = "plot_preset"
+SOURCE_DEFAULT = "default"
+
 
 @dataclass
 class ResolvedSoilBounds:
@@ -46,7 +55,7 @@ def resolve_soil_bounds(
     # 1. Deliberate user soil override (SCP edited by a human, is_customized=True) —
     #    the agronomist's explicit choice wins over measured calibration.
     if scp_customized and scp_fc is not None and scp_pwp is not None:
-        return ResolvedSoilBounds(scp_fc, scp_pwp, "scp_override", None)
+        return ResolvedSoilBounds(scp_fc, scp_pwp, SOURCE_SCP_OVERRIDE, None)
     # 2. Probe-calibrated bounds — measured from the sector's own sensor. Calibrate FC
     #    *and* the lower bound together, so TAW shrinks to the real operating band
     #    instead of ballooning against PWP. Outranks the auto-populated SCP/plot
@@ -54,16 +63,16 @@ def resolve_soil_bounds(
     #    than the max age) is NOT trusted — it falls through to the next source, but
     #    its metadata is still surfaced so the API/UI can explain it was ignored.
     if calib_fc is not None and calib_refill is not None and not calib_stale:
-        return ResolvedSoilBounds(calib_fc, calib_refill, "probe_calibrated", calib_meta)
+        return ResolvedSoilBounds(calib_fc, calib_refill, SOURCE_PROBE_CALIBRATED, calib_meta)
     # 3. SCP value (per-sector soil config, preset-derived / not customized).
     if scp_fc is not None and scp_pwp is not None:
-        result = ResolvedSoilBounds(scp_fc, scp_pwp, "scp", None)
+        result = ResolvedSoilBounds(scp_fc, scp_pwp, SOURCE_SCP, None)
     # 4. Plot / preset.
     elif plot_fc is not None and plot_pwp is not None:
-        result = ResolvedSoilBounds(plot_fc, plot_pwp, "plot_preset", None)
+        result = ResolvedSoilBounds(plot_fc, plot_pwp, SOURCE_PLOT_PRESET, None)
     # 5. Hardcoded clay-loam default — last resort.
     else:
-        result = ResolvedSoilBounds(DEFAULT_FC, DEFAULT_PWP, "default", None)
+        result = ResolvedSoilBounds(DEFAULT_FC, DEFAULT_PWP, SOURCE_DEFAULT, None)
     # Surface provenance of an ignored (stale) calibration without using its values.
     if calib_stale and calib_meta is not None:
         result.calibration = calib_meta

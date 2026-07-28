@@ -17,6 +17,7 @@ from app.engine.calibration_policy import (
     REASON_NO_CANDIDATE,
     REASON_PROBE_STALE,
 )
+from app.engine.pipeline import resolve_sector_soil_bounds
 from app.models import (
     Farm,
     Plot,
@@ -240,6 +241,80 @@ async def test_auto_apply_never_clears_manual_customization(db: AsyncSession):
     await db.refresh(scp)
     assert scp.is_customized is True
     assert scp.field_capacity == pytest.approx(0.22)
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_customized_profile_without_soil_fields_does_not_block(db: AsyncSession):
+    """Gate 1 must key on the bounds the engine USES, not on the raw flag.
+
+    `PUT /crop-profile` sets is_customized=True on ANY edit (e.g. bumping `mad`),
+    but soil_bounds honours scp_override only when BOTH scp_fc and scp_pwp are set.
+    With soil fields NULL the sector is still governed by the clamping plot preset,
+    so blocking here would pin it at ~0% depletion forever — the exact bug this
+    feature exists to fix.
+    """
+    sector_id, _ = await _make_sector(db, vwc=0.44)
+    scp = SectorCropProfile(
+        sector_id=sector_id,
+        crop_type="almond",
+        mad=0.45,
+        root_depth_mature_m=0.9,
+        root_depth_young_m=0.4,
+        stages={},
+        field_capacity=None,
+        wilting_point=None,
+        is_customized=True,
+    )
+    db.add(scp)
+    await db.flush()
+
+    before = await resolve_sector_soil_bounds(sector_id, db)
+    assert before.source == "plot_preset"  # the flag does not govern soil bounds
+
+    outcome = await ProbeCalibrationService().compute_and_auto_apply(sector_id, db)
+
+    assert outcome.apply is True
+    assert outcome.reason == REASON_APPLIED
+
+    # THE invariant still holds: the auto path never clears the agronomist's flag.
+    await db.refresh(scp)
+    assert scp.is_customized is True
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_stale_prior_calibration_is_not_delta_capped(db: AsyncSession):
+    """A calibration older than CALIB_MAX_AGE_DAYS must not deadlock the gate.
+
+    soil_bounds IGNORES a stale calibration, so `before` is the clamping preset
+    (0.16), not the old probe value. Capping the move against a preset the sector
+    was never measured against blocks the sector permanently — and it can only get
+    staler. The cap must apply only while the live bounds ARE probe-derived.
+    """
+    sector_id, _ = await _make_sector(db, vwc=0.44)
+    db.add(ProbeCalibration(
+        sector_id=sector_id,
+        observed_fc=0.30,
+        observed_refill=0.20,
+        method="envelope",
+        num_cycles=0,
+        consistency=0.5,
+        window_days=30,
+        computed_at=datetime.now(UTC) - timedelta(days=100),
+    ))
+    await db.flush()
+
+    before = await resolve_sector_soil_bounds(sector_id, db)
+    assert before.source == "plot_preset"
+    assert before.fc == pytest.approx(0.16)
+
+    outcome = await ProbeCalibrationService().compute_and_auto_apply(sector_id, db)
+
+    assert outcome.apply is True
+    assert outcome.reason == REASON_APPLIED
+    projection = await _projection(db, sector_id)
+    assert projection.observed_fc > 0.40  # refreshed, no longer stale
     await db.rollback()
 
 

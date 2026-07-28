@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.engine.auto_calibration import AutoCalibrationService
 from app.engine.calibration_policy import (
     AUTO_APPLY_FLATLINE_STD_M3M3,
+    AutoApplyDecision,
     CalibrationQuality,
 )
 
@@ -33,12 +34,34 @@ class CalibrationSweepCounts:
     candidates: int = 0
     failed: int = 0
 
+
+@dataclass(frozen=True)
+class AutoApplyOutcome:
+    """A decision plus the numbers that explain it, for logging.
+
+    Blocked runs persist no row, so the log line is the ONLY trace of what the
+    sweep saw. Carrying the values out of `compute_and_auto_apply` lets the caller
+    log them *after* the per-sector savepoint has released, so a rolled-back sector
+    can never leave a line claiming it was applied. The values live here rather than
+    on the frozen `AutoApplyDecision` so the pure policy — and its fixture-free
+    tests — stay a function of thresholds only.
+    """
+
+    decision: AutoApplyDecision
+    before_fc: float | None = None
+    before_refill: float | None = None
+    before_source: str | None = None
+    candidate_fc: float | None = None
+    candidate_refill: float | None = None
+    method: str | None = None
+
     @property
-    def total(self) -> int:
-        return (
-            self.applied + self.skipped + self.no_candidate
-            + self.candidates + self.failed
-        )
+    def apply(self) -> bool:
+        return self.decision.apply
+
+    @property
+    def reason(self) -> str:
+        return self.decision.reason
 
 
 class ProbeCalibrationService:
@@ -125,48 +148,63 @@ class ProbeCalibrationService:
             created_by_id=created_by_id,
         )
 
-    async def compute_and_auto_apply(self, sector_id: str, db: AsyncSession):
+    async def compute_and_auto_apply(
+        self, sector_id: str, db: AsyncSession
+    ) -> AutoApplyOutcome:
         """Compute a candidate and promote it only if the policy allows.
 
         A blocked candidate persists NOTHING — no history row, no projection
         change. Unlike the manual endpoints, this path never clears
         SectorCropProfile.is_customized: a deliberate human soil edit outranks
         unattended measurement.
+
+        Returns an AutoApplyOutcome so the caller can log the before/candidate
+        values once the sector's savepoint has released.
         """
         from sqlalchemy import select
 
         from app.engine.calibration_policy import (
             REASON_NO_CANDIDATE,
-            AutoApplyDecision,
             evaluate_auto_apply,
         )
         from app.engine.pipeline import resolve_sector_soil_bounds
+        from app.engine.soil_bounds import SOURCE_PROBE_CALIBRATED, SOURCE_SCP_OVERRIDE
         from app.models import ProbeCalibration
-        from app.models.sector_crop_profile import SectorCropProfile
         from app.services.audit_service import audit
 
         result = await self._calibrator.compute_sector_calibration(sector_id, db)
         if result is None:
-            return AutoApplyDecision(False, REASON_NO_CANDIDATE)
+            return AutoApplyOutcome(AutoApplyDecision(False, REASON_NO_CANDIDATE))
 
         before = await resolve_sector_soil_bounds(sector_id, db)
         existing = (await db.execute(
             select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
         )).scalar_one_or_none()
-        scp = (await db.execute(
-            select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
-        )).scalar_one_or_none()
         quality = await self.build_quality(sector_id, db)
 
+        # Gate on the source the resolver actually chose, not on raw DB flags:
+        # SectorCropProfile.is_customized is set by any profile edit even when the
+        # soil fields are NULL (so the preset still governs), and a >90-day-old
+        # probe_calibration row is ignored by the resolver (so `before` is a preset
+        # the cap must not be measured against — that deadlocks the sector forever).
         decision = evaluate_auto_apply(
             result,
             before,
             quality,
-            is_customized=bool(scp and scp.is_customized),
-            has_prior_calibration=existing is not None,
+            bounds_from_manual_override=before.source == SOURCE_SCP_OVERRIDE,
+            bounds_from_prior_calibration=before.source == SOURCE_PROBE_CALIBRATED,
+        )
+        outcome = AutoApplyOutcome(
+            decision,
+            before_fc=before.fc,
+            before_refill=before.pwp,
+            before_source=before.source,
+            candidate_fc=result.observed_fc,
+            candidate_refill=result.observed_refill,
+            method=result.method,
         )
         if not decision.apply:
-            return decision
+            return outcome
 
         now = datetime.now(UTC)
         run = self._new_run(
@@ -191,7 +229,7 @@ class ProbeCalibrationService:
                 "run_id": str(run.id),
             },
         )
-        return decision
+        return outcome
 
     async def apply_run(self, run, db: AsyncSession):
         """Promote a history row, superseding the previously applied run."""
