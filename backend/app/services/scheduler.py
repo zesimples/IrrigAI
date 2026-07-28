@@ -222,15 +222,42 @@ async def _run_reference_recompute() -> None:
     )
 
 
-async def _run_recompute_probe_calibration() -> None:
+async def _calibration_sweep_for_farm(farm, db):
+    """One farm's calibration sweep, honouring its own auto-apply opt-in.
+
+    Extracted from the job body so the flag-routing is testable without the
+    scheduler, Redis lock, or a real trigger.
+    """
     from app.services.probe_calibration_service import ProbeCalibrationService
 
-    svc = ProbeCalibrationService()
+    auto_apply = bool(getattr(farm, "calibration_auto_apply", False))
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        str(farm.id), db, auto_apply=auto_apply
+    )
+    logger.info(
+        "Probe calibration: farm=%s auto_apply=%s applied=%d skipped=%d "
+        "no_candidate=%d candidates=%d failed=%d",
+        farm.id,
+        auto_apply,
+        counts.applied,
+        counts.skipped,
+        counts.no_candidate,
+        counts.candidates,
+        counts.failed,
+    )
+    if counts.failed:
+        logger.warning(
+            "Probe calibration: farm=%s had %d sector failures",
+            farm.id,
+            counts.failed,
+        )
+    return counts
 
+
+async def _run_recompute_probe_calibration() -> None:
     async def handle(farm, db) -> None:
-        n = await svc.compute_all_for_farm(str(farm.id), db)
+        await _calibration_sweep_for_farm(farm, db)
         await db.commit()
-        logger.info("Probe calibration: farm=%s created %d candidate runs", farm.id, n)
 
     await _run_per_farm_job(
         job_name="probe_calibration",

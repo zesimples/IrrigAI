@@ -435,3 +435,26 @@ async def test_one_failing_sector_does_not_abort_the_farm(db: AsyncSession):
     assert still_usable.id == good_id
 
     await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_job_handler_reads_the_per_farm_flag(db: AsyncSession):
+    """The job must pass each farm's own flag, not a global default."""
+    from app.services.scheduler import _calibration_sweep_for_farm
+
+    _, on_farm = await _make_sector(db, vwc=0.44, auto_apply=True)
+    _, off_farm = await _make_sector(db, vwc=0.44, auto_apply=False)
+
+    from sqlalchemy import select
+
+    on = (await db.execute(select(Farm).where(Farm.id == on_farm))).scalar_one()
+    off = (await db.execute(select(Farm).where(Farm.id == off_farm))).scalar_one()
+
+    on_counts = await _calibration_sweep_for_farm(on, db)
+    off_counts = await _calibration_sweep_for_farm(off, db)
+
+    assert on_counts.applied == 1
+    assert on_counts.candidates == 0
+    assert off_counts.candidates == 1
+    assert off_counts.applied == 0
+    await db.rollback()
