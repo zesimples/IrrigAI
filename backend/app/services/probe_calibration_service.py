@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import statistics
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -20,6 +21,24 @@ from app.engine.calibration_policy import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CalibrationSweepCounts:
+    """Outcome tally for one farm's weekly calibration sweep."""
+
+    applied: int = 0
+    skipped: int = 0
+    no_candidate: int = 0
+    candidates: int = 0
+    failed: int = 0
+
+    @property
+    def total(self) -> int:
+        return (
+            self.applied + self.skipped + self.no_candidate
+            + self.candidates + self.failed
+        )
 
 
 class ProbeCalibrationService:
@@ -282,11 +301,22 @@ class ProbeCalibrationService:
             all_depths_flatlined=all_flat,
         )
 
-    async def compute_all_for_farm(self, farm_id: str, db: AsyncSession) -> int:
-        """Recompute calibration for every sector in a farm. Caller commits.
+    async def compute_all_for_farm(
+        self, farm_id: str, db: AsyncSession, *, auto_apply: bool = False
+    ) -> CalibrationSweepCounts:
+        """Recompute calibration for every active sector in a farm. Caller commits.
 
-        Per-sector failures are swallowed so one bad sector cannot abort the farm.
+        Each sector runs inside a savepoint so a failed flush rolls back only that
+        sector — without it, a single failure leaves the session needing a rollback
+        and every later sector raises PendingRollbackError.
+
+        With `auto_apply` the policy may promote results unattended; without it the
+        job records candidates only, exactly as before.
         """
+        from sqlalchemy import select
+
+        from app.engine.calibration_policy import REASON_NO_CANDIDATE
+        from app.metrics import calibration_auto_apply_total
         from app.models import Plot, Sector
 
         sectors = (await db.execute(
@@ -298,14 +328,37 @@ class ProbeCalibrationService:
             )
         )).scalars().all()
 
-        calibrated = 0
+        counts = CalibrationSweepCounts()
         for sector in sectors:
+            sector_id = str(sector.id)
             try:
-                result = await self.compute_and_record(
-                    str(sector.id), db, apply=False, source="scheduled"
-                )
-                if result is not None:
-                    calibrated += 1
+                async with db.begin_nested():
+                    if not auto_apply:
+                        recorded = await self.compute_and_record(
+                            sector_id, db, apply=False, source="scheduled"
+                        )
+                        if recorded is not None:
+                            counts.candidates += 1
+                        continue
+
+                    decision = await self.compute_and_auto_apply(sector_id, db)
+                    if decision.apply:
+                        counts.applied += 1
+                        calibration_auto_apply_total.labels(
+                            "applied", decision.reason, "any"
+                        ).inc()
+                    elif decision.reason == REASON_NO_CANDIDATE:
+                        counts.no_candidate += 1
+                        calibration_auto_apply_total.labels(
+                            "no_candidate", decision.reason, "none"
+                        ).inc()
+                    else:
+                        counts.skipped += 1
+                        calibration_auto_apply_total.labels(
+                            "skipped", decision.reason, "any"
+                        ).inc()
             except Exception:
+                counts.failed += 1
+                calibration_auto_apply_total.labels("error", "exception", "none").inc()
                 logger.exception("Probe calibration failed for sector %s", sector.id)
-        return calibrated
+        return counts

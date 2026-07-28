@@ -36,11 +36,14 @@ async def main() -> None:
             print("No matching farms found.")
             return
         for farm in farms:
-            n = await svc.compute_all_for_farm(str(farm.id), db)
+            counts = await svc.compute_all_for_farm(str(farm.id), db)
             await db.commit()
-            total += n
-            print(f"farm {farm.name} ({farm.id}): calibrated {n} sectors")
-    print(f"Done — {total} sector calibration rows upserted across {len(farms)} farm(s).")
+            total += counts.candidates
+            print(
+                f"farm {farm.name} ({farm.id}): {counts.candidates} candidate runs, "
+                f"{counts.failed} failed"
+            )
+    print(f"Done — {total} candidate calibration runs recorded across {len(farms)} farm(s).")
 
 
 if __name__ == "__main__":

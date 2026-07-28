@@ -331,3 +331,66 @@ async def test_second_apply_supersedes_the_first(db: AsyncSession):
     statuses = sorted(r.status for r in runs)
     assert statuses == ["applied", "superseded"]
     await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_sweep_applies_when_flag_on(db: AsyncSession):
+    sector_id, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=True
+    )
+    assert counts.applied == 1
+    assert counts.candidates == 0
+    assert counts.failed == 0
+
+    runs = await _runs(db, sector_id)
+    assert [r.status for r in runs] == ["applied"]
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_sweep_records_candidates_only_when_flag_off(db: AsyncSession):
+    """The opt-out path must behave exactly as it does today."""
+    sector_id, farm_id = await _make_sector(db, vwc=0.44, auto_apply=False)
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=False
+    )
+    assert counts.candidates == 1
+    assert counts.applied == 0
+
+    runs = await _runs(db, sector_id)
+    assert [r.status for r in runs] == ["candidate"]
+    assert await _projection(db, sector_id) is None
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_one_failing_sector_does_not_abort_the_farm(db: AsyncSession):
+    """Savepoint isolation: a flush failure on sector A must not poison sector B."""
+    good_id, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
+
+    # A second sector on the same farm, built the same way.
+    from sqlalchemy import select
+    plot = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
+    bad = Sector(plot_id=plot.id, name="Boom", crop_type="almond")
+    db.add(bad)
+    await db.flush()
+
+    svc = ProbeCalibrationService()
+    original = svc.compute_and_auto_apply
+    calls: list[str] = []
+
+    async def flaky(sector_id, session):
+        calls.append(sector_id)
+        if sector_id == str(bad.id):
+            raise RuntimeError("simulated flush failure")
+        return await original(sector_id, session)
+
+    svc.compute_and_auto_apply = flaky
+    counts = await svc.compute_all_for_farm(farm_id, db, auto_apply=True)
+
+    assert counts.failed == 1
+    assert counts.applied == 1
+    assert set(calls) == {good_id, str(bad.id)}
+    assert [r.status for r in await _runs(db, good_id)] == ["applied"]
+    await db.rollback()
