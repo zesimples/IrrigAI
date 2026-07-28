@@ -4,6 +4,8 @@ Each test builds its own farm subtree with flush() and ends with rollback() —
 never commit, and never touch the globally-seeded sector (that corrupts the
 local dev DB and breaks test_context_loading::test_ctx_mad_in_range).
 """
+import logging
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -13,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import get_settings
 from app.engine.calibration_policy import (
     REASON_APPLIED,
+    REASON_FLATLINE,
     REASON_MANUAL_OVERRIDE,
     REASON_NO_CANDIDATE,
     REASON_PROBE_STALE,
@@ -33,6 +36,31 @@ from app.models import (
 from app.services.probe_calibration_service import ProbeCalibrationService
 
 
+@contextmanager
+def _capture(logger_name: str):
+    """Collect LogRecords from one logger.
+
+    A plain handler rather than pytest's `caplog`: the app installs its own JSON
+    logging config, and these assertions are about the record the service emits.
+    """
+    records: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    target = logging.getLogger(logger_name)
+    handler = _Collect(level=logging.DEBUG)
+    target.addHandler(handler)
+    previous_level = target.level
+    target.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        target.removeHandler(handler)
+        target.setLevel(previous_level)
+
+
 @pytest.fixture
 async def db():
     settings = get_settings()
@@ -51,12 +79,19 @@ async def _make_sector(
     last_reading_age_h: float = 1.0,
     auto_apply: bool = True,
     depths_cm: tuple[int, ...] = (20,),
+    constant_levels: dict[int, float] | None = None,
 ) -> tuple[str, str]:
     """Build Farm→Plot→Sector→Probe→ProbeDepth(s) + 60 hourly VWC readings.
 
     Returns (sector_id, farm_id). The plot carries the sandy_loam preset
     (FC 0.16) that clamps a probe sitting near 0.44 — the bug this feature fixes.
     A `flat` series is dead-constant so its std-dev falls under the flatline floor.
+
+    `constant_levels` ({depth_cm: value}) overrides both `depths_cm` and the wave:
+    each depth gets its own dead-constant plateau. Per depth the std-dev is 0 (so
+    build_quality reports all_depths_flatlined) while the sector calibration pools
+    all shallow depths, so plateaus at different levels still yield a plausible
+    FC-refill spread — the only way to reach the flatline gate with a candidate.
     """
     stamp = datetime.now(UTC).timestamp()
     user = User(
@@ -85,7 +120,8 @@ async def _make_sector(
     await db.flush()
 
     base = datetime.now(UTC) - timedelta(hours=59)
-    for depth_cm in depths_cm:
+    levels = constant_levels or dict.fromkeys(depths_cm)
+    for depth_cm, level in levels.items():
         depth = ProbeDepth(probe_id=probe.id, depth_cm=depth_cm, sensor_type="soil_moisture")
         db.add(depth)
         await db.flush()
@@ -98,7 +134,7 @@ async def _make_sector(
             phase = i % 24
             frac = phase / 12
             tri = frac if frac <= 1 else (2 - frac)
-            v = round(lo + span * tri, 4)
+            v = level if level is not None else round(lo + span * tri, 4)
             db.add(ProbeReading(
                 probe_depth_id=depth.id,
                 timestamp=base + timedelta(hours=i),
@@ -350,6 +386,39 @@ async def test_flatlined_sector_yields_no_candidate(db: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_flatline_gate_fires_end_to_end_when_a_candidate_exists(db: AsyncSession):
+    """build_quality -> flatline gate, wired end to end.
+
+    The trap: a single dead-constant series short-circuits to no_candidate (fc ==
+    refill fails the plausibility spread), so it never proves the gate works. Here
+    two shallow depths sit on plateaus 0.20 apart: each depth's std-dev is 0 (all
+    depths flatlined) while the pooled shallow series gives fc 0.44 / refill 0.24 —
+    a plausible candidate. So this reaches gate 3, not gate 0, and a wrong
+    sensor_type / unit / quality_flag filter in build_quality would show up as
+    REASON_APPLIED here.
+    """
+    sector_id, _ = await _make_sector(db, constant_levels={10: 0.24, 20: 0.44})
+    svc = ProbeCalibrationService()
+
+    # Precondition 1: a candidate genuinely exists (so gate 0 cannot fire).
+    candidate = await svc._calibrator.compute_sector_calibration(sector_id, db)
+    assert candidate is not None
+    assert candidate.observed_fc == pytest.approx(0.44)
+
+    # Precondition 2: the quality signal really is flatlined.
+    quality = await svc.build_quality(sector_id, db)
+    assert quality.all_depths_flatlined is True
+
+    outcome = await svc.compute_and_auto_apply(sector_id, db)
+
+    assert outcome.apply is False
+    assert outcome.reason == REASON_FLATLINE  # not REASON_NO_CANDIDATE
+    assert await _runs(db, sector_id) == []
+    assert await _projection(db, sector_id) is None
+    await db.rollback()
+
+
+@pytest.mark.asyncio
 async def test_no_candidate_when_sector_has_no_probe(db: AsyncSession):
     stamp = datetime.now(UTC).timestamp()
     user = User(email=f"nc-{stamp}@t.dev", name="NC", hashed_password="x", role="admin")
@@ -395,16 +464,36 @@ async def test_auto_applied_run_is_audited_without_a_user(db: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_second_apply_supersedes_the_first(db: AsyncSession):
+    """The NEWEST run must be the live one.
+
+    Asserting only sorted(statuses) == ["applied", "superseded"] would pass green
+    on the inverted bug — superseding the new run and leaving the old bounds live —
+    which would freeze bounds farm-wide. So identify the rows: the second run must
+    be `applied` and the first `superseded`, and the projection must carry the
+    second run's values.
+    """
     sector_id, _ = await _make_sector(db, vwc=0.44)
     svc = ProbeCalibrationService()
     await svc.compute_and_auto_apply(sector_id, db)
+    first = (await _runs(db, sector_id))[0]
+    first_id = first.id
+
     # Same window, so the second candidate is within the delta cap and applies.
     await svc.compute_and_auto_apply(sector_id, db)
 
     runs = await _runs(db, sector_id)
     assert len(runs) == 2
-    statuses = sorted(r.status for r in runs)
-    assert statuses == ["applied", "superseded"]
+    by_id = {r.id: r for r in runs}
+    second = next(r for r in runs if r.id != first_id)
+    assert second.computed_at >= by_id[first_id].computed_at
+
+    assert second.status == "applied"
+    assert second.applied_at is not None
+    assert by_id[first_id].status == "superseded"
+
+    projection = await _projection(db, sector_id)
+    assert projection.observed_fc == pytest.approx(second.observed_fc)
+    assert projection.computed_at == second.computed_at
     await db.rollback()
 
 
@@ -509,6 +598,108 @@ async def test_one_failing_sector_does_not_abort_the_farm(db: AsyncSession):
     )).scalar_one()
     assert still_usable.id == good_id
 
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_sweep_logs_one_line_per_applied_and_blocked_sector(db: AsyncSession):
+    """Blocked runs leave no DB row, so the log is the only trace — per sector.
+
+    Values must reach the log: an INFO with before/after FC and refill for the
+    applied sector, a WARNING with both value pairs for the quality-blocked one.
+    """
+    applied_id, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
+    # A second sector on the same farm whose probe is dead -> quality-blocked.
+    plot = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
+    blocked = Sector(plot_id=plot.id, name="Stale", crop_type="almond")
+    db.add(blocked)
+    await db.flush()
+    stale_probe = Probe(
+        sector_id=blocked.id,
+        external_id=f"aa-stale-{datetime.now(UTC).timestamp()}",
+        last_reading_at=datetime.now(UTC) - timedelta(hours=200),
+    )
+    db.add(stale_probe)
+    await db.flush()
+    depth = ProbeDepth(probe_id=stale_probe.id, depth_cm=20, sensor_type="soil_moisture")
+    db.add(depth)
+    await db.flush()
+    base = datetime.now(UTC) - timedelta(hours=59)
+    for i in range(60):
+        phase = i % 24
+        frac = phase / 12
+        tri = frac if frac <= 1 else (2 - frac)
+        v = round(0.41 + 0.045 * tri, 4)
+        db.add(ProbeReading(
+            probe_depth_id=depth.id, timestamp=base + timedelta(hours=i),
+            raw_value=v, calibrated_value=v, unit="vwc_m3m3", quality_flag="ok",
+        ))
+    await db.flush()
+
+    logger_name = "app.services.probe_calibration_service"
+    with _capture(logger_name) as records:
+        counts = await ProbeCalibrationService().compute_all_for_farm(
+            farm_id, db, auto_apply=True
+        )
+    assert counts.applied == 1
+    assert counts.skipped == 1
+
+    infos = [r for r in records if r.levelno == logging.INFO and "applied" in r.getMessage()]
+    assert len(infos) == 1
+    applied_msg = infos[0].getMessage()
+    assert str(applied_id) in applied_msg
+    assert "0.16" in applied_msg              # before FC (the clamping preset)
+    assert "0.07" in applied_msg              # before refill
+    assert "fc" in applied_msg and "refill" in applied_msg
+
+    warns = [r for r in records if r.levelno == logging.WARNING]
+    assert len(warns) == 1
+    blocked_msg = warns[0].getMessage()
+    assert str(blocked.id) in blocked_msg
+    assert "probe_stale" in blocked_msg
+    assert "0.16" in blocked_msg              # live pair
+    assert "candidate fc=" in blocked_msg     # candidate pair
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_failed_savepoint_release_does_not_count_a_sector_twice(db: AsyncSession):
+    """Counters/metrics/logs must run only AFTER the savepoint has released.
+
+    A failure in RELEASE SAVEPOINT surfaces at `__aexit__`. With the increments
+    inside the block the same sector counted as BOTH applied and error, and the
+    summary log claimed applied=1 for bounds that may have been rolled back.
+    """
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
+    real_begin_nested = db.begin_nested
+
+    class _FailingRelease:
+        def __init__(self, inner):
+            self._inner = inner
+
+        async def __aenter__(self):
+            return await self._inner.__aenter__()
+
+        async def __aexit__(self, *exc_info):
+            await self._inner.__aexit__(*exc_info)
+            raise RuntimeError("RELEASE SAVEPOINT failed")
+
+    db.begin_nested = lambda: _FailingRelease(real_begin_nested())
+    try:
+        with _capture("app.services.probe_calibration_service") as records:
+            counts = await ProbeCalibrationService().compute_all_for_farm(
+                farm_id, db, auto_apply=True
+            )
+    finally:
+        db.begin_nested = real_begin_nested
+
+    assert counts.failed == 1
+    assert counts.applied == 0          # never both
+    assert counts.skipped == 0
+    assert not [
+        r for r in records
+        if r.levelno == logging.INFO and "applied" in r.getMessage()
+    ]
     await db.rollback()
 
 
