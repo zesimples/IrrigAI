@@ -4,6 +4,7 @@ import type {
   AuditLog,
   AutoCalibrationResult,
   CalibrationHistoryRun,
+  CalibrationSweepResponse,
   ChatResult,
   ChatConversation,
   ChatConversationDetail,
@@ -144,6 +145,8 @@ export const farmsApi = {
     put<import("@/types").FarmCredentialsStatus>(`/farms/${id}/credentials`, body),
   discoverProviderResources: (id: string) =>
     get<import("@/types").ProviderDiscovery>(`/farms/${id}/provider-resources`),
+  setCalibrationAutoApply: (id: string, enabled: boolean) =>
+    put<Farm>(`/farms/${id}`, { calibration_auto_apply: enabled }),
 };
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
@@ -523,6 +526,8 @@ export const calibrationApi = {
     post<CalibrationHistoryRun>(`/calibration-runs/${runId}/apply`),
   accept: (sectorId: string) => post<{ accepted: boolean; preset_name_pt: string; preset_name_en: string }>(`/sectors/${sectorId}/auto-calibration/accept`),
   dismiss: (sectorId: string) => post<{ dismissed: boolean; dismissed_until: string }>(`/sectors/${sectorId}/auto-calibration/dismiss`),
+  sweepFarm: (farmId: string) =>
+    post<CalibrationSweepResponse>(`/farms/${farmId}/calibration-sweep`),
 };
 
 // ── GDD Phenology ─────────────────────────────────────────────────────────────

@@ -39,6 +39,7 @@ export interface Farm {
   timezone: string;
   owner_id: string;
   is_archived: boolean;
+  calibration_auto_apply: boolean;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -784,6 +785,35 @@ export interface CalibrationHistoryRun {
   previous_fc: number | null;
   previous_refill: number | null;
   applied_at: string | null;
+}
+
+export interface SectorSweepOutcome {
+  sector_id: string;
+  sector_name: string;
+  /** Stable machine value; the PT label lives in the UI. */
+  reason: string;
+  applied: boolean;
+  fc_before: number | null;
+  /** Populated for blocked sectors too — what was measured but withheld. */
+  fc_candidate: number | null;
+  refill_before: number | null;
+  refill_candidate: number | null;
+  method: string | null;
+  before_source: string | null;
+}
+
+export interface SweepCounts {
+  applied: number;
+  skipped: number;
+  no_candidate: number;
+  candidates: number;
+  failed: number;
+}
+
+export interface CalibrationSweepResponse {
+  auto_apply: boolean;
+  counts: SweepCounts;
+  outcomes: SectorSweepOutcome[];
 }
 
 export interface RecommendationOutcome {
