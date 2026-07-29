@@ -1,11 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { ApiError, calibrationApi, farmsApi } from "@/lib/api";
 import { useToast } from "@/hooks/useToast";
 import { formatDecimal } from "@/lib/utils";
-import type { CalibrationSweepResponse, SectorSweepOutcome } from "@/types";
+import type { CalibrationSweepRun, SectorSweepOutcome, SweepQueued } from "@/types";
+
+const POLL_MS = 2_000;
+/** Give up displaying progress after this long — a spinner that never ends is
+ *  what made the synchronous version look broken. */
+const POLL_CAP_MS = 20 * 60 * 1_000;
+
+const TERMINAL = new Set(["success", "partial", "failure", "stale"]);
+
+/** The 409 body is flat (`{detail, run_id}`), not FastAPI's nested envelope. */
+function runIdFrom409(e: unknown): string | null {
+  if (!(e instanceof ApiError) || e.status !== 409) return null;
+  const body = e.body as { run_id?: string } | undefined;
+  return body?.run_id ?? null;
+}
 
 /** Machine reasons come from the backend; these labels are display-only, the
  *  same split used for crop-stage keys. */
@@ -63,8 +77,21 @@ export function FarmCalibrationControls({ farmId, initialEnabled }: Props) {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [result, setResult] = useState<CalibrationSweepResponse | null>(null);
+  const [run, setRun] = useState<CalibrationSweepRun | null>(null);
+  const [gaveUp, setGaveUp] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aliveRef = useRef(true);
+
+  // Unmounting mid-sweep must not leave a timer firing setState on a dead
+  // component — navigating away during a ten-minute sweep is the normal case.
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   async function handleToggle() {
     const next = !enabled;
@@ -83,25 +110,83 @@ export function FarmCalibrationControls({ farmId, initialEnabled }: Props) {
     }
   }
 
+  function announce(r: CalibrationSweepRun) {
+    // The sweep takes minutes; by the time it lands the user may be looking
+    // elsewhere on the page, so the outcome is toasted as well as rendered.
+    if (r.status === "stale") {
+      toast("Calibração interrompida", {
+        variant: "error",
+        description: "Nada foi perdido — tente novamente.",
+      });
+      return;
+    }
+    if (r.status === "failure") {
+      toast("A calibração falhou", {
+        variant: "error",
+        description: r.error ?? "Erro inesperado.",
+      });
+      return;
+    }
+    toast(r.auto_apply ? "Calibração aplicada" : "Candidatas registadas", {
+      variant: "success",
+      description: r.auto_apply
+        ? `${r.counts.applied} aplicadas · ${r.counts.skipped} ignoradas`
+        : `${r.counts.candidates} candidatas · sem alterações aos limites`,
+    });
+  }
+
+  // Recursive setTimeout, not setInterval: a slow poll must not stack on itself.
+  function schedulePoll(runId: string, deadline: number) {
+    timerRef.current = setTimeout(async () => {
+      if (!aliveRef.current) return;
+      try {
+        const r = await calibrationApi.sweepRun(runId);
+        if (!aliveRef.current) return;
+        setRun(r);
+        if (TERMINAL.has(r.status)) {
+          setRunning(false);
+          announce(r);
+          return;
+        }
+      } catch {
+        // A transient poll failure is not a sweep failure — keep trying until
+        // the cap, then say so.
+      }
+      if (!aliveRef.current) return;
+      if (Date.now() >= deadline) {
+        setRunning(false);
+        setGaveUp(true);
+        return;
+      }
+      schedulePoll(runId, deadline);
+    }, POLL_MS);
+  }
+
   async function runSweep() {
     setConfirming(false);
     // Drop the previous tally first: left in place it sits beside the "a calibrar…"
     // spinner and reads as this run's answer.
-    setResult(null);
+    setRun(null);
+    setGaveUp(false);
     setShowDetail(false);
     setRunning(true);
+    let queued: SweepQueued;
     try {
-      const r = await calibrationApi.sweepFarm(farmId);
-      setResult(r);
-      toast(r.auto_apply ? "Calibração aplicada" : "Candidatas registadas", {
-        variant: "success",
-        description: r.auto_apply
-          ? `${r.counts.applied} aplicadas · ${r.counts.skipped} ignoradas`
-          : `${r.counts.candidates} candidatas · sem alterações aos limites`,
-      });
+      queued = await calibrationApi.sweepFarm(farmId);
     } catch (e) {
+      const existing = runIdFrom409(e);
+      if (existing) {
+        // Already running — follow that one rather than erroring uselessly.
+        toast("Já está a correr", {
+          variant: "info",
+          description: "A acompanhar a calibração em curso.",
+        });
+        schedulePoll(existing, Date.now() + POLL_CAP_MS);
+        return;
+      }
+      setRunning(false);
       const rateLimited = e instanceof ApiError && e.status === 429;
-      toast(rateLimited ? "Demasiados pedidos" : "A calibração falhou", {
+      toast(rateLimited ? "Demasiados pedidos" : "Não foi possível iniciar", {
         variant: "error",
         description: rateLimited
           ? "Aguarde um minuto e tente novamente."
@@ -109,9 +194,9 @@ export function FarmCalibrationControls({ farmId, initialEnabled }: Props) {
             ? e.detail
             : "Erro inesperado.",
       });
-    } finally {
-      setRunning(false);
+      return;
     }
+    schedulePoll(queued.run_id, Date.now() + POLL_CAP_MS);
   }
 
   // Only an enabled farm can have its live bounds changed by this button.
@@ -119,8 +204,6 @@ export function FarmCalibrationControls({ farmId, initialEnabled }: Props) {
     if (enabled) setConfirming(true);
     else void runSweep();
   }
-
-  const c = result?.counts;
 
   return (
     <div className="border-t border-rule-soft px-6 py-2.5">
@@ -189,39 +272,64 @@ export function FarmCalibrationControls({ farmId, initialEnabled }: Props) {
         </p>
       )}
 
-      {c && (
+      {/* Live progress. The sweep runs 5-10 minutes on a large farm, so
+          "sector N of M" is the difference between working and hung. */}
+      {running && run && run.sectors_total ? (
+        <p className="mt-1.5 font-mono text-[10.5px] text-ink-3">
+          a calibrar… {run.sectors_done}/{run.sectors_total}
+        </p>
+      ) : null}
+
+      {gaveUp && (
+        <p className="mt-1.5 text-[11px] text-ink-3">
+          Ainda a correr — recarregue a página mais tarde para ver o resultado.
+        </p>
+      )}
+
+      {run && TERMINAL.has(run.status) && (
         <div className="mt-2">
-          <div className="flex items-center justify-between gap-3">
-            <span className="font-mono text-[10.5px] text-ink-3">
-              aplicadas {c.applied} · ignoradas {c.skipped} · sem dados{" "}
-              {c.no_candidate}
-              {c.candidates ? ` · candidatas ${c.candidates}` : ""}
-              {c.failed ? ` · erros ${c.failed}` : ""}
-            </span>
-            {result!.outcomes.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowDetail((s) => !s)}
-                className="text-[11px] text-ink-3 underline shrink-0"
-              >
-                detalhe
-              </button>
-            )}
-          </div>
-          {/* Applied bounds change the depletion denominator, but nothing on
-              screen moves until the 05:00 UTC recommendation run recomputes it —
-              say so, or the card and the sector pages look like they disagree. */}
-          {c.applied > 0 && (
-            <p className="mt-1 text-[11px] text-ink-3">
-              Os novos limites só se refletem na próxima recomendação (05:00 UTC).
+          {run.status === "stale" ? (
+            <p className="text-[11px] text-ink-3">Interrompida — tente novamente.</p>
+          ) : run.status === "failure" ? (
+            <p className="text-[11px] text-ink-3">
+              A calibração falhou{run.error ? `: ${run.error}` : "."}
             </p>
-          )}
-          {showDetail && (
-            <div className="mt-1 divide-y divide-rule-soft">
-              {result!.outcomes.map((o) => (
-                <OutcomeRow key={o.sector_id} o={o} />
-              ))}
-            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-mono text-[10.5px] text-ink-3">
+                  aplicadas {run.counts.applied} · ignoradas {run.counts.skipped} · sem dados{" "}
+                  {run.counts.no_candidate}
+                  {run.counts.candidates ? ` · candidatas ${run.counts.candidates}` : ""}
+                  {run.counts.failed ? ` · erros ${run.counts.failed}` : ""}
+                </span>
+                {run.outcomes && run.outcomes.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDetail((s) => !s)}
+                    className="text-[11px] text-ink-3 underline shrink-0"
+                  >
+                    detalhe
+                  </button>
+                )}
+              </div>
+              {/* Applied bounds change the depletion denominator, but nothing on
+                  screen moves until the 05:00 UTC recommendation run recomputes
+                  it — say so, or the card and the sector pages look like they
+                  disagree. */}
+              {run.counts.applied > 0 && (
+                <p className="mt-1 text-[11px] text-ink-3">
+                  Os novos limites só se refletem na próxima recomendação (05:00 UTC).
+                </p>
+              )}
+              {showDetail && run.outcomes && (
+                <div className="mt-1 divide-y divide-rule-soft">
+                  {run.outcomes.map((o) => (
+                    <OutcomeRow key={o.sector_id} o={o} />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

@@ -810,10 +810,28 @@ export interface SweepCounts {
   failed: number;
 }
 
-export interface CalibrationSweepResponse {
+/** POST /farms/{id}/calibration-sweep — the sweep is queued, not run inline. */
+export interface SweepQueued {
+  run_id: string;
+  status: string;
   auto_apply: boolean;
+}
+
+export interface CalibrationSweepRun {
+  run_id: string;
+  farm_id: string;
+  /** queued | running | success | partial | failure | stale */
+  status: string;
+  auto_apply: boolean;
+  sectors_total: number | null;
+  sectors_done: number;
   counts: SweepCounts;
-  outcomes: SectorSweepOutcome[];
+  /** Null until the run reaches a terminal status. */
+  outcomes: SectorSweepOutcome[] | null;
+  error: string | null;
+  queued_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 export interface RecommendationOutcome {

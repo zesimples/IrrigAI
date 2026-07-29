@@ -4,7 +4,7 @@ import type {
   AuditLog,
   AutoCalibrationResult,
   CalibrationHistoryRun,
-  CalibrationSweepResponse,
+  CalibrationSweepRun,
   ChatResult,
   ChatConversation,
   ChatConversationDetail,
@@ -48,6 +48,7 @@ import type {
   SectorStatus,
   SoilPreset,
   StressProjection,
+  SweepQueued,
 } from "@/types";
 
 // In production (Docker) this is a relative path — Next.js rewrites proxy it
@@ -74,6 +75,9 @@ class ApiError extends Error {
   constructor(
     public status: number,
     public detail: string,
+    /** Parsed response body, when the caller needs more than `detail` —
+     *  the sweep's 409 carries the already-running run_id here. */
+    public body?: unknown,
   ) {
     super(detail);
     this.name = "ApiError";
@@ -101,7 +105,7 @@ async function request<T>(
         window.location.href = "/login";
       }
     }
-    throw new ApiError(res.status, body.detail ?? res.statusText);
+    throw new ApiError(res.status, body.detail ?? res.statusText, body);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -401,7 +405,7 @@ export const chatApi = {
     });
     if (!response.ok || !response.body) {
       const payload = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new ApiError(response.status, payload.detail ?? response.statusText);
+      throw new ApiError(response.status, payload.detail ?? response.statusText, payload);
     }
 
     const reader = response.body.getReader();
@@ -527,7 +531,9 @@ export const calibrationApi = {
   accept: (sectorId: string) => post<{ accepted: boolean; preset_name_pt: string; preset_name_en: string }>(`/sectors/${sectorId}/auto-calibration/accept`),
   dismiss: (sectorId: string) => post<{ dismissed: boolean; dismissed_until: string }>(`/sectors/${sectorId}/auto-calibration/dismiss`),
   sweepFarm: (farmId: string) =>
-    post<CalibrationSweepResponse>(`/farms/${farmId}/calibration-sweep`),
+    post<SweepQueued>(`/farms/${farmId}/calibration-sweep`),
+  sweepRun: (runId: string) =>
+    get<CalibrationSweepRun>(`/calibration-sweep-runs/${runId}`),
 };
 
 // ── GDD Phenology ─────────────────────────────────────────────────────────────
