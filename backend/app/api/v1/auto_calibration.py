@@ -8,6 +8,7 @@ POST /sectors/{sector_id}/auto-calibration/dismiss  — suppress for 30 days
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +21,14 @@ from app.engine.auto_calibration import (
     AutoCalibrationService,
 )
 from app.limiter import limiter
-from app.models import Plot, ProbeCalibration, ProbeCalibrationRun, SectorCropProfile, SoilPreset
+from app.models import (
+    CalibrationSweepRun,
+    Plot,
+    ProbeCalibration,
+    ProbeCalibrationRun,
+    SectorCropProfile,
+    SoilPreset,
+)
 from app.services.audit_service import audit
 from app.services.probe_calibration_service import ProbeCalibrationService
 
@@ -114,6 +122,13 @@ class SectorSweepOutcomeOut(BaseModel):
     before_source: str | None = None
 
 
+class SweepQueuedOut(BaseModel):
+    run_id: str
+    status: str
+    # Echoed so the UI never has to infer which mode ran.
+    auto_apply: bool
+
+
 class SweepCountsOut(BaseModel):
     applied: int
     skipped: int
@@ -122,11 +137,20 @@ class SweepCountsOut(BaseModel):
     failed: int
 
 
-class CalibrationSweepOut(BaseModel):
-    # Echoed so the UI never has to infer which mode ran.
+class CalibrationSweepRunOut(BaseModel):
+    run_id: str
+    farm_id: str
+    status: str
     auto_apply: bool
+    sectors_total: int | None
+    sectors_done: int
     counts: SweepCountsOut
-    outcomes: list[SectorSweepOutcomeOut]
+    # Null until the run reaches a terminal status.
+    outcomes: list[SectorSweepOutcomeOut] | None
+    error: str | None
+    queued_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
 
 
 class CalibrationHistoryOut(BaseModel):
@@ -460,72 +484,110 @@ def _to_out(result: AutoCalibrationResult) -> AutoCalibrationOut:
     )
 
 
-@router.post("/farms/{farm_id}/calibration-sweep", response_model=CalibrationSweepOut)
+@router.post(
+    "/farms/{farm_id}/calibration-sweep",
+    response_model=SweepQueuedOut,
+    status_code=202,
+)
 @limiter.limit("3/minute")
-async def run_farm_calibration_sweep(
+async def queue_farm_calibration_sweep(
     request: Request,
     farm_id: str,
     access: Access,
     db: AsyncSession = Depends(get_db),
 ):
-    """Run the weekly calibration sweep for one farm, now, honouring its flag.
+    """Queue the calibration sweep for one farm; the worker runs it.
 
-    Deliberately the SAME path the scheduler runs: with the farm's
-    `calibration_auto_apply` off this records candidates and changes no bounds,
-    which makes the button a safe preview of what Monday 04:00 UTC will do. The
-    endpoint never overrides the flag.
+    Not synchronous: on real data this takes 4.9–9.6 minutes, which outlives the
+    frontend proxy's ~5 minute ceiling — the original synchronous version
+    returned 200 to a connection nobody was holding any more.
 
-    Synchronous, like POST /farms/{id}/recommendations/generate — on a large farm
-    (77 sectors at Innoliva) this runs for tens of seconds.
+    Honours the farm's `calibration_auto_apply` flag and never overrides it, so
+    with the flag off this queues a candidate-only preview of Monday's run.
     """
+    from app.services.calibration_sweep_service import (
+        SweepAlreadyRunning,
+        enqueue_sweep,
+        reclaim_stale_runs,
+    )
+
     farm = await access.farm(farm_id)
     auto_apply = bool(farm.calibration_auto_apply)
+
+    # A dead run would otherwise hold this farm's slot in the partial unique
+    # index until it ages out.
+    await reclaim_stale_runs(db, farm_id=farm_id)
+
     try:
-        counts = await _calib_service.compute_all_for_farm(
-            farm_id, db, auto_apply=auto_apply
+        run = await enqueue_sweep(
+            farm_id, db, auto_apply=auto_apply,
+            triggered_by_id=str(access.current_user.id),
         )
-    except Exception as exc:
-        raise HTTPException(500, detail=f"Calibration sweep error: {exc}") from exc
+    except SweepAlreadyRunning as exc:
+        # Flat body, not FastAPI's nested `detail` envelope: the id is carried so
+        # the UI attaches to the running sweep, and it reads `body.run_id`.
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "Uma calibração já está a correr para este campo.",
+                "run_id": exc.run_id,
+            },
+        )
 
     await audit.log(
-        "probe_calibration_sweep_triggered",
+        "probe_calibration_sweep_queued",
         "farm",
         farm_id,
         db,
         user_id=str(access.current_user.id),
-        after_data={
-            "auto_apply": auto_apply,
-            "applied": counts.applied,
-            "skipped": counts.skipped,
-            "no_candidate": counts.no_candidate,
-            "candidates": counts.candidates,
-            "failed": counts.failed,
-        },
+        after_data={"auto_apply": auto_apply, "run_id": str(run.id)},
     )
     await db.commit()
 
-    return CalibrationSweepOut(
-        auto_apply=auto_apply,
+    return SweepQueuedOut(run_id=str(run.id), status=run.status, auto_apply=auto_apply)
+
+
+@router.get(
+    "/calibration-sweep-runs/{run_id}",
+    response_model=CalibrationSweepRunOut,
+)
+async def get_calibration_sweep_run(
+    run_id: str,
+    access: Access,
+    db: AsyncSession = Depends(get_db),
+):
+    """Poll one sweep run.
+
+    Deliberately NOT rate-limited: a 2s poll across a ten-minute sweep is ~300
+    requests, and a limiter here would 429 the client mid-sweep.
+    """
+    run = await db.get(CalibrationSweepRun, run_id)
+    if run is None:
+        raise HTTPException(404, detail="Calibration sweep run not found")
+    # Ownership rides on the run's farm — cross-tenant and unknown both 404.
+    await access.farm(str(run.farm_id))
+
+    return CalibrationSweepRunOut(
+        run_id=str(run.id),
+        farm_id=str(run.farm_id),
+        status=run.status,
+        auto_apply=run.auto_apply,
+        sectors_total=run.sectors_total,
+        sectors_done=run.sectors_done,
         counts=SweepCountsOut(
-            applied=counts.applied,
-            skipped=counts.skipped,
-            no_candidate=counts.no_candidate,
-            candidates=counts.candidates,
-            failed=counts.failed,
+            applied=run.applied,
+            skipped=run.skipped,
+            no_candidate=run.no_candidate,
+            candidates=run.candidates,
+            failed=run.failed,
         ),
-        outcomes=[
-            SectorSweepOutcomeOut(
-                sector_id=o.sector_id,
-                sector_name=o.sector_name,
-                reason=o.reason,
-                applied=o.applied,
-                fc_before=o.fc_before,
-                fc_candidate=o.fc_candidate,
-                refill_before=o.refill_before,
-                refill_candidate=o.refill_candidate,
-                method=o.method,
-                before_source=o.before_source,
-            )
-            for o in counts.outcomes
-        ],
+        outcomes=(
+            [SectorSweepOutcomeOut(**o) for o in run.outcomes]
+            if run.outcomes is not None
+            else None
+        ),
+        error=run.error,
+        queued_at=run.queued_at,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
     )
