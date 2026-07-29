@@ -62,6 +62,20 @@ calibration_auto_apply_total = Counter(
     ["result", "reason", "method"],  # result: applied | skipped | no_candidate | error
 )
 
+calibration_sweep_duration_seconds = Histogram(
+    "irrigai_calibration_sweep_duration_seconds",
+    "Wall-clock duration of one farm calibration sweep. Nobody knew this took "
+    "5-10 minutes until production said so — this is how a regression surfaces "
+    "as a number instead of a 500 in someone's console.",
+    buckets=(10, 30, 60, 120, 300, 600, 1200, 1800),
+)
+
+calibration_sweep_total = Counter(
+    "irrigai_calibration_sweep_total",
+    "Terminal outcomes of background calibration sweeps",
+    ["status"],  # success | partial | failure | stale
+)
+
 # ── AI / LLM ─────────────────────────────────────────────────────────────────
 
 ai_requests_total = Counter(

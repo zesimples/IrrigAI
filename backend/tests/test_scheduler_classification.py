@@ -68,6 +68,10 @@ async def test_start_scheduler_registers_all_expected_jobs():
             "reference_recompute",
             "probe_calibration",
             "irrigation_fingerprint",
+            # Drains on-demand farm sweeps queued by the API. Every 10s rather
+            # than cron: it exists to pick a request up promptly, not on a
+            # schedule.
+            "calibration_sweep_drain",
         }
 
         fingerprint_trigger = jobs["irrigation_fingerprint"].trigger

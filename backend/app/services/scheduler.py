@@ -222,18 +222,135 @@ async def _run_reference_recompute() -> None:
     )
 
 
+async def _drain_calibration_sweep_queue() -> None:
+    """Run one queued calibration sweep, if any.
+
+    Separate from the Monday job because a manual sweep targets one farm and
+    must not wait for the whole-estate pass. Both take the same per-farm lock,
+    so they can never collide on one farm.
+    """
+    import time
+
+    from sqlalchemy import func, select
+
+    from app.database import AsyncSessionLocal
+    from app.metrics import calibration_sweep_duration_seconds, calibration_sweep_total
+    from app.models import CalibrationSweepRun, Plot, Sector
+    from app.services.calibration_sweep_service import (
+        finish_run,
+        mark_running,
+        pop_queued_run_id,
+        record_progress,
+        requeue_run_id,
+    )
+    from app.services.probe_calibration_service import (
+        CalibrationSweepCounts,
+        ProbeCalibrationService,
+    )
+
+    run_id = await pop_queued_run_id()
+    if run_id is None:
+        return
+
+    async with AsyncSessionLocal() as session:
+        run = await session.get(CalibrationSweepRun, run_id)
+        if run is None:
+            logger.warning("Calibration sweep queue held unknown run %s — dropping", run_id)
+            return
+        farm_id = str(run.farm_id)
+        auto_apply = bool(run.auto_apply)
+        run_status = run.status
+
+    if run_status != "queued":
+        logger.info("Calibration sweep run %s is %s, not queued — skipping", run_id, run_status)
+        return
+
+    async with JobLock(f"calibration_sweep:{farm_id}", ttl=3_600) as acquired:
+        if not acquired:
+            # The Monday job (or a previous tick) owns this farm. The request is
+            # valid — put it back and try on a later tick. queued_at staleness
+            # is the backstop if the lock never frees.
+            logger.info("Calibration sweep for farm %s deferred — lock held", farm_id)
+            await requeue_run_id(run_id)
+            return
+
+        async with AsyncSessionLocal() as session:
+            total = (await session.execute(
+                select(func.count(Sector.id))
+                .join(Plot, Sector.plot_id == Plot.id)
+                .where(
+                    Plot.farm_id == farm_id,
+                    Plot.is_archived.is_(False),
+                    Sector.is_archived.is_(False),
+                )
+            )).scalar() or 0
+
+        await mark_running(run_id, sectors_total=total)
+        logger.info(
+            "Calibration sweep starting: run=%s farm=%s sectors=%d auto_apply=%s",
+            run_id, farm_id, total, auto_apply,
+        )
+
+        started = time.monotonic()
+
+        async def on_sector_done(done: int, counts) -> None:
+            await record_progress(run_id, done, counts)
+
+        try:
+            async with AsyncSessionLocal() as session:
+                counts = await ProbeCalibrationService().compute_all_for_farm(
+                    farm_id, session, auto_apply=auto_apply, on_sector_done=on_sector_done
+                )
+                await session.commit()
+        except Exception as exc:
+            elapsed = time.monotonic() - started
+            logger.exception("Calibration sweep failed: run=%s farm=%s", run_id, farm_id)
+            # Every exit path must reach a terminal status, or this farm keeps its
+            # slot in the active-run unique index until staleness reclaims it.
+            await finish_run(run_id, CalibrationSweepCounts(), status="failure", error=str(exc))
+            calibration_sweep_duration_seconds.observe(elapsed)
+            calibration_sweep_total.labels("failure").inc()
+            return
+
+        elapsed = time.monotonic() - started
+        outcome_status = "partial" if counts.failed else "success"
+        await finish_run(run_id, counts, status=outcome_status)
+        calibration_sweep_duration_seconds.observe(elapsed)
+        calibration_sweep_total.labels(outcome_status).inc()
+        per_sector = elapsed / total if total else 0.0
+        logger.info(
+            "Calibration sweep %s: run=%s farm=%s %.1fs total, %.2fs/sector — "
+            "applied=%d skipped=%d no_candidate=%d candidates=%d failed=%d",
+            outcome_status, run_id, farm_id, elapsed, per_sector,
+            counts.applied, counts.skipped, counts.no_candidate,
+            counts.candidates, counts.failed,
+        )
+
+
 async def _calibration_sweep_for_farm(farm, db):
     """One farm's calibration sweep, honouring its own auto-apply opt-in.
 
     Extracted from the job body so the flag-routing is testable without the
     scheduler, Redis lock, or a real trigger.
+
+    Takes the same per-farm lock as the on-demand drain job, so a manual sweep
+    and this one can never work the same farm at once.
     """
-    from app.services.probe_calibration_service import ProbeCalibrationService
+    from app.services.probe_calibration_service import (
+        CalibrationSweepCounts,
+        ProbeCalibrationService,
+    )
 
     auto_apply = bool(getattr(farm, "calibration_auto_apply", False))
-    counts = await ProbeCalibrationService().compute_all_for_farm(
-        str(farm.id), db, auto_apply=auto_apply
-    )
+
+    async with JobLock(f"calibration_sweep:{farm.id}", ttl=3_600) as acquired:
+        if not acquired:
+            logger.info("Skipping farm %s — an on-demand sweep holds its lock", farm.id)
+            return CalibrationSweepCounts()
+
+        counts = await ProbeCalibrationService().compute_all_for_farm(
+            str(farm.id), db, auto_apply=auto_apply
+        )
     logger.info(
         "Probe calibration: farm=%s auto_apply=%s applied=%d skipped=%d "
         "no_candidate=%d candidates=%d failed=%d",
@@ -342,6 +459,16 @@ def start_scheduler() -> AsyncIOScheduler:
         id="irrigation_fingerprint",
         replace_existing=True,
         misfire_grace_time=300,
+    )
+    # max_instances=1 matters: without it APScheduler could start a second drain
+    # tick while a multi-minute sweep is still running.
+    _scheduler.add_job(
+        _drain_calibration_sweep_queue,
+        trigger=IntervalTrigger(seconds=10),
+        id="calibration_sweep_drain",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=30,
     )
 
     _scheduler.start()

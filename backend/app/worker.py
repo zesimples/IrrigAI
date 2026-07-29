@@ -29,6 +29,17 @@ async def main() -> None:
     # the same encrypted per-farm credentials as the backend.
     check_production_security(_settings)
 
+    # A redeploy mid-sweep leaves a `running` row with a cold heartbeat. Clear
+    # those now rather than making the farm wait out the staleness window.
+    from app.database import AsyncSessionLocal
+    from app.services.calibration_sweep_service import reclaim_stale_runs
+
+    async with AsyncSessionLocal() as session:
+        reclaimed = await reclaim_stale_runs(session)
+        await session.commit()
+    if reclaimed:
+        logger.info("Reclaimed %d stale calibration sweep run(s) at startup", reclaimed)
+
     logger.info("IrrigAI worker starting...")
     start_scheduler()
 
