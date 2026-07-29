@@ -33,7 +33,11 @@ from app.models import (
     SectorCropProfile,
     User,
 )
-from app.services.probe_calibration_service import ProbeCalibrationService
+from app.services.probe_calibration_service import (
+    REASON_INSUFFICIENT_DATA,
+    REASON_NOT_APPLICABLE,
+    ProbeCalibrationService,
+)
 
 
 @contextmanager
@@ -810,7 +814,9 @@ async def test_flag_off_sweep_counts_and_lists_sectors_with_no_candidate(db: Asy
     assert len(counts.outcomes) == 2
     blank = [o for o in counts.outcomes if o.sector_id == str(bare.id)]
     assert len(blank) == 1
-    assert blank[0].reason == REASON_NO_CANDIDATE
+    # Refined 2026-07-29: a sector with no moisture probe is structurally
+    # uncalibratable, not "not enough data yet" — see the two tests below.
+    assert blank[0].reason == REASON_NOT_APPLICABLE
     assert blank[0].sector_name == "Sem sonda"
     assert blank[0].applied is False
     assert blank[0].fc_candidate is None  # nothing was computed
@@ -898,4 +904,110 @@ async def test_sweep_without_callback_is_unchanged(db: AsyncSession):
     _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
     counts = await ProbeCalibrationService().compute_all_for_farm(farm_id, db, auto_apply=True)
     assert counts.applied == 1
+    await db.rollback()
+
+
+# ── no_candidate is two different things ──────────────────────────────────────
+#
+# A flowmeter-only or bare sector can NEVER be calibrated (calibration needs the
+# probe's own VWC envelope; a flowmeter contributes nothing to it), while a VWC
+# sector with 12 readings is a data gap someone can actually close. Collapsing
+# both into "sem dados suficientes" told agronomists to go fix sectors that have
+# nothing to fix, and left `no_candidate` unable to trend toward zero — so a real
+# ingestion regression would hide inside a large permanent constant.
+
+
+@pytest.mark.asyncio
+async def test_sector_without_a_moisture_probe_is_not_applicable(db: AsyncSession):
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=False)
+    plot = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
+    bare = Sector(plot_id=plot.id, name="Só caudalímetro", crop_type="almond")
+    db.add(bare)
+    await db.flush()
+
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=False
+    )
+
+    outcome = next(o for o in counts.outcomes if o.sector_id == str(bare.id))
+    assert outcome.reason == REASON_NOT_APPLICABLE
+    # The aggregate counter is unchanged — only the per-sector reason splits.
+    assert counts.no_candidate == 1
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_tension_only_sector_is_not_applicable_too(db: AsyncSession):
+    """Watermark/tension sectors have no VWC depth, so they are structural too —
+    the same predicate the UI uses to disable the button (calibration_available)."""
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=False)
+    plot = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
+    sector = Sector(plot_id=plot.id, name="Olival", crop_type="olive")
+    db.add(sector)
+    await db.flush()
+    probe = Probe(sector_id=sector.id, external_id=f"tension-{datetime.now(UTC).timestamp()}",
+                  last_reading_at=datetime.now(UTC))
+    db.add(probe)
+    await db.flush()
+    db.add(ProbeDepth(probe_id=probe.id, depth_cm=30, sensor_type="soil_tension"))
+    await db.flush()
+
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=False
+    )
+
+    outcome = next(o for o in counts.outcomes if o.sector_id == str(sector.id))
+    assert outcome.reason == REASON_NOT_APPLICABLE
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_vwc_sector_with_too_few_readings_is_insufficient_data(db: AsyncSession):
+    """A real moisture probe below the 48-reading floor: actionable, not structural."""
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=False)
+    plot = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
+    sector = Sector(plot_id=plot.id, name="Sonda nova", crop_type="almond")
+    db.add(sector)
+    await db.flush()
+    probe = Probe(sector_id=sector.id, external_id=f"thin-{datetime.now(UTC).timestamp()}",
+                  last_reading_at=datetime.now(UTC))
+    db.add(probe)
+    await db.flush()
+    depth = ProbeDepth(probe_id=probe.id, depth_cm=20, sensor_type="soil_moisture")
+    db.add(depth)
+    await db.flush()
+    base = datetime.now(UTC) - timedelta(hours=10)
+    for i in range(10):        # well under CALIB_MIN_READINGS
+        db.add(ProbeReading(probe_depth_id=depth.id, timestamp=base + timedelta(hours=i),
+                            raw_value=0.42, calibrated_value=0.42,
+                            unit="vwc_m3m3", quality_flag="ok"))
+    await db.flush()
+
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=False
+    )
+
+    outcome = next(o for o in counts.outcomes if o.sector_id == str(sector.id))
+    assert outcome.reason == REASON_INSUFFICIENT_DATA
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_the_flag_on_path_refines_the_reason_too(db: AsyncSession):
+    """The gate returns its own no_candidate; an opted-in farm must not keep
+    reporting the coarse label while the preview reports the refined one."""
+    _, farm_id = await _make_sector(db, vwc=0.44, auto_apply=True)
+    plot = (await db.execute(select(Plot).where(Plot.farm_id == farm_id))).scalar_one()
+    bare = Sector(plot_id=plot.id, name="Só caudalímetro", crop_type="almond")
+    db.add(bare)
+    await db.flush()
+
+    counts = await ProbeCalibrationService().compute_all_for_farm(
+        farm_id, db, auto_apply=True
+    )
+
+    outcome = next(o for o in counts.outcomes if o.sector_id == str(bare.id))
+    assert outcome.reason == REASON_NOT_APPLICABLE
+    assert counts.no_candidate == 1
+    assert counts.applied == 1        # the real sector still applied
     await db.rollback()

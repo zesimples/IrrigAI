@@ -73,6 +73,18 @@ const OUTCOMES = [
     fc_before: 0.16, fc_candidate: 0.44, refill_before: 0.07, refill_candidate: 0.2,
     method: "envelope", before_source: "plot_preset",
   },
+  // No moisture probe: structurally uncalibratable, not a data gap.
+  {
+    sector_id: "s3", sector_name: "Só caudalímetro", reason: "not_applicable", applied: false,
+    fc_before: null, fc_candidate: null, refill_before: null, refill_candidate: null,
+    method: null, before_source: null,
+  },
+  // A real probe below the reading floor: someone can actually fix this one.
+  {
+    sector_id: "s4", sector_name: "Sonda nova", reason: "insufficient_data", applied: false,
+    fc_before: null, fc_candidate: null, refill_before: null, refill_candidate: null,
+    method: null, before_source: null,
+  },
 ];
 
 /** A terminal run. `over` lands on the run, so counts can be replaced wholesale. */
@@ -189,6 +201,24 @@ describe("FarmCalibrationControls", () => {
     expect(screen.getByText("Talhão B1")).toBeInTheDocument();
     expect(screen.getByText(/variação demasiado grande/i)).toBeInTheDocument();
     expect(screen.getByText(/16 ⇢ 44/)).toBeInTheDocument();
+  });
+
+  it("distinguishes a sector with no probe from one merely short of data", async () => {
+    // Both used to render "sem dados suficientes", which told an agronomist to go
+    // fix a flowmeter-only sector that can never be calibrated.
+    vi.useFakeTimers();
+    mockSweep.mockResolvedValue(queued);
+    mockSweepRun.mockResolvedValue(finished());
+    render(<FarmCalibrationControls farmId="f1" initialEnabled={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /correr/i }));
+    await tick(2100);
+    fireEvent.click(screen.getByRole("button", { name: /detalhe/i }));
+
+    expect(screen.getByText("Só caudalímetro")).toBeInTheDocument();
+    expect(screen.getByText(/sem sonda de humidade/i)).toBeInTheDocument();
+    expect(screen.getByText("Sonda nova")).toBeInTheDocument();
+    expect(screen.getByText(/dados insuficientes na sonda/i)).toBeInTheDocument();
   });
 
   it("disables the trigger while a sweep is in flight", async () => {

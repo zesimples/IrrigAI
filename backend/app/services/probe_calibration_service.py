@@ -24,6 +24,18 @@ from app.engine.calibration_policy import (
 
 logger = logging.getLogger(__name__)
 
+# Sweep-level reasons, deliberately NOT added to calibration_policy's REASON_*
+# constants (those describe the gate's decision about a candidate that exists).
+#
+# These two split what used to be a single `no_candidate`: a sector with no
+# moisture probe — flowmeter-only, bare, or tension/Watermark-only — can NEVER be
+# calibrated, while a VWC sector below the reading floor is a data gap someone can
+# close. Reporting both as "sem dados suficientes" sent agronomists to fix sectors
+# with nothing to fix, and left the coverage number unable to trend toward zero,
+# so an ingestion regression would hide inside a large permanent constant.
+REASON_NOT_APPLICABLE = "not_applicable"
+REASON_INSUFFICIENT_DATA = "insufficient_data"
+
 
 @dataclass(frozen=True)
 class SectorSweepOutcome:
@@ -393,6 +405,7 @@ class ProbeCalibrationService:
         """
         from sqlalchemy import select
 
+        from app.engine.calibration_policy import REASON_NO_CANDIDATE
         from app.models import Plot, Sector
 
         sectors = (await db.execute(
@@ -426,7 +439,14 @@ class ProbeCalibrationService:
             # Savepoint released — the work below can no longer be rolled back, so
             # counters, logs and outcomes describe what actually persisted.
             if auto_apply and outcome is not None:
-                self._record_outcome(sector_id, sector_name, outcome, counts)
+                # The gate reports its own coarse no_candidate; refine it so an
+                # opted-in farm does not disagree with the same farm's preview.
+                refined = None
+                if outcome.reason == REASON_NO_CANDIDATE:
+                    refined = await self._classify_no_candidate(sector_id, db)
+                self._record_outcome(
+                    sector_id, sector_name, outcome, counts, no_candidate_reason=refined
+                )
             elif recorded_candidate:
                 counts.candidates += 1
                 counts.outcomes.append(
@@ -438,19 +458,17 @@ class ProbeCalibrationService:
                     )
                 )
             else:
-                # Nothing computable (no probe, tension-only sensors, too few
-                # readings, implausible envelope). Counted and listed so the
-                # flag-off run is the preview it claims to be: without this a
-                # 77-sector farm reported "candidatas 12 · sem dados 0" with the
-                # other 65 sectors silently absent, while the SAME farm with the
-                # flag on reports them as no_candidate. Sweep-level reason string,
-                # deliberately equal to the gate's REASON_NO_CANDIDATE value.
+                # Nothing computable. Counted and listed so the flag-off run is
+                # the preview it claims to be: without this a 77-sector farm
+                # reported "candidatas 12 · sem dados 0" with the other 65
+                # sectors silently absent, while the SAME farm with the flag on
+                # reports them as no_candidate.
                 counts.no_candidate += 1
                 counts.outcomes.append(
                     SectorSweepOutcome(
                         sector_id=sector_id,
                         sector_name=sector_name,
-                        reason="no_candidate",
+                        reason=await self._classify_no_candidate(sector_id, db),
                         applied=False,
                     )
                 )
@@ -466,6 +484,20 @@ class ProbeCalibrationService:
                         "Sweep progress callback failed for sector %s", sector_id, exc_info=True
                     )
         return counts
+
+    @staticmethod
+    async def _classify_no_candidate(sector_id: str, db: AsyncSession) -> str:
+        """Structural (no moisture probe) vs actionable (probe, not enough data).
+
+        Called only for sectors that already produced nothing, so the extra query
+        is paid on a subset — it must not add a per-sector cost to a sweep that
+        takes minutes on a 77-sector farm.
+        """
+        from app.engine.auto_calibration import sector_has_vwc_depth
+
+        if not await sector_has_vwc_depth(sector_id, db):
+            return REASON_NOT_APPLICABLE
+        return REASON_INSUFFICIENT_DATA
 
     @staticmethod
     def _count_failure(
@@ -487,13 +519,25 @@ class ProbeCalibrationService:
 
     @staticmethod
     def _record_outcome(
-        sector_id: str, sector_name: str, outcome: AutoApplyOutcome, counts: CalibrationSweepCounts
+        sector_id: str,
+        sector_name: str,
+        outcome: AutoApplyOutcome,
+        counts: CalibrationSweepCounts,
+        *,
+        no_candidate_reason: str | None = None,
     ) -> None:
-        """Tally + log one released sector. Blocked runs leave no row: this is the trace."""
+        """Tally + log one released sector. Blocked runs leave no row: this is the trace.
+
+        `no_candidate_reason` replaces the gate's coarse no_candidate with the
+        refined structural/actionable split; it is resolved by the caller because
+        that needs a DB query and this stays synchronous.
+        """
         from app.engine.calibration_policy import REASON_NO_CANDIDATE
         from app.metrics import calibration_auto_apply_total
 
         reason = outcome.reason
+        if reason == REASON_NO_CANDIDATE and no_candidate_reason is not None:
+            reason = no_candidate_reason
         if outcome.apply:
             counts.applied += 1
             calibration_auto_apply_total.labels("applied", reason, "any").inc()
@@ -508,7 +552,10 @@ class ProbeCalibrationService:
                 outcome.candidate_refill,
                 outcome.before_source,
             )
-        elif reason == REASON_NO_CANDIDATE:
+        elif outcome.reason == REASON_NO_CANDIDATE:
+            # Bucket on the GATE's reason, label with the refined one — otherwise
+            # a refined label falls through to `skipped`, which means "we measured
+            # something and withheld it" and is a different fact entirely.
             counts.no_candidate += 1
             calibration_auto_apply_total.labels("no_candidate", reason, "none").inc()
         else:

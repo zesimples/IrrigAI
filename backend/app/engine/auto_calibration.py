@@ -39,6 +39,36 @@ CALIB_MIN_SPREAD_M3M3 = 0.03
 ENVELOPE_FC_PCTL = 95.0
 ENVELOPE_REFILL_PCTL = 10.0
 
+# Calibration is derived from the probe's own VWC envelope, so it needs a moisture
+# depth and nothing else — a flowmeter contributes nothing to it. "moisture" is a
+# legacy synonym for VWC still present in old data.
+VWC_SENSOR_TYPES = ("soil_moisture", "moisture")
+
+
+async def sector_has_vwc_depth(sector_id: str, db: AsyncSession) -> bool:
+    """Can this sector be calibrated at all?
+
+    False for a sector with no probe (flowmeter-only or bare) and for a
+    tension/Watermark-only sector — both are structurally uncalibratable, as
+    opposed to merely short of data. Shared so the sweep's per-sector reason and
+    the UI's `calibration_available` (which disables the button) cannot drift
+    apart, the same reason resolve_sector_soil_bounds is shared.
+    """
+    from app.models import Probe, ProbeDepth
+
+    found = (
+        await db.execute(
+            select(ProbeDepth.id)
+            .join(Probe, ProbeDepth.probe_id == Probe.id)
+            .where(
+                Probe.sector_id == sector_id,
+                ProbeDepth.sensor_type.in_(VWC_SENSOR_TYPES),
+            )
+            .limit(1)
+        )
+    ).first()
+    return found is not None
+
 
 @dataclass
 class IrrigationCycle:

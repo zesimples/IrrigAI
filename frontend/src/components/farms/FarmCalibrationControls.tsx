@@ -29,6 +29,12 @@ const REASON_LABELS: Record<string, string> = {
   probe_stale: "sonda sem dados recentes",
   flatline: "sinal plano",
   delta_exceeds_cap: "variação demasiado grande",
+  // Structural vs actionable. A sector with no moisture probe (flowmeter-only,
+  // bare, or tension/Watermark) can never be calibrated — calling that "sem dados
+  // suficientes" sent people looking for a data gap that does not exist.
+  not_applicable: "sem sonda de humidade",
+  insufficient_data: "dados insuficientes na sonda",
+  // Kept for sweep rows persisted before the split (2026-07-29).
   no_candidate: "sem dados suficientes",
   candidate: "registada como candidata",
   error: "erro",

@@ -13,7 +13,6 @@ from app.models import (
     IrrigationSystem,
     Plot,
     Probe,
-    ProbeDepth,
     Recommendation,
     Sector,
     SectorCropProfile,
@@ -86,6 +85,8 @@ async def get_sector(sector_id: str, access: Access, db: AsyncSession = Depends(
 
 @router.get("/sectors/{sector_id}/status", response_model=SectorStatus)
 async def get_sector_status(sector_id: str, access: Access, db: AsyncSession = Depends(get_db)):
+    from app.engine.auto_calibration import sector_has_vwc_depth
+
     sector = await access.sector(sector_id)
 
     now = datetime.now(UTC)
@@ -159,20 +160,10 @@ async def get_sector_status(sector_id: str, access: Access, db: AsyncSession = D
 
     # Probe calibration only applies to VWC moisture sensors. Tension/Watermark
     # sectors (e.g. the Olival at Herdade do Esporão) have no VWC depth, so the
-    # "Calibração AI" button is disabled for them in the UI.
-    calibration_available = False
-    if probes:
-        vwc_depth = (
-            await db.execute(
-                select(ProbeDepth.id)
-                .where(
-                    ProbeDepth.probe_id.in_([p.id for p in probes]),
-                    ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
-                )
-                .limit(1)
-            )
-        ).first()
-        calibration_available = vwc_depth is not None
+    # "Calibração AI" button is disabled for them in the UI. Shared with the
+    # farm sweep, which uses the same predicate to label such a sector
+    # `not_applicable` rather than "not enough data".
+    calibration_available = bool(probes) and await sector_has_vwc_depth(sector_id, db)
 
     # Data freshness
     freshness_hours = None
