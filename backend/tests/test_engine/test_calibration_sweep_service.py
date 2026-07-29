@@ -310,3 +310,62 @@ def test_outcomes_to_json_is_plain_serialisable_dicts():
     assert payload[0]["sector_name"] == "Talhão 0"
     import json
     json.dumps(payload)      # must not raise
+
+
+@pytest.mark.asyncio
+async def test_failed_finish_preserves_what_the_sweep_already_did(db: AsyncSession):
+    """A sweep that dies half-way must not report `applied=0`.
+
+    The drain job's failure path has no counts to hand — `compute_all_for_farm`
+    raised, so its tally went with it — and used to pass an empty
+    CalibrationSweepCounts(). That overwrote the numbers the per-sector progress
+    writes had already recorded, so a run that moved real soil bounds on 5
+    sectors finished claiming it applied nothing. `sectors_done` was guarded by
+    GREATEST; the counters were not.
+    """
+    farm_id = await _farm(db)
+    try:
+        run = await enqueue_sweep(farm_id, db, auto_apply=True, triggered_by_id=None)
+        await db.commit()
+        run_id = str(run.id)
+
+        await mark_running(run_id, sectors_total=77)
+        await record_progress(run_id, 34, _counts(applied=5, outcomes=34))
+
+        await finish_run(
+            run_id, CalibrationSweepCounts(), status="failure",
+            error="boom", preserve_counts=True,
+        )
+
+        db.expire_all()
+        fresh = await db.get(CalibrationSweepRun, run_id)
+        assert fresh.status == "failure"
+        assert fresh.error == "boom"
+        assert fresh.finished_at is not None
+        # What it actually did, not zeros.
+        assert fresh.sectors_done == 34
+        assert fresh.applied == 5
+    finally:
+        await _cleanup(db, farm_id)
+
+
+@pytest.mark.asyncio
+async def test_successful_finish_still_writes_the_final_tally(db: AsyncSession):
+    """The preserve flag must not leak into the normal path."""
+    farm_id = await _farm(db)
+    try:
+        run = await enqueue_sweep(farm_id, db, auto_apply=True, triggered_by_id=None)
+        await db.commit()
+        run_id = str(run.id)
+
+        await mark_running(run_id, sectors_total=2)
+        await record_progress(run_id, 1, _counts(applied=1, outcomes=1))
+        await finish_run(run_id, _counts(applied=2, outcomes=2), status="success")
+
+        db.expire_all()
+        fresh = await db.get(CalibrationSweepRun, run_id)
+        assert fresh.applied == 2
+        assert fresh.sectors_done == 2
+        assert len(fresh.outcomes) == 2
+    finally:
+        await _cleanup(db, farm_id)

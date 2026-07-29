@@ -180,32 +180,49 @@ async def record_progress(run_id: str, sectors_done: int, counts) -> None:
         await session.commit()
 
 
-async def finish_run(run_id: str, counts, *, status: str, error: str | None = None) -> None:
+async def finish_run(
+    run_id: str,
+    counts,
+    *,
+    status: str,
+    error: str | None = None,
+    preserve_counts: bool = False,
+) -> None:
+    """Write the terminal status. Own session, commits immediately.
+
+    `preserve_counts` is for the failure path, which has no counts to hand: the
+    sweep raised, so its tally went with it. Overwriting the row with an empty
+    CalibrationSweepCounts() would make a run that moved real soil bounds on 5
+    sectors finish claiming it applied nothing — the per-sector progress writes
+    already recorded the truth, so leave them alone and record only the failure.
+    """
+    values: dict = {
+        "status": status,
+        "finished_at": datetime.now(UTC),
+        "heartbeat_at": datetime.now(UTC),
+        "error": error,
+    }
+    if not preserve_counts:
+        values.update(
+            # Never let the final write snap progress backwards. GREATEST is
+            # atomic (no read-then-write race against a concurrent
+            # record_progress).
+            sectors_done=func.greatest(
+                CalibrationSweepRun.sectors_done, len(counts.outcomes)
+            ),
+            applied=counts.applied,
+            skipped=counts.skipped,
+            no_candidate=counts.no_candidate,
+            candidates=counts.candidates,
+            failed=counts.failed,
+            outcomes=outcomes_to_json(counts),
+        )
+
     async with AsyncSessionLocal() as session:
-        now = datetime.now(UTC)
         result = await session.execute(
             update(CalibrationSweepRun)
             .where(CalibrationSweepRun.id == run_id)
-            .values(
-                status=status,
-                finished_at=now,
-                heartbeat_at=now,
-                error=error,
-                # Never let the final write snap progress backwards: the
-                # failure path passes an empty CalibrationSweepCounts(), whose
-                # len(outcomes) is 0 — a run that had polled to 34/77 must not
-                # finish reporting 0/77. GREATEST is atomic (no read-then-write
-                # race against a concurrent record_progress).
-                sectors_done=func.greatest(
-                    CalibrationSweepRun.sectors_done, len(counts.outcomes)
-                ),
-                applied=counts.applied,
-                skipped=counts.skipped,
-                no_candidate=counts.no_candidate,
-                candidates=counts.candidates,
-                failed=counts.failed,
-                outcomes=outcomes_to_json(counts),
-            )
+            .values(**values)
         )
         if result.rowcount == 0:
             logger.warning("finish_run: no CalibrationSweepRun row for id=%s", run_id)

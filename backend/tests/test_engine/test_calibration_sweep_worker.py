@@ -191,9 +191,18 @@ async def test_drain_finishes_the_run_even_when_the_sweep_raises(db: AsyncSessio
         await db.commit()
         run_id = str(run.id)
 
-        from app.services.probe_calibration_service import ProbeCalibrationService
+        from app.services.probe_calibration_service import (
+            CalibrationSweepCounts,
+            ProbeCalibrationService,
+        )
 
-        async def boom(*_a, **_k):
+        async def boom(_self, _farm_id, _db, *, auto_apply=False, on_sector_done=None):
+            # Get one sector's worth of progress on the record, THEN die — the
+            # realistic shape of a mid-sweep failure.
+            partial = CalibrationSweepCounts(applied=1)
+            partial.outcomes.append(object())     # only its length is read
+            if on_sector_done is not None:
+                await on_sector_done(1, partial)
             raise RuntimeError("sweep exploded")
 
         original = ProbeCalibrationService.compute_all_for_farm
@@ -208,6 +217,9 @@ async def test_drain_finishes_the_run_even_when_the_sweep_raises(db: AsyncSessio
         assert fresh.status == "failure"
         assert fresh.finished_at is not None
         assert "sweep exploded" in (fresh.error or "")
+        # The failure must not erase what the sweep already did to live bounds.
+        assert fresh.sectors_done == 1
+        assert fresh.applied == 1
     finally:
         await _cleanup(db, farm_id)
 

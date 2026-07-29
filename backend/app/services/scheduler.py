@@ -307,7 +307,16 @@ async def _drain_calibration_sweep_queue() -> None:
             logger.exception("Calibration sweep failed: run=%s farm=%s", run_id, farm_id)
             # Every exit path must reach a terminal status, or this farm keeps its
             # slot in the active-run unique index until staleness reclaims it.
-            await finish_run(run_id, CalibrationSweepCounts(), status="failure", error=str(exc))
+            # preserve_counts: the tally died with the sweep, but the per-sector
+            # progress writes already recorded what it managed to do — reporting
+            # zeros here would hide bounds that really moved.
+            await finish_run(
+                run_id,
+                CalibrationSweepCounts(),
+                status="failure",
+                error=str(exc),
+                preserve_counts=True,
+            )
             calibration_sweep_duration_seconds.observe(elapsed)
             calibration_sweep_total.labels("failure").inc()
             return
