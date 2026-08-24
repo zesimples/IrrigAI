@@ -1,3 +1,13 @@
+# Docker's json-file driver is unbounded by default. The worker's log reached
+# 12G during the 2026-08-13 outage — 11 days of DB-connection errors with
+# nothing to rotate them — which was the second-largest consumer of the disk
+# that outage filled. Every service caps its logs.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   db:
     image: timescale/timescaledb:latest-pg16
@@ -15,6 +25,7 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging: *default-logging
 
   redis:
     image: redis:7-alpine
@@ -28,6 +39,7 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging: *default-logging
 
   backend:
     build:
@@ -52,6 +64,7 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
+    logging: *default-logging
 
   # Dedicated scheduler worker — the only process that runs APScheduler.
   # Single replica enforces exactly-one execution; Redis job locks protect
@@ -80,6 +93,7 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+    logging: *default-logging
 
   frontend:
     build:
@@ -94,6 +108,7 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    logging: *default-logging
 
   db-backup:
     image: timescale/timescaledb:latest-pg16
@@ -103,35 +118,23 @@ services:
       PGUSER: ${POSTGRES_USER:-irrigai}
       PGPASSWORD: ${POSTGRES_PASSWORD:-irrigai_dev}
       PGDATABASE: ${POSTGRES_DB:-irrigai}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      BACKUP_KEEP_MIN: ${BACKUP_KEEP_MIN:-3}
+      BACKUP_MIN_FREE_MB: ${BACKUP_MIN_FREE_MB:-20480}
     volumes:
       - ./backups:/backups
+      - ./ops/db-backup.sh:/usr/local/bin/db-backup.sh:ro
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
-    entrypoint: >
-      /bin/sh -c '
-        mkdir -p /backups &&
-        while true; do
-          FILENAME="/backups/irrigai_$$(date +%Y%m%d_%H%M%S).sql.gz" &&
-          pg_dump | gzip > "$$FILENAME" &&
-          echo "Backup written: $$FILENAME" &&
-
-          echo "Verifying backup: $$FILENAME" &&
-          VERIFY_DB="irrigai_verify_$$(date +%s)" &&
-          createdb "$$VERIFY_DB" &&
-          if gunzip -c "$$FILENAME" | psql -q "$$VERIFY_DB" > /dev/null 2>&1; then
-            FARM_COUNT=$$(psql -t -A -c "SELECT COUNT(*) FROM farm;" "$$VERIFY_DB" 2>/dev/null || echo "err") &&
-            echo "Backup verify OK: farm_count=$$FARM_COUNT file=$$FILENAME" ;
-          else
-            echo "ERROR: Backup restore FAILED for $$FILENAME" ;
-          fi &&
-          dropdb --if-exists "$$VERIFY_DB" &&
-
-          find /backups -name "irrigai_*.sql.gz" -mtime +7 -delete &&
-          sleep 86400 ;
-        done
-      '
+    logging: *default-logging
+    # Logic lives in ops/db-backup.sh (tested by ops/tests/test_db_backup.sh).
+    # It was inline here until 2026-08-13, when an `&&` chain let a failed
+    # pg_dump skip both the retention purge and the sleep — a tight loop that
+    # filled the disk and took production down for 11 days.
+    entrypoint: ["/usr/local/bin/db-backup.sh"]
 
 volumes:
   postgres_data:
