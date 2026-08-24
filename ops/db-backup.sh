@@ -14,8 +14,21 @@
 #      — one dump file every ~15s until the disk hit 100%.
 #
 # The rules that keep those from recurring: every cycle sleeps, no matter how it
-# ends; a dump is only named like a backup once it is complete and verified; and
+# ends; a dump is only named like a backup once it is complete and intact; and
 # retention never drops below BACKUP_KEEP_MIN surviving backups.
+#
+# Verification is two-tier, because proving a dump restores costs a full copy of
+# the database (~20GB on prod as of 2026-08-24) and ~45 minutes:
+#
+#   * Every cycle: decompress the archive and require pg_dump's completion
+#     trailer. One pass, no disk. This alone catches every bad dump the
+#     2026-08-13 outage produced.
+#   * Every BACKUP_FULL_VERIFY_INTERVAL_DAYS: also restore into a throwaway
+#     database and count farms. Skipped when disk is tight — the cheap check
+#     already passed, so a skip is not a failure.
+#
+# Ordering matters: prune runs after the archive is named but *before* the full
+# restore, so retention frees space at the moment the restore needs it.
 
 set -uo pipefail
 
@@ -24,6 +37,12 @@ INTERVAL_SECONDS="${BACKUP_INTERVAL_SECONDS:-86400}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
 KEEP_MIN="${BACKUP_KEEP_MIN:-3}"
 MIN_FREE_MB="${BACKUP_MIN_FREE_MB:-20480}"
+FULL_VERIFY_INTERVAL_DAYS="${BACKUP_FULL_VERIFY_INTERVAL_DAYS:-7}"
+FULL_VERIFY_MIN_FREE_MB="${BACKUP_FULL_VERIFY_MIN_FREE_MB:-30720}"
+
+# Touched only after a full restore succeeds. Lives in BACKUP_DIR so it survives
+# container recreates.
+FULL_VERIFY_MARKER="${BACKUP_DIR}/.last_full_verify"
 
 log() { echo "[db-backup] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*"; }
 
@@ -47,14 +66,87 @@ drop_orphan_verify_dbs() {
   done <<<"$orphans"
 }
 
-# Restore the archive into a throwaway database and sanity-check its contents.
-verify_archive() {
-  local archive="$1" verify_db="$2"
+# Cheap integrity check: one decompression pass, no disk cost.
+#
+# `gunzip -t` alone is not enough. If pg_dump dies mid-stream, gzip sees a clean
+# EOF and finalises a *valid* archive wrapping partial SQL — that is how the
+# 2026-08-13 dumps looked intact at the container level. Requiring the trailer
+# pg_dump writes last is what actually proves the dump finished. Modern pg_dump
+# emits `\unrestrict <token>` after the completion comment, so check the last
+# few lines rather than only the final one.
+verify_archive_integrity() {
+  local archive="$1" trailer rc
+  trailer=$(set -o pipefail; gunzip -c "$archive" 2>/dev/null | tail -5)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    log "ERROR: ${archive} is truncated or corrupt (gunzip exit ${rc})"
+    return 1
+  fi
+  case "$trailer" in
+    *"PostgreSQL database dump complete"*) return 0 ;;
+    *)
+      log "ERROR: ${archive} has no completion marker — pg_dump did not finish"
+      return 1
+      ;;
+  esac
+}
+
+# Expensive check: restore the archive into a throwaway database and confirm it
+# holds real rows.
+restore_into() {
+  local archive="$1" verify_db="$2" farms
   gunzip -c "$archive" | psql -q "$verify_db" >/dev/null 2>&1 || return 1
-  local farms
   farms=$(psql -tA -c 'SELECT COUNT(*) FROM farm;' "$verify_db" 2>/dev/null) || return 1
   [ -n "$farms" ] && [ "$farms" -gt 0 ] 2>/dev/null || return 1
-  log "verified ${archive} (farm_count=${farms})"
+  log "full restore verified ${archive} (farm_count=${farms})"
+}
+
+full_verify_due() {
+  local now last age
+  [ -f "$FULL_VERIFY_MARKER" ] || return 0
+  now=$(date +%s)
+  last=$(stat -c %Y "$FULL_VERIFY_MARKER" 2>/dev/null || echo 0)
+  age=$(( (now - last) / 86400 ))
+  [ "$age" -ge "$FULL_VERIFY_INTERVAL_DAYS" ]
+}
+
+# Returns non-zero only when a restore was attempted and failed. A skip — not
+# due, or not enough disk — is a success: the archive already passed the
+# integrity check that runs every cycle.
+maybe_full_verify() {
+  local archive="$1" verify_db avail rc
+  if ! full_verify_due; then
+    log "full restore not due (runs every ${FULL_VERIFY_INTERVAL_DAYS}d)"
+    return 0
+  fi
+
+  avail=$(free_mb)
+  if [ "$avail" -lt "$FULL_VERIFY_MIN_FREE_MB" ]; then
+    log "WARN: full restore due but only ${avail}MB free (need ${FULL_VERIFY_MIN_FREE_MB}MB) — skipping"
+    return 0
+  fi
+
+  verify_db="irrigai_verify_$(date +%Y%m%d_%H%M%S)"
+  if ! createdb "$verify_db" >/dev/null 2>&1; then
+    log "ERROR: could not create verification database ${verify_db}"
+    return 1
+  fi
+
+  restore_into "$archive" "$verify_db"
+  rc=$?
+  # Unconditional: the verify database must not outlive the check that made it.
+  dropdb --if-exists "$verify_db" >/dev/null 2>&1 || log "WARN: could not drop ${verify_db}"
+
+  if [ "$rc" -ne 0 ]; then
+    # Deliberately kept. It passed integrity, so it is a complete dump; a failed
+    # restore here more likely means a broken restore environment than a bad
+    # archive, and deleting the newest backup on that evidence is worse than
+    # keeping it flagged.
+    log "ERROR: full restore FAILED for ${archive} — archive KEPT (it passed integrity checks)"
+    return 1
+  fi
+
+  touch "$FULL_VERIFY_MARKER"
 }
 
 # Delete backups older than RETENTION_DAYS, oldest first, never going below
@@ -83,7 +175,7 @@ prune() {
 }
 
 run_cycle() {
-  local avail stamp final part verify_db rc
+  local avail stamp final part rc
 
   avail=$(free_mb) || { log "ERROR: cannot stat ${BACKUP_DIR}"; return 1; }
   if [ "$avail" -lt "$MIN_FREE_MB" ]; then
@@ -108,40 +200,26 @@ run_cycle() {
     return 1
   fi
 
-  if ! gzip -t "$part" 2>/dev/null; then
-    log "ERROR: ${part} is not a valid archive — discarding"
+  if ! verify_archive_integrity "$part"; then
+    log "ERROR: discarding ${part}"
     rm -f "$part"
     return 1
   fi
 
-  verify_db="irrigai_verify_${stamp}"
-  if ! createdb "$verify_db" >/dev/null 2>&1; then
-    log "ERROR: could not create verification database ${verify_db} — discarding ${part}"
-    rm -f "$part"
-    return 1
-  fi
-
-  verify_archive "$part" "$verify_db"
-  rc=$?
-  # Unconditional: the verify database must not outlive the check that made it.
-  dropdb --if-exists "$verify_db" >/dev/null 2>&1 || log "WARN: could not drop ${verify_db}"
-
-  if [ "$rc" -ne 0 ]; then
-    log "ERROR: restore verification failed — discarding ${part}"
-    rm -f "$part"
-    return 1
-  fi
-
-  # Only now does the archive earn a backup's name.
+  # A complete, intact archive earns a backup's name.
   mv "$part" "$final"
   log "backup written: ${final} ($(du -h "$final" | cut -f1))"
 
+  # Before the full restore, not after: the restore needs ~20GB of transient
+  # disk, and retention is what frees it.
   prune
+
+  maybe_full_verify "$final"
 }
 
 main() {
   mkdir -p "$BACKUP_DIR"
-  log "starting: interval=${INTERVAL_SECONDS}s retention=${RETENTION_DAYS}d keep-min=${KEEP_MIN} min-free=${MIN_FREE_MB}MB"
+  log "starting: interval=${INTERVAL_SECONDS}s retention=${RETENTION_DAYS}d keep-min=${KEEP_MIN} min-free=${MIN_FREE_MB}MB full-verify=${FULL_VERIFY_INTERVAL_DAYS}d"
   while true; do
     run_cycle || log "cycle failed — retrying in ${INTERVAL_SECONDS}s"
     sleep "$INTERVAL_SECONDS"

@@ -122,6 +122,11 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
       BACKUP_KEEP_MIN: ${BACKUP_KEEP_MIN:-3}
       BACKUP_MIN_FREE_MB: ${BACKUP_MIN_FREE_MB:-20480}
+      # Full restore-verification is expensive (~20GB transient, ~45min on prod
+      # as of 2026-08-24), so it runs periodically; every cycle still checks
+      # archive integrity and pg_dump's completion trailer.
+      BACKUP_FULL_VERIFY_INTERVAL_DAYS: ${BACKUP_FULL_VERIFY_INTERVAL_DAYS:-7}
+      BACKUP_FULL_VERIFY_MIN_FREE_MB: ${BACKUP_FULL_VERIFY_MIN_FREE_MB:-30720}
     volumes:
       - ./backups:/backups
       - ./ops/db-backup.sh:/usr/local/bin/db-backup.sh:ro
