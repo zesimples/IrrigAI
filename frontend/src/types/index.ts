@@ -378,20 +378,31 @@ export interface AgronomicEvidence {
   label: string;
 }
 
+export interface AnswerConfidence {
+  engine_confidence: "high" | "medium" | "low" | "unknown";
+  data_quality: "fresh" | "stale" | "missing" | "unknown";
+  explanation_status: "generated" | "degraded" | "unavailable";
+  score: number;
+  basis: string;
+}
+
 export interface AgronomicInterpretation {
   summary: string;
   risk_level: "low" | "medium" | "high";
   irrigation_advice: string;
   evidence: AgronomicEvidence[];
   missing_data: string[];
+  /** @deprecated server-derived compatibility value; read `confidence` instead. */
   confidence_score: number;
   confidence_explanation: string;
+  confidence?: AnswerConfidence;
   recommended_actions: string[];
   degraded?: boolean;
   error_code?: string | null;
 }
 
 export interface AITextResponse {
+  provenance?: AnalysisProvenance | null;
   reply?: string;
   explanation?: string;
   summary?: string;
@@ -1091,23 +1102,83 @@ export interface ProposedAction {
   params: Record<string, unknown>;
 }
 
+/** A proposal plus the durable lifecycle state the server keeps for it.
+ *  `legacy` means the proposal predates the action table: its outcome was never
+ *  recorded, so it must be shown as historical rather than re-offered. */
+export type ChatActionStatus =
+  | "pending"
+  | "confirmed"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "invalidated"
+  | "legacy";
+
+export interface ProposedActionOut extends ProposedAction {
+  action_id?: string | null;
+  status: ChatActionStatus;
+  error_detail?: string | null;
+}
+
+export interface ChatActionOut {
+  id: string;
+  conversation_id: string;
+  chat_message_id: string | null;
+  sector_id: string | null;
+  recommendation_id: string | null;
+  action_type: string;
+  summary: string;
+  status: ChatActionStatus;
+  result: Record<string, unknown> | null;
+  error_detail: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface AnalysisProvenance {
+  recommendation_id: string | null;
+  context_version: string;
+  contract_version: string;
+  generated_at?: string | null;
+}
+
+export type FeedbackReason =
+  | "wrong_data"
+  | "stale_answer"
+  | "unclear_explanation"
+  | "unhelpful_next_step";
+
 export interface ChatResult {
   reply: string;
   conversation_id: string;
   message_id: string;
-  proposed_action: ProposedAction | null;
+  proposed_action: ProposedActionOut | null;
   degraded: boolean;
   model_name: string | null;
+  evidence?: AgronomicEvidence[];
+  context_version?: string;
+  contract_version?: string;
+  recommendation_id?: string | null;
+  validation_status?: "validated" | "repaired" | "fallback";
+  data_timestamps?: Record<string, string>;
+  status?: "complete" | "interrupted" | "failed";
 }
 
 export interface ChatMessage {
+  contract_version?: string;
+  validation_status?: "validated" | "repaired" | "fallback";
   id: string;
   role: "user" | "assistant";
   content: string;
-  proposed_action: ProposedAction | null;
+  proposed_action: ProposedActionOut | null;
   degraded: boolean;
   model_name: string | null;
   created_at: string;
+  evidence?: AgronomicEvidence[];
+  context_version?: string | null;
+  recommendation_id?: string | null;
+  surface?: string | null;
+  status?: "complete" | "interrupted" | "failed";
 }
 
 export interface ChatConversation {

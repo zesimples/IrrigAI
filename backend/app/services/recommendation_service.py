@@ -70,6 +70,8 @@ async def generate_recommendation(
     db: AsyncSession,
     target_date: date | None = None,
     farm_id: str | None = None,
+    *,
+    commit: bool = True,
 ) -> tuple[Recommendation, EngineRecommendation]:
     """Run engine for one sector and persist the recommendation.
 
@@ -91,22 +93,30 @@ async def generate_recommendation(
         await db.flush()
 
         for entry in eng.reasons:
-            db.add(RecommendationReason(
-                recommendation_id=rec.id,
-                order=entry.order,
-                category=entry.category,
-                message_pt=entry.message_pt,
-                message_en=entry.message_en,
-                data_key=entry.data_key,
-                data_value=entry.data_value,
-            ))
+            db.add(
+                RecommendationReason(
+                    recommendation_id=rec.id,
+                    order=entry.order,
+                    category=entry.category,
+                    message_pt=entry.message_pt,
+                    message_en=entry.message_en,
+                    data_key=entry.data_key,
+                    data_value=entry.data_value,
+                )
+            )
 
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
         await db.refresh(rec)
 
         logger.info(
             "Recommendation %s: sector=%s action=%s confidence=%.2f",
-            rec.id, sector_id, eng.action, eng.confidence.score,
+            rec.id,
+            sector_id,
+            eng.action,
+            eng.confidence.score,
         )
         recommendations_generated_total.labels(eng.action, "success").inc()
         return rec, eng
@@ -134,15 +144,17 @@ async def generate_for_farm(
             await db.flush()
 
             for entry in eng.reasons:
-                db.add(RecommendationReason(
-                    recommendation_id=rec.id,
-                    order=entry.order,
-                    category=entry.category,
-                    message_pt=entry.message_pt,
-                    message_en=entry.message_en,
-                    data_key=entry.data_key,
-                    data_value=entry.data_value,
-                ))
+                db.add(
+                    RecommendationReason(
+                        recommendation_id=rec.id,
+                        order=entry.order,
+                        category=entry.category,
+                        message_pt=entry.message_pt,
+                        message_en=entry.message_en,
+                        data_key=entry.data_key,
+                        data_value=entry.data_value,
+                    )
+                )
 
             await db.commit()
             await db.refresh(rec)

@@ -3,7 +3,6 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access import Access
@@ -14,6 +13,7 @@ from app.schemas.field_observation import (
     FieldObservationOut,
     FieldObservationVerify,
 )
+from app.services.field_observation_service import get_active_field_observations
 
 router = APIRouter(tags=["field-observations"])
 
@@ -29,20 +29,7 @@ async def list_field_observations(
     db: AsyncSession = Depends(get_db),
 ):
     await access.sector(sector_id)
-    stmt = select(FieldObservation).where(FieldObservation.sector_id == sector_id)
-    if active_only:
-        now = datetime.now(UTC)
-        stmt = stmt.where(
-            or_(
-                FieldObservation.expires_at.is_(None),
-                FieldObservation.expires_at > now,
-            )
-        )
-    rows = (
-        (await db.execute(stmt.order_by(FieldObservation.observed_at.desc()).limit(100)))
-        .scalars()
-        .all()
-    )
+    rows = await get_active_field_observations(sector_id, db, active_only=active_only, limit=100)
     return [FieldObservationOut.model_validate(row) for row in rows]
 
 

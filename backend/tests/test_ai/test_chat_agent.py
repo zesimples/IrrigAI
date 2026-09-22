@@ -24,6 +24,7 @@ def test_proposed_action_minimal():
     assert a.type == "run_calibration"
     assert a.params == {}
 
+
 def _agent():
     return ChatAgent(
         client=MockChatClient(),
@@ -65,8 +66,12 @@ async def test_chat_agent_prose_reply(monkeypatch):
     access = AsyncMock()
     db = AsyncMock()
     result = await agent.run(
-        farm_id="f1", sector_id=None, message="Quanto choveu esta semana?",
-        history=[], access=access, db=db,
+        farm_id="f1",
+        sector_id=None,
+        message="Quanto choveu esta semana?",
+        history=[],
+        access=access,
+        db=db,
     )
     assert result.proposed_action is None
     assert result.reply
@@ -76,12 +81,26 @@ async def test_chat_agent_prose_reply(monkeypatch):
 async def test_chat_agent_propose_calibration(monkeypatch):
     agent = _agent()
     monkeypatch.setattr(agent, "_seed_scope_context", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        "app.ai.tools._get_sector_status",
+        AsyncMock(
+            return_value={
+                "sector_id": "sec-9",
+                "action": "skip",
+                "irrigation_depth_mm": 0,
+            }
+        ),
+    )
     access = AsyncMock()
     access.sector.return_value = object()
     db = AsyncMock()
     result = await agent.run(
-        farm_id="f1", sector_id="sec-9", message="Podes recalibrar este setor?",
-        history=[], access=access, db=db,
+        farm_id="f1",
+        sector_id="sec-9",
+        message="Podes recalibrar este setor?",
+        history=[],
+        access=access,
+        db=db,
     )
     assert result.proposed_action is not None
     assert result.proposed_action.type == "run_calibration"
@@ -128,7 +147,7 @@ async def test_chat_agent_accepts_current_recommendation_from_tool_output(monkey
         db=AsyncMock(),
     )
 
-    assert calls == ["get_sector_status", "propose_accept_recommendation"]
+    assert calls == ["get_sector_status", "get_sector_status", "propose_accept_recommendation"]
     assert result.proposed_action is not None
     assert result.proposed_action.recommendation_id == "rec-current"
 
@@ -142,13 +161,18 @@ async def test_chat_agent_trims_history(monkeypatch):
     async def fake_loop(messages, tools, **kw):
         captured["messages"] = messages
         from app.ai.openai_client import LLMToolResponse
+
         return LLMToolResponse(content="ok", tool_calls=[])
 
     monkeypatch.setattr(agent.client, "run_tool_loop", fake_loop)
     history = [ChatTurn(role="user", content=f"m{i}") for i in range(20)]
     await agent.run(
-        farm_id="f1", sector_id=None, message="agora", history=history,
-        access=AsyncMock(), db=AsyncMock(),
+        farm_id="f1",
+        sector_id=None,
+        message="agora",
+        history=history,
+        access=AsyncMock(),
+        db=AsyncMock(),
     )
     # system + <=8 history + current user
     assert len(captured["messages"]) <= 1 + MAX_HISTORY_TURNS + 1

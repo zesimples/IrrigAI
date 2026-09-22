@@ -20,6 +20,20 @@ const RISK_CLASS = {
   high: "bg-terra/10 text-terra",
 } as const;
 
+const ENGINE_CONFIDENCE_LABEL = {
+  high: "Confiança alta",
+  medium: "Confiança média",
+  low: "Confiança baixa",
+  unknown: "Confiança por determinar",
+} as const;
+
+const DATA_QUALITY_LABEL = {
+  fresh: "leituras actuais",
+  stale: "leituras antigas",
+  missing: "sem leitura directa do solo",
+  unknown: "qualidade dos dados por determinar",
+} as const;
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INTERNAL_CODE_RE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
@@ -27,7 +41,10 @@ const INTERNAL_CODE_RE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
 
 /** Render the validated API object directly; never parse model-authored prose. */
 export function StructuredAIResult({ interpretation, compact = false }: Props) {
-  const confidencePct = interpretation.confidence_score * 100;
+  // Confidence has three axes, all server-derived. The percentage is a
+  // compatibility artefact and is no longer the headline: a grower can act on
+  // "engine confident, sensors stale" in a way a bare 62% does not support.
+  const confidence = interpretation.confidence;
   const evidence = interpretation.evidence
     .reduce<typeof interpretation.evidence>((rows, item) => {
       const label = item.label?.trim();
@@ -132,9 +149,23 @@ export function StructuredAIResult({ interpretation, compact = false }: Props) {
         </section>
       )}
 
-      <p className="text-[11px] leading-relaxed text-ink-3">
-        Confiança {formatDecimal(confidencePct, 0)}% — {interpretation.confidence_explanation}
-      </p>
+      {confidence ? (
+        // The server writes the basis sentence; rendering the axis labels next to
+        // it would only repeat the same words back to the reader.
+        <p className="text-[11px] leading-relaxed text-ink-3">
+          {confidence.basis || (
+            <>
+              {ENGINE_CONFIDENCE_LABEL[confidence.engine_confidence]} · dados:{" "}
+              {DATA_QUALITY_LABEL[confidence.data_quality]}
+            </>
+          )}
+        </p>
+      ) : (
+        <p className="text-[11px] leading-relaxed text-ink-3">
+          Confiança {formatDecimal(interpretation.confidence_score * 100, 0)}% —{" "}
+          {interpretation.confidence_explanation}
+        </p>
+      )}
     </div>
   );
 }

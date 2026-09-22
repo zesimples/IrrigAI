@@ -15,6 +15,12 @@ from app.schemas.ai import AgronomicInterpretation
 
 logger = logging.getLogger(__name__)
 
+# Bump when the prompt/response contract changes in a way that makes a stored
+# analysis no longer comparable to a fresh one. It is part of every cache key and
+# travels on every response, so a cached answer from an older contract is visibly
+# historical instead of silently current.
+CONTRACT_VERSION = "a3.2"
+
 _redis: aioredis.Redis | None = None
 
 
@@ -62,13 +68,19 @@ def context_digest(context: dict) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _cache_key(surface: str, entity_id: str, digest: str) -> str:
+    """Contract version is part of the key: a stored answer produced under an older
+    prompt/response contract must not be served as if it were current."""
+    return f"ai:response:{CONTRACT_VERSION}:{surface}:{entity_id}:{digest}"
+
+
 async def get_cached_interpretation(
     *,
     surface: str,
     entity_id: str,
     digest: str,
 ) -> AgronomicInterpretation | None:
-    key = f"ai:response:{surface}:{entity_id}:{digest}"
+    key = _cache_key(surface, entity_id, digest)
     try:
         value = await _get_redis().get(key)
         return AgronomicInterpretation.model_validate_json(value) if value else None
@@ -84,7 +96,7 @@ async def set_cached_interpretation(
     digest: str,
     interpretation: AgronomicInterpretation,
 ) -> None:
-    key = f"ai:response:{surface}:{entity_id}:{digest}"
+    key = _cache_key(surface, entity_id, digest)
     try:
         await _get_redis().set(
             key,

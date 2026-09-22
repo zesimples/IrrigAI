@@ -105,7 +105,30 @@ ai_degraded_responses_total = Counter(
 ai_response_feedback_total = Counter(
     "irrigai_ai_response_feedback_total",
     "User thumbs feedback on AI responses",
-    ["surface", "rating"],
+    ["surface", "reason", "rating"],
+)
+
+# Latency is measured per STAGE, not per request: "the chat is slow" is unactionable
+# when a turn is a context build, N tool reads, a model call and a validation pass.
+# Labels stay bounded and carry no tenant identifier.
+ai_chat_stage_seconds = Histogram(
+    "irrigai_ai_chat_stage_seconds",
+    "Time to reach each stage of one chat turn, measured from the start of the turn",
+    ["surface", "stage"],  # stage: first_progress | first_answer | complete
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0, 120.0),
+)
+
+ai_chat_turns_total = Counter(
+    "irrigai_ai_chat_turns_total",
+    "Chat turns by grounding outcome (a rising fallback rate means the model is "
+    "producing claims the data does not support)",
+    ["surface", "outcome"],  # outcome: validated | repaired | fallback | interrupted | failed
+)
+
+ai_chat_actions_total = Counter(
+    "irrigai_ai_chat_actions_total",
+    "Lifecycle transitions of AI-proposed actions",
+    ["action_type", "outcome"],  # outcome: succeeded | failed | cancelled | invalidated
 )
 
 # ── System ────────────────────────────────────────────────────────────────────

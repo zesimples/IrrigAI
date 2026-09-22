@@ -57,6 +57,14 @@ _NO_DEFICIT_PROBE_STATS = {
         "taw_mm": 104.0,
         "depletion_pct": 47.5,
         "irrigation_depth_mm": None,
+        "confidence_level": "high",
+        "reasons": [],
+    },
+    # Production ships the canonical probe-state block so the shared confidence
+    # resolver can grade freshness; with fresh depths this case is low risk.
+    "probe_state": {
+        "live": {"depth_count": 2},
+        "data_quality": {"fresh_depths": 2, "stale_depths": 0, "total_depths": 2},
     },
     "depths": [
         {

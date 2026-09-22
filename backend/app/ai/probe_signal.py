@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.pipeline import resolve_sector_soil_bounds
+from app.engine.staleness import PROBE_STALE_H, PROBE_VERY_STALE_H
 from app.models import (
     DetectedWaterEvent,
     IrrigationEvent,
@@ -22,6 +23,7 @@ from app.models import (
     ProbeDepth,
     ProbeReading,
     Recommendation,
+    RecommendationReason,
     Sector,
 )
 from app.models.sector_crop_profile import SectorCropProfile
@@ -29,7 +31,7 @@ from app.models.sector_crop_profile import SectorCropProfile
 # m³/m³ plausible VWC range
 _VWC_MIN, _VWC_MAX = 0.01, 0.65
 _ANALYSIS_HOURS = 72
-_FLATLINE_STD = 0.003   # std dev below this → suspect flatline
+_FLATLINE_STD = 0.003  # std dev below this → suspect flatline
 _RESPONSE_THRESHOLD = 0.008  # min delta to count as an irrigation response
 
 
@@ -94,6 +96,25 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
                 depletion_pct = None
 
             action = rec.action.value if hasattr(rec.action, "value") else str(rec.action)
+            # The guard quotes the engine's OWN reason rather than inventing one,
+            # so the reasons travel with the decision (A1).
+            reason_rows = (
+                (
+                    await db.execute(
+                        select(RecommendationReason)
+                        .where(RecommendationReason.recommendation_id == rec.id)
+                        .order_by(RecommendationReason.order)
+                        .limit(4)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            confidence_level = (
+                rec.confidence_level.value
+                if hasattr(rec.confidence_level, "value")
+                else rec.confidence_level
+            )
             latest_recommendation = {
                 "action": action,
                 "generated_at": rec.generated_at,
@@ -101,6 +122,10 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
                 "taw_mm": taw_mm,
                 "depletion_pct": depletion_pct,
                 "irrigation_depth_mm": rec.irrigation_depth_mm,
+                "confidence_level": confidence_level,
+                "reasons": [
+                    {"category": row.category, "message": row.message_pt} for row in reason_rows
+                ],
             }
 
     now = datetime.now(UTC)
@@ -129,17 +154,21 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         irrigation_event_count = len(irrigation_events)
     else:
         probe_events = (
-            await db.execute(
-                select(DetectedWaterEvent)
-                .where(
-                    DetectedWaterEvent.sector_id == probe.sector_id,
-                    DetectedWaterEvent.timestamp >= window_start,
-                    DetectedWaterEvent.kind == "irrigation",
-                    DetectedWaterEvent.status.in_(("active", "confirmed")),
+            (
+                await db.execute(
+                    select(DetectedWaterEvent)
+                    .where(
+                        DetectedWaterEvent.sector_id == probe.sector_id,
+                        DetectedWaterEvent.timestamp >= window_start,
+                        DetectedWaterEvent.kind == "irrigation",
+                        DetectedWaterEvent.status.in_(("active", "confirmed")),
+                    )
+                    .order_by(DetectedWaterEvent.timestamp)
                 )
-                .order_by(DetectedWaterEvent.timestamp)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if probe_events:
             last_probe_event = max(probe_events, key=lambda event: event.timestamp)
             last_event_at = last_probe_event.timestamp
@@ -148,19 +177,21 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
             irrigation_event_count = len(probe_events)
         else:
             flowmeter_events = (
-                await db.execute(
-                    select(IrrigationEventDetected)
-                    .where(
-                        IrrigationEventDetected.sector_id == probe.sector_id,
-                        IrrigationEventDetected.start_time >= window_start,
+                (
+                    await db.execute(
+                        select(IrrigationEventDetected)
+                        .where(
+                            IrrigationEventDetected.sector_id == probe.sector_id,
+                            IrrigationEventDetected.start_time >= window_start,
+                        )
+                        .order_by(IrrigationEventDetected.start_time)
                     )
-                    .order_by(IrrigationEventDetected.start_time)
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if flowmeter_events:
-                last_flowmeter_event = max(
-                    flowmeter_events, key=lambda event: event.start_time
-                )
+                last_flowmeter_event = max(flowmeter_events, key=lambda event: event.start_time)
                 last_event_at = last_flowmeter_event.start_time
                 last_event_applied_mm = round(last_flowmeter_event.total_m3_ha / 10.0, 3)
                 last_event_source = "flowmeter_detected"
@@ -185,19 +216,38 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         readings = readings_result.scalars().all()
 
         if not readings:
-            depth_stats.append({"depth_cm": pd.depth_cm, "n_readings": 0, "status": "no_data_in_window"})
+            depth_stats.append(
+                {
+                    "depth_cm": pd.depth_cm,
+                    "n_readings": 0,
+                    "status": "no_data_in_window",
+                    "quality": "dead",
+                }
+            )
             continue
 
         # Extract usable VWC values
         vwc_series: list[tuple[datetime, float]] = []
         for r in readings:
             v = r.calibrated_value if r.calibrated_value is not None else r.raw_value
-            if r.unit == "vwc_m3m3" and _VWC_MIN <= v <= _VWC_MAX or r.calibrated_value is not None and _VWC_MIN < r.calibrated_value <= _VWC_MAX:
+            if (
+                r.unit == "vwc_m3m3"
+                and _VWC_MIN <= v <= _VWC_MAX
+                or r.calibrated_value is not None
+                and _VWC_MIN < r.calibrated_value <= _VWC_MAX
+            ):
                 ts = r.timestamp.replace(tzinfo=UTC) if r.timestamp.tzinfo is None else r.timestamp
                 vwc_series.append((ts, v))
 
         if not vwc_series:
-            depth_stats.append({"depth_cm": pd.depth_cm, "n_readings": len(readings), "status": "no_vwc_available"})
+            depth_stats.append(
+                {
+                    "depth_cm": pd.depth_cm,
+                    "n_readings": len(readings),
+                    "status": "no_vwc_available",
+                    "quality": "dead",
+                }
+            )
             continue
 
         vals = [v for _, v in vwc_series]
@@ -229,12 +279,12 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         hours_to_peak: float | None = None
         if last_event_at is not None:
             evt_ts = (
-                last_event_at.replace(tzinfo=UTC)
-                if last_event_at.tzinfo is None
-                else last_event_at
+                last_event_at.replace(tzinfo=UTC) if last_event_at.tzinfo is None else last_event_at
             )
             vwc_at_event = _nearest_value(vwc_series, evt_ts)
-            post_window = [(t, v) for t, v in vwc_series if evt_ts <= t <= evt_ts + timedelta(hours=12)]
+            post_window = [
+                (t, v) for t, v in vwc_series if evt_ts <= t <= evt_ts + timedelta(hours=12)
+            ]
             if post_window and vwc_at_event is not None:
                 peak_v = max(v for _, v in post_window)
                 peak_t = next(t for t, v in post_window if v == peak_v)
@@ -243,7 +293,9 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
 
         # Human-readable moisture level descriptor
         moisture_level = _moisture_level(latest_vwc, field_capacity, wilting_point)
-        _latest_vwc_raw = latest_vwc  # kept internally for cross-depth divergence, stripped before return
+        _latest_vwc_raw = (
+            latest_vwc  # kept internally for cross-depth divergence, stripped before return
+        )
 
         # Qualitative trend based on slope
         if abs(slope) < 0.0001:
@@ -257,39 +309,52 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         else:
             trend = "a aumentar ligeiramente"
 
-        depth_stats.append({
-            "depth_cm": pd.depth_cm,
-            "n_readings": len(vwc_series),
-            "humidade_actual": moisture_level,
-            "tendencia": trend,
-            "sinal_estavel": vwc_std < _FLATLINE_STD and len(vwc_series) >= 4,
-            "causa_sinal_estavel": (
-                "solo próximo da capacidade de campo, sem consumo nem drenagem activa"
-                if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4 and flatline_near_fc
-                else "profundidade além da zona radicular activa — sem consumo radicular nem drenagem, comportamento normal"
-                if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4 and beyond_roots
-                else "humidade estável sem consumo nem recarga activos — equilíbrio hídrico"
+        hours_since_reading = round((now - last_ts).total_seconds() / 3600, 1)
+        depth_stats.append(
+            {
+                "depth_cm": pd.depth_cm,
+                "n_readings": len(vwc_series),
+                "hours_since_reading": hours_since_reading,
+                "quality": _freshness(hours_since_reading),
+                "humidade_actual": moisture_level,
+                "tendencia": trend,
+                "sinal_estavel": vwc_std < _FLATLINE_STD and len(vwc_series) >= 4,
+                "causa_sinal_estavel": (
+                    "solo próximo da capacidade de campo, sem consumo nem drenagem activa"
+                    if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4 and flatline_near_fc
+                    else "profundidade além da zona radicular activa — sem consumo radicular nem drenagem, comportamento normal"
+                    if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4 and beyond_roots
+                    else "humidade estável sem consumo nem recarga activos — equilíbrio hídrico"
+                    if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4
+                    else None
+                ),
+                "profundidade_alem_raizes": beyond_roots
                 if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4
-                else None
-            ),
-            "profundidade_alem_raizes": beyond_roots if vwc_std < _FLATLINE_STD and len(vwc_series) >= 4 else None,
-            "variabilidade_sinal": (
-                "muito baixa (sinal plano)" if vwc_std < _FLATLINE_STD
-                else "baixa" if vwc_std < 0.01
-                else "moderada" if vwc_std < 0.03
-                else "alta (sinal instável)"
-            ),
-            "variacao_24h": _delta_qualitative(change_24h),
-            "variacao_48h": _delta_qualitative(change_48h),
-            "resposta_rega": (
-                "forte" if post_irrig_delta is not None and post_irrig_delta > 0.05
-                else "moderada" if post_irrig_delta is not None and post_irrig_delta > _RESPONSE_THRESHOLD
-                else "fraca ou ausente" if post_irrig_delta is not None
-                else None
-            ),
-            "horas_ate_pico_apos_rega": hours_to_peak,
-            "_latest_vwc_raw": _latest_vwc_raw,  # internal — stripped before LLM sees it
-        })
+                else None,
+                "variabilidade_sinal": (
+                    "muito baixa (sinal plano)"
+                    if vwc_std < _FLATLINE_STD
+                    else "baixa"
+                    if vwc_std < 0.01
+                    else "moderada"
+                    if vwc_std < 0.03
+                    else "alta (sinal instável)"
+                ),
+                "variacao_24h": _delta_qualitative(change_24h),
+                "variacao_48h": _delta_qualitative(change_48h),
+                "resposta_rega": (
+                    "forte"
+                    if post_irrig_delta is not None and post_irrig_delta > 0.05
+                    else "moderada"
+                    if post_irrig_delta is not None and post_irrig_delta > _RESPONSE_THRESHOLD
+                    else "fraca ou ausente"
+                    if post_irrig_delta is not None
+                    else None
+                ),
+                "horas_ate_pico_apos_rega": hours_to_peak,
+                "_latest_vwc_raw": _latest_vwc_raw,  # internal — stripped before LLM sees it
+            }
+        )
 
     # Cross-depth signals
     valid = [d for d in depth_stats if "humidade_actual" in d]
@@ -300,7 +365,8 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         cross_depth["profundidade_rasa_cm"] = shallowest["depth_cm"]
         cross_depth["profundidade_funda_cm"] = deepest["depth_cm"]
         cross_depth["rasa_consome_mais_rapido"] = shallowest["tendencia"] in (
-            "a consumir rapidamente", "a consumir gradualmente"
+            "a consumir rapidamente",
+            "a consumir gradualmente",
         ) and deepest["tendencia"] in ("estável", "a aumentar ligeiramente")
         cross_depth["divergencia_entre_profundidades"] = _divergence_label(
             _raw_vwc_lookup(depth_stats, shallowest["depth_cm"]),
@@ -332,8 +398,39 @@ async def compute_probe_signal_stats(probe_id: str, db: AsyncSession) -> dict:
         "last_irrigation_applied_mm": last_event_applied_mm,
         "last_irrigation_event_source": last_event_source,
         "latest_recommendation": latest_recommendation,
+        # Canonical probe-state shape so answer_confidence.resolve_data_quality()
+        # grades this surface exactly like every other AI context block.
+        "probe_state": _probe_state_block(depth_stats),
         "depths": depth_stats,
         "cross_depth_signals": cross_depth,
+    }
+
+
+def _freshness(hours_since_reading: float) -> str:
+    """Grade one depth against the canonical probe-staleness thresholds."""
+    if hours_since_reading > PROBE_VERY_STALE_H:
+        return "dead"
+    if hours_since_reading > PROBE_STALE_H:
+        return "stale"
+    return "fresh"
+
+
+def _probe_state_block(depth_stats: list[dict]) -> dict:
+    """Freshness summary in the canonical ``probe_state`` shape.
+
+    ``quality`` is already graded per depth against ``engine/staleness.py``; this
+    only counts it so the shared confidence resolver can read this surface.
+    """
+    total = len(depth_stats)
+    fresh = sum(1 for d in depth_stats if d.get("quality") == "fresh")
+    stale = sum(1 for d in depth_stats if d.get("quality") in ("stale", "dead"))
+    return {
+        "live": {"depth_count": total} if total else None,
+        "data_quality": {
+            "fresh_depths": fresh,
+            "stale_depths": stale,
+            "total_depths": total,
+        },
     }
 
 
@@ -409,6 +506,8 @@ def _nearest_value(series: list[tuple[datetime, float]], target: datetime) -> fl
     return None
 
 
-def _delta_from(series: list[tuple[datetime, float]], past: datetime, latest: float) -> float | None:
+def _delta_from(
+    series: list[tuple[datetime, float]], past: datetime, latest: float
+) -> float | None:
     v = _nearest_value(series, past)
     return round(latest - v, 4) if v is not None else None

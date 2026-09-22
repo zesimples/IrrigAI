@@ -12,6 +12,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import prompt_templates
+from app.ai.answer_confidence import derive_answer_confidence, resolve_data_quality
 from app.ai.context_builder import (
     AssistantContextBuilder,
     FarmAssistantContext,
@@ -26,6 +27,7 @@ from app.schemas.ai import (
     AgronomicEvidence,
     AgronomicInterpretation,
     AgronomicInterpretationDraft,
+    AnswerConfidence,
 )
 
 logger = logging.getLogger(__name__)
@@ -308,10 +310,18 @@ class IrrigationAssistant:
         structured = await self._complete_structured(
             system_prompt=system_prompt,
             user_message=user_message,
+            # The wrapper key is what the evidence registry cites paths under; the
+            # confidence axes live in the unwrapped stats, so they are re-derived
+            # below rather than read through the wrapper (which grades as "unknown").
             context={"probe_signal": stats},
             fallback_risk="medium",
             max_tokens=700,
             surface="probe_diagnosis",
+        )
+        structured = self._apply_deterministic_confidence(
+            structured,
+            stats,
+            explanation_status="degraded" if structured.degraded else "generated",
         )
         return self._apply_probe_recommendation_guard(stats, structured)
 
@@ -481,6 +491,12 @@ class IrrigationAssistant:
 
         Probe-pattern interpretation is useful for diagnosing sensor behaviour, but it
         must not override a fresh sector recommendation that says there is no deficit.
+
+        The guard is deliberately narrow.  It neutralises advice that would contradict
+        the engine and quotes the engine's *own* reason; it never invents an agronomic
+        justification ("reserva suficiente" when the engine deferred for rain), never
+        declares low risk on the strength of stale or absent sensor data, and never
+        raises confidence because it happens to agree with the engine.
         """
         latest = stats.get("latest_recommendation")
         if not isinstance(latest, dict):
@@ -513,18 +529,19 @@ class IrrigationAssistant:
         # Surgical override: keep the LLM's depth description (summary + depth
         # evidence) but neutralise the irrigation advice so it can never contradict
         # the engine's "do not irrigate" decision.
-        interpretation.risk_level = "low"
-        interpretation.irrigation_advice = (
-            "Não regues agora — o balanço hídrico tem reserva suficiente. Vigia a evolução das "
-            "camadas mais fundas e confirma sensores com leituras díspares."
-        )
+        data_quality = resolve_data_quality(stats)
+        # Irrigation urgency and sensor reliability are different questions: a sector
+        # with no current deficit but no trustworthy reading is not "low risk".
+        interpretation.risk_level = "low" if data_quality == "fresh" else "medium"
+        interpretation.irrigation_advice = self._engine_no_irrigation_advice(latest)
         interpretation.recommended_actions = [
             "Monitorizar a tendência das camadas mais fundas nas próximas 24-48 horas.",
             "Confirmar qualquer profundidade com leitura discrepante antes de alterar a rega.",
         ]
-        interpretation.confidence_score = max(interpretation.confidence_score, 0.75)
-        interpretation.confidence_explanation = (
-            "Conselho alinhado com a recomendação mais recente do motor (não regar)."
+        interpretation = self._apply_deterministic_confidence(
+            interpretation,
+            stats,
+            explanation_status=("degraded" if interpretation.degraded else "generated"),
         )
 
         # Prepend server-resolved engine evidence; never manufacture a display value.
@@ -537,6 +554,45 @@ class IrrigationAssistant:
             if all(ev.evidence_id != item.evidence_id for ev in evidence):
                 evidence.insert(0, item)
         interpretation.evidence = evidence[:4]
+        return interpretation
+
+    @staticmethod
+    def _engine_no_irrigation_advice(latest: dict) -> str:
+        """State the engine's decision and quote its own reason, or stay silent."""
+        base = "Não regues agora — é a decisão do motor determinístico para este sector."
+        reasons = latest.get("reasons")
+        messages: list[str] = []
+        if isinstance(reasons, list):
+            for reason in reasons[:2]:
+                if isinstance(reason, dict):
+                    message = reason.get("message") or reason.get("message_pt")
+                elif isinstance(reason, str):
+                    message = reason
+                else:
+                    message = None
+                if message and str(message).strip():
+                    messages.append(str(message).strip())
+        tail = "Vigia a evolução das camadas mais fundas e confirma sensores com leituras díspares."
+        if messages:
+            return f"{base} Motivo do motor: {' '.join(messages)} {tail}"
+        return f"{base} {tail}"
+
+    @staticmethod
+    def _apply_deterministic_confidence(
+        interpretation: AgronomicInterpretation,
+        context: dict | list | None,
+        *,
+        explanation_status: str = "generated",
+    ) -> AgronomicInterpretation:
+        """Replace any model-authored confidence with server-derived axes."""
+        confidence = derive_answer_confidence(
+            context,
+            explanation_status=explanation_status,  # type: ignore[arg-type]
+        )
+        interpretation.confidence = AnswerConfidence(**confidence.to_dict())
+        interpretation.confidence_score = confidence.score
+        if explanation_status != "generated" or not interpretation.confidence_explanation.strip():
+            interpretation.confidence_explanation = confidence.basis
         return interpretation
 
     async def _complete_structured(
@@ -578,9 +634,9 @@ class IrrigationAssistant:
                 "",
                 context=context,
                 risk_level=fallback_risk,
-                confidence_score=0.3,
                 degraded=True,
                 error_code="llm_unavailable",
+                explanation_status="degraded",
             )
 
         result = self._resolve_model_interpretation(parsed, registry, context)
@@ -588,7 +644,7 @@ class IrrigationAssistant:
             result.evidence = self._default_evidence(context, registry=registry)
         if not result.missing_data:
             result.missing_data = self._known_limitations(context)
-        return result
+        return self._apply_deterministic_confidence(result, context, explanation_status="generated")
 
     def _resolve_model_interpretation(
         self,
@@ -646,18 +702,16 @@ class IrrigationAssistant:
         confidence_score: float | None = None,
         degraded: bool = False,
         error_code: str | None = None,
+        explanation_status: str | None = None,
     ) -> AgronomicInterpretation:
         evidence = self._default_evidence(context)
         missing_data = self._known_limitations(context)
-        return AgronomicInterpretation(
+        interpretation = AgronomicInterpretation(
             summary=text.strip() or "Sem análise disponível.",
             risk_level=risk_level,  # type: ignore[arg-type]
             irrigation_advice=text.strip() or "Sem conselho de rega disponível.",
             evidence=evidence,
             missing_data=missing_data,
-            confidence_score=confidence_score
-            if confidence_score is not None
-            else (0.65 if evidence else 0.35),
             confidence_explanation=(
                 "Resposta validada com evidência do contexto estruturado."
                 if evidence
@@ -667,6 +721,15 @@ class IrrigationAssistant:
             degraded=degraded,
             error_code=error_code,
         )
+        status = explanation_status or ("degraded" if degraded else "unavailable")
+        interpretation = self._apply_deterministic_confidence(
+            interpretation, context, explanation_status=status
+        )
+        if confidence_score is not None:
+            # Callers that already know the answer is not grounded (no recommendation
+            # yet, alert not found) may only ever LOWER the derived score.
+            interpretation.confidence_score = min(interpretation.confidence_score, confidence_score)
+        return interpretation
 
     def render_structured(self, interpretation: AgronomicInterpretation) -> str:
         lines: list[str] = []
@@ -689,12 +752,9 @@ class IrrigationAssistant:
             )
             lines.append(f"• Atenção: {msg}")
 
-        if interpretation.confidence_score < 0.60:
-            pct = round(interpretation.confidence_score * 100)
-            lines.append(
-                f"• Baixa confiança: A confiança na recomendação é de {pct}%"
-                f" — {interpretation.confidence_explanation}"
-            )
+        confidence_line = _confidence_line(interpretation)
+        if confidence_line:
+            lines.append(confidence_line)
 
         return "\n".join(lines)
 
@@ -735,9 +795,9 @@ class IrrigationAssistant:
             if missing:
                 lines.append(f"• Limitações: {missing}")
 
-        if interpretation.confidence_score < 0.60:
-            pct = round(interpretation.confidence_score * 100)
-            lines.append(f"• Confiança: {pct}% — {interpretation.confidence_explanation}")
+        confidence_line = _confidence_line(interpretation)
+        if confidence_line:
+            lines.append(confidence_line)
 
         return "\n".join(lines) if lines else "• Perfil da sonda: Sem análise disponível."
 
@@ -794,3 +854,32 @@ def _get_path(data: dict, path: list[str]) -> object | None:
             return None
         current = current.get(key)
     return current
+
+
+_CONFIDENCE_HEADLINE_PT = {
+    "high": "Confiança alta",
+    "medium": "Confiança média",
+    "low": "Confiança baixa",
+    "unknown": "Confiança por determinar",
+}
+
+
+def _confidence_line(interpretation: AgronomicInterpretation) -> str | None:
+    """Render confidence qualitatively.
+
+    The percentage is a compatibility artefact, not something a grower can act on;
+    the axes that matter are the engine's own confidence and the freshness of the
+    data behind it. A fully confident, freshly measured answer says nothing.
+    """
+    confidence = interpretation.confidence
+    if (
+        confidence.engine_confidence == "high"
+        and confidence.data_quality == "fresh"
+        and confidence.explanation_status == "generated"
+    ):
+        return None
+    headline = _CONFIDENCE_HEADLINE_PT.get(
+        confidence.engine_confidence, _CONFIDENCE_HEADLINE_PT["unknown"]
+    )
+    basis = confidence.basis.strip() or interpretation.confidence_explanation.strip()
+    return f"• {headline}: {basis}" if basis else f"• {headline}."

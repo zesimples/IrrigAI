@@ -4,6 +4,7 @@ Computes per-sector FC/refill bounds from each probe's own VWC envelope (via
 AutoCalibrationService) and upserts them into the probe_calibration table. Run
 weekly per farm by the scheduler. Pure computation lives in engine/auto_calibration.py.
 """
+
 from __future__ import annotations
 
 import logging
@@ -121,13 +122,19 @@ class ProbeCalibrationService:
         if result is None:
             return None
 
-        existing = (await db.execute(
-            select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
-        )).scalar_one_or_none()
+        existing = (
+            await db.execute(
+                select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
+            )
+        ).scalar_one_or_none()
         now = datetime.now(UTC)
         run = self._new_run(
-            sector_id, result, existing,
-            source=source, created_by_id=created_by_id, computed_at=now,
+            sector_id,
+            result,
+            existing,
+            source=source,
+            created_by_id=created_by_id,
+            computed_at=now,
         )
         db.add(run)
         await db.flush()
@@ -157,6 +164,70 @@ class ProbeCalibrationService:
         active, _run = recorded
         return active
 
+    async def run_manual(self, sector_id, db, *, user_id, diagnoser=None) -> dict:
+        """Manual calibration including precedence and audit. The caller commits."""
+        from fastapi import HTTPException
+
+        from app.engine.pipeline import resolve_sector_soil_bounds
+        from app.models import SectorCropProfile
+        from app.services.audit_service import audit
+
+        before = await resolve_sector_soil_bounds(sector_id, db)
+        saved = await self.compute_and_save(
+            sector_id, db, source="manual", created_by_id=str(user_id)
+        )
+        if saved is None:
+            reason = await (diagnoser or AutoCalibrationService()).diagnose_unavailable(
+                sector_id, db
+            )
+            raise HTTPException(422, detail=reason)
+        profile = (
+            await db.execute(
+                select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
+            )
+        ).scalar_one_or_none()
+        cleared = bool(profile and profile.is_customized)
+        if cleared:
+            profile.is_customized = False
+        await db.flush()
+        after = await resolve_sector_soil_bounds(sector_id, db)
+        changed = (
+            before.fc is None
+            or abs(before.fc - after.fc) >= 0.005
+            or abs(before.pwp - after.pwp) >= 0.005
+        )
+        payload = {
+            "sector_id": sector_id,
+            "observed_fc": saved.observed_fc,
+            "observed_refill": saved.observed_refill,
+            "method": saved.method,
+            "num_cycles": saved.num_cycles,
+            "consistency": saved.consistency,
+            "window_days": saved.window_days,
+            "computed_at": saved.computed_at,
+            "previous_fc": before.fc,
+            "previous_refill": before.pwp,
+            "effective_fc": after.fc,
+            "effective_pwp": after.pwp,
+            "effective_source": after.source,
+            "changed": changed,
+            "applied": after.source == "probe_calibrated",
+            "cleared_customization": cleared,
+        }
+        await audit.log(
+            "probe_calibration_computed",
+            "sector",
+            sector_id,
+            db,
+            before_data={"source": before.source, "fc": before.fc, "pwp": before.pwp},
+            after_data={
+                key: value
+                for key, value in payload.items()
+                if key not in {"computed_at", "previous_fc", "previous_refill"}
+            },
+        )
+        return payload
+
     def _new_run(
         self,
         sector_id: str,
@@ -185,9 +256,7 @@ class ProbeCalibrationService:
             created_by_id=created_by_id,
         )
 
-    async def compute_and_auto_apply(
-        self, sector_id: str, db: AsyncSession
-    ) -> AutoApplyOutcome:
+    async def compute_and_auto_apply(self, sector_id: str, db: AsyncSession) -> AutoApplyOutcome:
         """Compute a candidate and promote it only if the policy allows.
 
         A blocked candidate persists NOTHING — no history row, no projection
@@ -214,9 +283,11 @@ class ProbeCalibrationService:
             return AutoApplyOutcome(AutoApplyDecision(False, REASON_NO_CANDIDATE))
 
         before = await resolve_sector_soil_bounds(sector_id, db)
-        existing = (await db.execute(
-            select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
-        )).scalar_one_or_none()
+        existing = (
+            await db.execute(
+                select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
+            )
+        ).scalar_one_or_none()
         quality = await self.build_quality(sector_id, db)
 
         # Gate on the source the resolver actually chose, not on raw DB flags:
@@ -245,8 +316,12 @@ class ProbeCalibrationService:
 
         now = datetime.now(UTC)
         run = self._new_run(
-            sector_id, result, existing,
-            source="scheduled", created_by_id=None, computed_at=now,
+            sector_id,
+            result,
+            existing,
+            source="scheduled",
+            created_by_id=None,
+            computed_at=now,
         )
         db.add(run)
         await db.flush()
@@ -273,19 +348,27 @@ class ProbeCalibrationService:
         from app.models import ProbeCalibration, ProbeCalibrationRun
 
         now = datetime.now(UTC)
-        previously_applied = (await db.execute(
-            select(ProbeCalibrationRun).where(
-                ProbeCalibrationRun.sector_id == run.sector_id,
-                ProbeCalibrationRun.status == "applied",
-                ProbeCalibrationRun.id != run.id,
+        previously_applied = (
+            (
+                await db.execute(
+                    select(ProbeCalibrationRun).where(
+                        ProbeCalibrationRun.sector_id == run.sector_id,
+                        ProbeCalibrationRun.status == "applied",
+                        ProbeCalibrationRun.id != run.id,
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
         for previous in previously_applied:
             previous.status = "superseded"
 
-        existing = (await db.execute(
-            select(ProbeCalibration).where(ProbeCalibration.sector_id == run.sector_id)
-        )).scalar_one_or_none()
+        existing = (
+            await db.execute(
+                select(ProbeCalibration).where(ProbeCalibration.sector_id == run.sector_id)
+            )
+        ).scalar_one_or_none()
 
         if existing:
             row = existing
@@ -313,9 +396,7 @@ class ProbeCalibrationService:
         await db.flush()
         return row
 
-    async def build_quality(
-        self, sector_id: str, db: AsyncSession
-    ) -> CalibrationQuality:
+    async def build_quality(self, sector_id: str, db: AsyncSession) -> CalibrationQuality:
         """Deterministic trust signals for the calibration window.
 
         Two queries: one join for the per-depth VWC series, one for the sector's
@@ -331,23 +412,25 @@ class ProbeCalibrationService:
 
         since = datetime.now(UTC) - timedelta(days=CALIB_WINDOW_DAYS)
 
-        rows = (await db.execute(
-            select(
-                ProbeDepth.depth_cm,
-                ProbeReading.raw_value,
-                ProbeReading.calibrated_value,
+        rows = (
+            await db.execute(
+                select(
+                    ProbeDepth.depth_cm,
+                    ProbeReading.raw_value,
+                    ProbeReading.calibrated_value,
+                )
+                .join(ProbeReading, ProbeReading.probe_depth_id == ProbeDepth.id)
+                .join(Probe, Probe.id == ProbeDepth.probe_id)
+                .where(
+                    Probe.sector_id == sector_id,
+                    # Real data uses "soil_moisture"; older/mock data uses "moisture".
+                    ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
+                    ProbeReading.timestamp >= since,
+                    ProbeReading.unit == "vwc_m3m3",
+                    ProbeReading.quality_flag == "ok",
+                )
             )
-            .join(ProbeReading, ProbeReading.probe_depth_id == ProbeDepth.id)
-            .join(Probe, Probe.id == ProbeDepth.probe_id)
-            .where(
-                Probe.sector_id == sector_id,
-                # Real data uses "soil_moisture"; older/mock data uses "moisture".
-                ProbeDepth.sensor_type.in_(("soil_moisture", "moisture")),
-                ProbeReading.timestamp >= since,
-                ProbeReading.unit == "vwc_m3m3",
-                ProbeReading.quality_flag == "ok",
-            )
-        )).all()
+        ).all()
 
         by_depth: dict[int, list[float]] = {}
         for depth_cm, raw, calibrated in rows:
@@ -361,9 +444,11 @@ class ProbeCalibrationService:
             statistics.stdev(vals) < AUTO_APPLY_FLATLINE_STD_M3M3 for vals in judgeable
         )
 
-        last_reading_at = (await db.execute(
-            select(func.max(Probe.last_reading_at)).where(Probe.sector_id == sector_id)
-        )).scalar()
+        last_reading_at = (
+            await db.execute(
+                select(func.max(Probe.last_reading_at)).where(Probe.sector_id == sector_id)
+            )
+        ).scalar()
 
         hours: float | None = None
         if last_reading_at is not None:
@@ -408,14 +493,21 @@ class ProbeCalibrationService:
         from app.engine.calibration_policy import REASON_NO_CANDIDATE
         from app.models import Plot, Sector
 
-        sectors = (await db.execute(
-            select(Sector).join(Plot, Sector.plot_id == Plot.id)
-            .where(
-                Plot.farm_id == farm_id,
-                Plot.is_archived.is_(False),
-                Sector.is_archived.is_(False),
+        sectors = (
+            (
+                await db.execute(
+                    select(Sector)
+                    .join(Plot, Sector.plot_id == Plot.id)
+                    .where(
+                        Plot.farm_id == farm_id,
+                        Plot.is_archived.is_(False),
+                        Sector.is_archived.is_(False),
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
 
         counts = CalibrationSweepCounts()
         for sector in sectors:
@@ -500,9 +592,7 @@ class ProbeCalibrationService:
         return REASON_INSUFFICIENT_DATA
 
     @staticmethod
-    def _count_failure(
-        sector_id: str, sector_name: str, counts: CalibrationSweepCounts
-    ) -> None:
+    def _count_failure(sector_id: str, sector_name: str, counts: CalibrationSweepCounts) -> None:
         from app.metrics import calibration_auto_apply_total
 
         counts.failed += 1

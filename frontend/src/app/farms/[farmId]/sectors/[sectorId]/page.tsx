@@ -746,7 +746,17 @@ export default function SectorDetailPage({ params }: Props) {
       )}
 
       <BottomNav farmId={farmId} />
-      <ChatButton farmId={farmId} sectorId={sectorId} />
+      <ChatButton
+        farmId={farmId}
+        sectorId={sectorId}
+        // A confirmed AI proposal writes through the API, so the recommendation and
+        // sector state on screen are stale until they are re-read.
+        onActionCompleted={() => {
+          refetch();
+          sectorsApi.get(sectorId).then(setSectorDetail).catch(() => {});
+          setProbeRefreshTrigger((value) => value + 1);
+        }}
+      />
     </div>
   );
 }

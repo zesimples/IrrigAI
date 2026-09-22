@@ -5,6 +5,8 @@ const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8000";
 
 export default defineConfig({
   testDir: "./e2e",
+  // Synthetic proxy fixtures have their own isolated server/configuration.
+  testIgnore: "**/chat-review.spec.ts",
   fullyParallel: false,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",

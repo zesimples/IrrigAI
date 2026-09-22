@@ -5,6 +5,7 @@ from app.models.ai_response_feedback import AIResponseFeedback
 from app.models.alert import Alert
 from app.models.audit_log import AuditLog
 from app.models.calibration_sweep_run import CalibrationSweepRun
+from app.models.chat_action import ChatAction
 from app.models.chat_conversation import ChatConversation
 from app.models.chat_message import ChatMessage
 from app.models.crop_profile_template import CropProfileTemplate
@@ -71,6 +72,7 @@ __all__ = [
     "IrrigationFingerprint",
     "RecommendationOutcome",
     "FieldObservation",
+    "ChatAction",
     "ChatConversation",
     "ChatMessage",
     "AIResponseFeedback",

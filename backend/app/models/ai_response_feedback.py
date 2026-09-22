@@ -46,3 +46,8 @@ class AIResponseFeedback(Base, TimestampMixin):
     rating: Mapped[int] = mapped_column(Integer, nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     details: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    # A meaningful reason ("stale_answer") is actionable in a way a thumb is not.
+    reason: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Ties the vote to the exact answer version it was cast against.
+    context_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    contract_version: Mapped[str | None] = mapped_column(String(20), nullable=True)

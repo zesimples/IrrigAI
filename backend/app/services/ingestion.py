@@ -254,9 +254,11 @@ async def ingest_probe_readings(
         provider_first_ts = min(r.timestamp for r in readings)
         provider_last_ts = max(r.timestamp for r in readings)
 
-        # Load the probe and its depth records
+        # Archived replacements can retain the same provider identity.
+        from app.active_records import active_probes_stmt
+
         probe_result = await session.execute(
-            select(Probe).where(Probe.external_id == probe_external_id)
+            active_probes_stmt(farm_id).where(Probe.external_id == probe_external_id)
         )
         probe = probe_result.scalar_one_or_none()
         if probe is None:
@@ -654,10 +656,11 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
     lookback_hours: how far back to fetch probe readings (default 2h for scheduler,
                     use a larger value for initial backfill).
     """
+    from sqlalchemy.orm import selectinload
+
     from app.adapters.factory import get_probe_provider, get_weather_provider
     from app.config import get_settings
     from app.models import Farm, Probe
-    from sqlalchemy.orm import selectinload
 
     settings = get_settings()
     farm_result = await db.execute(
@@ -697,7 +700,9 @@ async def ingest_farm(farm_id: str, db: AsyncSession, lookback_hours: int = 2) -
                         probe_total += summary.inserted
                         if summary.inserted > 0:
                             try:
-                                from app.services.water_event_service import detect_and_persist_water_events
+                                from app.services.water_event_service import (
+                                    detect_and_persist_water_events,
+                                )
 
                                 await detect_and_persist_water_events(
                                     probe_id=probe.id,
@@ -811,6 +816,8 @@ def ingest_probe_readings_sync(
     probe_external_id: str,
     since: datetime,
     until: datetime,
+    *,
+    farm_id: str | None = None,
 ) -> IngestionSummary:
     """Synchronous version using a sync SQLAlchemy session."""
     import asyncio
@@ -828,8 +835,10 @@ def ingest_probe_readings_sync(
 
         from sqlalchemy import select as _select
 
+        from app.active_records import active_probes_stmt
+
         probe = session.execute(
-            _select(Probe).where(Probe.external_id == probe_external_id)
+            active_probes_stmt(farm_id).where(Probe.external_id == probe_external_id)
         ).scalar_one_or_none()
 
         if probe is None:

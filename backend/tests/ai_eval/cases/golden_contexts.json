@@ -21,8 +21,28 @@
         "dose_band": "normal",
         "confidence_score": 0.88,
         "confidence_penalties": [],
-        "reasons": [{"category": "water_balance", "message": "A depleção ultrapassou o limiar de rega."}],
-        "probe_live": {"hours_since_any_reading": 0.4, "all_depths_ok": true, "depths": [{"depth_cm": 30, "vwc": 0.238, "quality": "ok"}, {"depth_cm": 60, "vwc": 0.261, "quality": "ok"}]},
+        "reasons": [
+          {
+            "category": "water_balance",
+            "message": "A depleção ultrapassou o limiar de rega."
+          }
+        ],
+        "probe_live": {
+          "hours_since_any_reading": 0.4,
+          "all_depths_ok": true,
+          "depths": [
+            {
+              "depth_cm": 30,
+              "vwc": 0.238,
+              "quality": "ok"
+            },
+            {
+              "depth_cm": 60,
+              "vwc": 0.261,
+              "quality": "ok"
+            }
+          ]
+        },
         "source_confidence": "fresh",
         "data_quality_explanation": "Dados da sonda actuais — leitura directa do estado hídrico do solo.",
         "missing_config": []
@@ -47,12 +67,21 @@
         "swc_source": "model",
         "dose_band": "normal",
         "confidence_score": 0.72,
-        "confidence_penalties": ["no_probe"],
-        "reasons": [{"category": "weather", "message": "A chuva prevista cobre o défice actual."}],
+        "confidence_penalties": [
+          "no_probe"
+        ],
+        "reasons": [
+          {
+            "category": "weather",
+            "message": "A chuva prevista cobre o défice actual."
+          }
+        ],
         "probe_live": null,
         "source_confidence": "no_probe",
         "data_quality_explanation": "Sem sondas configuradas — recomendação baseada em balanço hídrico e meteorologia.",
-        "missing_config": ["probe"]
+        "missing_config": [
+          "probe"
+        ]
       }
     },
     {
@@ -75,8 +104,28 @@
         "dose_band": "low",
         "confidence_score": 0.91,
         "confidence_penalties": [],
-        "reasons": [{"category": "water_balance", "message": "O perfil mantém reserva suficiente."}],
-        "probe_live": {"hours_since_any_reading": 0.8, "all_depths_ok": true, "depths": [{"depth_cm": 20, "vwc": 0.361, "quality": "ok"}, {"depth_cm": 50, "vwc": 0.342, "quality": "ok"}]},
+        "reasons": [
+          {
+            "category": "water_balance",
+            "message": "O perfil mantém reserva suficiente."
+          }
+        ],
+        "probe_live": {
+          "hours_since_any_reading": 0.8,
+          "all_depths_ok": true,
+          "depths": [
+            {
+              "depth_cm": 20,
+              "vwc": 0.361,
+              "quality": "ok"
+            },
+            {
+              "depth_cm": 50,
+              "vwc": 0.342,
+              "quality": "ok"
+            }
+          ]
+        },
         "source_confidence": "fresh",
         "data_quality_explanation": "Dados da sonda actuais — perfil bem hidratado.",
         "missing_config": []
@@ -100,9 +149,26 @@
         "swc_source": "model",
         "dose_band": "normal",
         "confidence_score": 0.58,
-        "confidence_penalties": ["stale_probe"],
-        "reasons": [{"category": "water_balance", "message": "A reserva facilmente utilizável foi ultrapassada."}],
-        "probe_live": {"hours_since_any_reading": 10.5, "all_depths_ok": false, "depths": [{"depth_cm": 30, "vwc": 0.207, "quality": "stale"}]},
+        "confidence_penalties": [
+          "stale_probe"
+        ],
+        "reasons": [
+          {
+            "category": "water_balance",
+            "message": "A reserva facilmente utilizável foi ultrapassada."
+          }
+        ],
+        "probe_live": {
+          "hours_since_any_reading": 10.5,
+          "all_depths_ok": false,
+          "depths": [
+            {
+              "depth_cm": 30,
+              "vwc": 0.207,
+              "quality": "stale"
+            }
+          ]
+        },
         "source_confidence": "stale",
         "data_quality_explanation": "A última leitura tem algumas horas; o estado actual pode ter mudado.",
         "missing_config": []
@@ -123,12 +189,33 @@
         "today_etc_mm": 5.5,
         "rainfall_effective_mm": 0.0,
         "swc_source": "probe_weighted",
-        "fc_calibration": {"source": "probe_calibration", "stale": false, "computed_at": "2026-07-15T06:00:00+00:00", "field_capacity": 0.43, "refill_point": 0.24},
+        "fc_calibration": {
+          "source": "probe_calibration",
+          "stale": false,
+          "computed_at": "2026-07-15T06:00:00+00:00",
+          "field_capacity": 0.43,
+          "refill_point": 0.24
+        },
         "dose_band": "low",
         "confidence_score": 0.86,
         "confidence_penalties": [],
-        "reasons": [{"category": "config", "message": "Limites hídricos resolvidos pela calibração aplicada da sonda."}],
-        "probe_live": {"hours_since_any_reading": 0.2, "all_depths_ok": true, "depths": [{"depth_cm": 30, "vwc": 0.31, "quality": "ok"}]},
+        "reasons": [
+          {
+            "category": "config",
+            "message": "Limites hídricos resolvidos pela calibração aplicada da sonda."
+          }
+        ],
+        "probe_live": {
+          "hours_since_any_reading": 0.2,
+          "all_depths_ok": true,
+          "depths": [
+            {
+              "depth_cm": 30,
+              "vwc": 0.31,
+              "quality": "ok"
+            }
+          ]
+        },
         "source_confidence": "fresh",
         "data_quality_explanation": "Leitura recente e limites calibrados disponíveis.",
         "missing_config": []
@@ -152,11 +239,30 @@
         "swc_source": "probe_weighted",
         "dose_band": "low",
         "dose_source": "configured_system",
-        "dose_presentation": {"net_mm": 9.0, "gross_mm": 10.6, "runtime_minutes": 210.0},
+        "dose_presentation": {
+          "net_mm": 9.0,
+          "gross_mm": 10.6,
+          "runtime_minutes": 210.0
+        },
         "confidence_score": 0.81,
         "confidence_penalties": [],
-        "reasons": [{"category": "irrigation", "message": "A dose respeita a capacidade do sistema configurado."}],
-        "probe_live": {"hours_since_any_reading": 1.1, "all_depths_ok": true, "depths": [{"depth_cm": 30, "vwc": 0.219, "quality": "ok"}]},
+        "reasons": [
+          {
+            "category": "irrigation",
+            "message": "A dose respeita a capacidade do sistema configurado."
+          }
+        ],
+        "probe_live": {
+          "hours_since_any_reading": 1.1,
+          "all_depths_ok": true,
+          "depths": [
+            {
+              "depth_cm": 30,
+              "vwc": 0.219,
+              "quality": "ok"
+            }
+          ]
+        },
         "source_confidence": "fresh",
         "data_quality_explanation": "Dados da sonda actuais e sistema de rega configurado.",
         "missing_config": []
@@ -177,12 +283,31 @@
         "today_etc_mm": 6.8,
         "rainfall_effective_mm": 0.0,
         "forecast_rain_next_48h_mm": 0.0,
-        "stress_projection": {"status_24h": "stress", "days_to_raw": 0, "basis": "deterministic_engine"},
+        "stress_projection": {
+          "status_24h": "stress",
+          "days_to_raw": 0,
+          "basis": "deterministic_engine"
+        },
         "swc_source": "probe_weighted",
         "confidence_score": 0.9,
         "confidence_penalties": [],
-        "reasons": [{"category": "crop", "message": "O consumo previsto mantém o perfil acima do limiar amanhã."}],
-        "probe_live": {"hours_since_any_reading": 0.5, "all_depths_ok": true, "depths": [{"depth_cm": 30, "vwc": 0.19, "quality": "ok"}]},
+        "reasons": [
+          {
+            "category": "crop",
+            "message": "O consumo previsto mantém o perfil acima do limiar amanhã."
+          }
+        ],
+        "probe_live": {
+          "hours_since_any_reading": 0.5,
+          "all_depths_ok": true,
+          "depths": [
+            {
+              "depth_cm": 30,
+              "vwc": 0.19,
+              "quality": "ok"
+            }
+          ]
+        },
         "source_confidence": "fresh",
         "data_quality_explanation": "Dados directos e recentes da sonda.",
         "missing_config": []
@@ -206,12 +331,23 @@
         "swc_source": "model",
         "dose_source": "default",
         "confidence_score": 0.52,
-        "confidence_penalties": ["missing_irrigation_system", "no_probe"],
-        "reasons": [{"category": "config", "message": "O tempo de rega não pode ser calculado sem o sistema configurado."}],
+        "confidence_penalties": [
+          "missing_irrigation_system",
+          "no_probe"
+        ],
+        "reasons": [
+          {
+            "category": "config",
+            "message": "O tempo de rega não pode ser calculado sem o sistema configurado."
+          }
+        ],
         "probe_live": null,
         "source_confidence": "no_probe",
         "data_quality_explanation": "Sem sondas configuradas — decisão estimada pelo balanço hídrico.",
-        "missing_config": ["irrigation_system", "probe"]
+        "missing_config": [
+          "irrigation_system",
+          "probe"
+        ]
       }
     },
     {
@@ -222,12 +358,51 @@
         "probe_external_id": "SONDA-A",
         "sector_name": "Norte",
         "analysis_window_hours": 72,
-        "latest_recommendation": {"action": "skip", "depletion_mm": 12.0, "depletion_pct": 16.7},
-        "soil_bounds": {"field_capacity": 0.44, "wilting_point": 0.2, "source": "probe_calibrated", "stale": false, "computed_at": "2026-07-15T06:00:00+00:00"},
-        "depths": [{"depth_cm": 30, "n_readings": 72, "humidade_actual": "humidade adequada", "tendencia": "estável", "sinal_estavel": true, "resposta_rega": null}, {"depth_cm": 60, "n_readings": 72, "humidade_actual": "humidade baixa", "tendencia": "sem tendência clara", "sinal_estavel": false, "resposta_rega": null}],
-        "cross_depth_signals": {"coerencia": "moderada"},
+        "latest_recommendation": {
+          "action": "skip",
+          "depletion_mm": 12.0,
+          "depletion_pct": 16.7
+        },
+        "soil_bounds": {
+          "field_capacity": 0.44,
+          "wilting_point": 0.2,
+          "source": "probe_calibrated",
+          "stale": false,
+          "computed_at": "2026-07-15T06:00:00+00:00"
+        },
+        "depths": [
+          {
+            "depth_cm": 30,
+            "n_readings": 72,
+            "humidade_actual": "humidade adequada",
+            "tendencia": "estável",
+            "sinal_estavel": true,
+            "resposta_rega": null
+          },
+          {
+            "depth_cm": 60,
+            "n_readings": 72,
+            "humidade_actual": "humidade baixa",
+            "tendencia": "sem tendência clara",
+            "sinal_estavel": false,
+            "resposta_rega": null
+          }
+        ],
+        "cross_depth_signals": {
+          "coerencia": "moderada"
+        },
         "n_irrigation_events_in_window": 0,
-        "last_irrigation_event_source": null
+        "last_irrigation_event_source": null,
+        "probe_state": {
+          "live": {
+            "depth_count": 2
+          },
+          "data_quality": {
+            "fresh_depths": 2,
+            "stale_depths": 0,
+            "total_depths": 2
+          }
+        }
       }
     },
     {
@@ -238,12 +413,51 @@
         "probe_external_id": "SONDA-B",
         "sector_name": "Sul",
         "analysis_window_hours": 72,
-        "latest_recommendation": {"action": "defer", "depletion_mm": 23.0, "depletion_pct": 34.0},
-        "soil_bounds": {"field_capacity": 0.35, "wilting_point": 0.16, "source": "plot_preset", "stale": false, "computed_at": null},
-        "depths": [{"depth_cm": 20, "n_readings": 70, "humidade_actual": "humidade baixa", "tendencia": "a consumir", "sinal_estavel": false, "resposta_rega": null}, {"depth_cm": 50, "n_readings": 70, "humidade_actual": "humidade adequada", "tendencia": "estável", "sinal_estavel": true, "resposta_rega": null}],
-        "cross_depth_signals": {"perfil": "camada superficial a consumir"},
+        "latest_recommendation": {
+          "action": "defer",
+          "depletion_mm": 23.0,
+          "depletion_pct": 34.0
+        },
+        "soil_bounds": {
+          "field_capacity": 0.35,
+          "wilting_point": 0.16,
+          "source": "plot_preset",
+          "stale": false,
+          "computed_at": null
+        },
+        "depths": [
+          {
+            "depth_cm": 20,
+            "n_readings": 70,
+            "humidade_actual": "humidade baixa",
+            "tendencia": "a consumir",
+            "sinal_estavel": false,
+            "resposta_rega": null
+          },
+          {
+            "depth_cm": 50,
+            "n_readings": 70,
+            "humidade_actual": "humidade adequada",
+            "tendencia": "estável",
+            "sinal_estavel": true,
+            "resposta_rega": null
+          }
+        ],
+        "cross_depth_signals": {
+          "perfil": "camada superficial a consumir"
+        },
         "n_irrigation_events_in_window": 0,
-        "last_irrigation_event_source": null
+        "last_irrigation_event_source": null,
+        "probe_state": {
+          "live": {
+            "depth_count": 2
+          },
+          "data_quality": {
+            "fresh_depths": 2,
+            "stale_depths": 0,
+            "total_depths": 2
+          }
+        }
       }
     },
     {
@@ -254,12 +468,51 @@
         "probe_external_id": "SONDA-C",
         "sector_name": "Poente",
         "analysis_window_hours": 72,
-        "latest_recommendation": {"action": "irrigate", "depletion_mm": 36.0, "depletion_pct": 48.0},
-        "soil_bounds": {"field_capacity": 0.39, "wilting_point": 0.18, "source": "probe_calibrated", "stale": false, "computed_at": "2026-07-14T07:30:00+00:00"},
-        "depths": [{"depth_cm": 30, "n_readings": 74, "humidade_actual": "humidade baixa", "tendencia": "a consumir", "sinal_estavel": false, "resposta_rega": null}, {"depth_cm": 60, "n_readings": 74, "humidade_actual": "humidade adequada", "tendencia": "a consumir", "sinal_estavel": false, "resposta_rega": null}],
-        "cross_depth_signals": {"perfil": "consumo coerente na zona radicular"},
+        "latest_recommendation": {
+          "action": "irrigate",
+          "depletion_mm": 36.0,
+          "depletion_pct": 48.0
+        },
+        "soil_bounds": {
+          "field_capacity": 0.39,
+          "wilting_point": 0.18,
+          "source": "probe_calibrated",
+          "stale": false,
+          "computed_at": "2026-07-14T07:30:00+00:00"
+        },
+        "depths": [
+          {
+            "depth_cm": 30,
+            "n_readings": 74,
+            "humidade_actual": "humidade baixa",
+            "tendencia": "a consumir",
+            "sinal_estavel": false,
+            "resposta_rega": null
+          },
+          {
+            "depth_cm": 60,
+            "n_readings": 74,
+            "humidade_actual": "humidade adequada",
+            "tendencia": "a consumir",
+            "sinal_estavel": false,
+            "resposta_rega": null
+          }
+        ],
+        "cross_depth_signals": {
+          "perfil": "consumo coerente na zona radicular"
+        },
         "n_irrigation_events_in_window": 0,
-        "last_irrigation_event_source": null
+        "last_irrigation_event_source": null,
+        "probe_state": {
+          "live": {
+            "depth_count": 2
+          },
+          "data_quality": {
+            "fresh_depths": 2,
+            "stale_depths": 0,
+            "total_depths": 2
+          }
+        }
       }
     },
     {
@@ -270,13 +523,52 @@
         "probe_external_id": "SONDA-D",
         "sector_name": "Centro",
         "analysis_window_hours": 72,
-        "latest_recommendation": {"action": "skip", "depletion_mm": 8.0, "depletion_pct": 11.0},
-        "soil_bounds": {"field_capacity": 0.41, "wilting_point": 0.2, "source": "probe_calibrated", "stale": false, "computed_at": "2026-07-13T05:00:00+00:00"},
-        "depths": [{"depth_cm": 30, "n_readings": 72, "humidade_actual": "humidade elevada", "tendencia": "a recarregar", "sinal_estavel": false, "resposta_rega": "forte"}, {"depth_cm": 60, "n_readings": 72, "humidade_actual": "humidade adequada", "tendencia": "estável", "sinal_estavel": true, "resposta_rega": "fraca"}],
-        "cross_depth_signals": {"perfil": "resposta concentrada na camada superficial"},
+        "latest_recommendation": {
+          "action": "skip",
+          "depletion_mm": 8.0,
+          "depletion_pct": 11.0
+        },
+        "soil_bounds": {
+          "field_capacity": 0.41,
+          "wilting_point": 0.2,
+          "source": "probe_calibrated",
+          "stale": false,
+          "computed_at": "2026-07-13T05:00:00+00:00"
+        },
+        "depths": [
+          {
+            "depth_cm": 30,
+            "n_readings": 72,
+            "humidade_actual": "humidade elevada",
+            "tendencia": "a recarregar",
+            "sinal_estavel": false,
+            "resposta_rega": "forte"
+          },
+          {
+            "depth_cm": 60,
+            "n_readings": 72,
+            "humidade_actual": "humidade adequada",
+            "tendencia": "estável",
+            "sinal_estavel": true,
+            "resposta_rega": "fraca"
+          }
+        ],
+        "cross_depth_signals": {
+          "perfil": "resposta concentrada na camada superficial"
+        },
         "n_irrigation_events_in_window": 1,
         "last_irrigation_event_source": "probe_detected",
-        "last_irrigation_applied_mm": 12.0
+        "last_irrigation_applied_mm": 12.0,
+        "probe_state": {
+          "live": {
+            "depth_count": 2
+          },
+          "data_quality": {
+            "fresh_depths": 2,
+            "stale_depths": 0,
+            "total_depths": 2
+          }
+        }
       }
     },
     {
@@ -287,13 +579,52 @@
         "probe_external_id": "SONDA-E",
         "sector_name": "Encosta",
         "analysis_window_hours": 72,
-        "latest_recommendation": {"action": "irrigate", "depletion_mm": 31.0, "depletion_pct": 44.0},
-        "soil_bounds": {"field_capacity": 0.37, "wilting_point": 0.17, "source": "plot_preset", "stale": false, "computed_at": null},
-        "depths": [{"depth_cm": 20, "n_readings": 71, "humidade_actual": "humidade adequada", "tendencia": "a recarregar", "sinal_estavel": false, "resposta_rega": "moderada"}, {"depth_cm": 50, "n_readings": 71, "humidade_actual": "humidade baixa", "tendencia": "estável", "sinal_estavel": true, "resposta_rega": "ausente"}],
-        "cross_depth_signals": {"perfil": "rega pouco profunda"},
+        "latest_recommendation": {
+          "action": "irrigate",
+          "depletion_mm": 31.0,
+          "depletion_pct": 44.0
+        },
+        "soil_bounds": {
+          "field_capacity": 0.37,
+          "wilting_point": 0.17,
+          "source": "plot_preset",
+          "stale": false,
+          "computed_at": null
+        },
+        "depths": [
+          {
+            "depth_cm": 20,
+            "n_readings": 71,
+            "humidade_actual": "humidade adequada",
+            "tendencia": "a recarregar",
+            "sinal_estavel": false,
+            "resposta_rega": "moderada"
+          },
+          {
+            "depth_cm": 50,
+            "n_readings": 71,
+            "humidade_actual": "humidade baixa",
+            "tendencia": "estável",
+            "sinal_estavel": true,
+            "resposta_rega": "ausente"
+          }
+        ],
+        "cross_depth_signals": {
+          "perfil": "rega pouco profunda"
+        },
         "n_irrigation_events_in_window": 1,
         "last_irrigation_event_source": "flowmeter_detected",
-        "last_irrigation_applied_mm": 7.8
+        "last_irrigation_applied_mm": 7.8,
+        "probe_state": {
+          "live": {
+            "depth_count": 2
+          },
+          "data_quality": {
+            "fresh_depths": 2,
+            "stale_depths": 0,
+            "total_depths": 2
+          }
+        }
       }
     },
     {
@@ -304,13 +635,54 @@
         "probe_external_id": "SONDA-F",
         "sector_name": "Várzea",
         "analysis_window_hours": 72,
-        "latest_recommendation": {"action": "skip", "depletion_mm": 2.0, "depletion_pct": 3.0},
-        "soil_bounds": {"field_capacity": 0.46, "wilting_point": 0.23, "source": "probe_calibrated", "stale": false, "computed_at": "2026-07-16T06:15:00+00:00"},
-        "depths": [{"depth_cm": 30, "n_readings": 76, "humidade_actual": "próximo da capacidade de campo", "tendencia": "estável", "sinal_estavel": true, "causa_sinal_estavel": "próximo da capacidade de campo", "resposta_rega": "moderada"}, {"depth_cm": 60, "n_readings": 76, "humidade_actual": "humidade elevada", "tendencia": "estável", "sinal_estavel": true, "causa_sinal_estavel": "equilíbrio hídrico", "resposta_rega": "moderada"}],
-        "cross_depth_signals": {"coerencia": "elevada"},
+        "latest_recommendation": {
+          "action": "skip",
+          "depletion_mm": 2.0,
+          "depletion_pct": 3.0
+        },
+        "soil_bounds": {
+          "field_capacity": 0.46,
+          "wilting_point": 0.23,
+          "source": "probe_calibrated",
+          "stale": false,
+          "computed_at": "2026-07-16T06:15:00+00:00"
+        },
+        "depths": [
+          {
+            "depth_cm": 30,
+            "n_readings": 76,
+            "humidade_actual": "próximo da capacidade de campo",
+            "tendencia": "estável",
+            "sinal_estavel": true,
+            "causa_sinal_estavel": "próximo da capacidade de campo",
+            "resposta_rega": "moderada"
+          },
+          {
+            "depth_cm": 60,
+            "n_readings": 76,
+            "humidade_actual": "humidade elevada",
+            "tendencia": "estável",
+            "sinal_estavel": true,
+            "causa_sinal_estavel": "equilíbrio hídrico",
+            "resposta_rega": "moderada"
+          }
+        ],
+        "cross_depth_signals": {
+          "coerencia": "elevada"
+        },
         "n_irrigation_events_in_window": 1,
         "last_irrigation_event_source": "manual",
-        "last_irrigation_applied_mm": 16.0
+        "last_irrigation_applied_mm": 16.0,
+        "probe_state": {
+          "live": {
+            "depth_count": 2
+          },
+          "data_quality": {
+            "fresh_depths": 2,
+            "stale_depths": 0,
+            "total_depths": 2
+          }
+        }
       }
     },
     {
@@ -320,8 +692,31 @@
       "context": {
         "farm_name": "Monte Claro",
         "date": "2026-07-17",
-        "weather_summary": {"et0_mm": 5.4, "rainfall_mm": 0.0, "forecast_rain_next_48h_mm": 1.2},
-        "sectors": [{"sector_name": "Norte", "recommendation_action": "irrigate", "irrigation_depth_mm": 18.0, "confidence_score": 0.88}, {"sector_name": "Sul", "recommendation_action": "skip", "irrigation_depth_mm": null, "confidence_score": 0.85}, {"sector_name": "Poente", "recommendation_action": "defer", "irrigation_depth_mm": null, "confidence_score": 0.74}],
+        "weather_summary": {
+          "et0_mm": 5.4,
+          "rainfall_mm": 0.0,
+          "forecast_rain_next_48h_mm": 1.2
+        },
+        "sectors": [
+          {
+            "sector_name": "Norte",
+            "recommendation_action": "irrigate",
+            "irrigation_depth_mm": 18.0,
+            "confidence_score": 0.88
+          },
+          {
+            "sector_name": "Sul",
+            "recommendation_action": "skip",
+            "irrigation_depth_mm": null,
+            "confidence_score": 0.85
+          },
+          {
+            "sector_name": "Poente",
+            "recommendation_action": "defer",
+            "irrigation_depth_mm": null,
+            "confidence_score": 0.74
+          }
+        ],
         "total_active_alerts": 1,
         "missing_data_priorities": [],
         "setup_completion_pct": 100.0
@@ -334,8 +729,25 @@
       "context": {
         "farm_name": "Quinta Serena",
         "date": "2026-07-17",
-        "weather_summary": {"et0_mm": 3.8, "rainfall_mm": 4.0, "forecast_rain_next_48h_mm": 8.5},
-        "sectors": [{"sector_name": "Olival A", "recommendation_action": "skip", "irrigation_depth_mm": null, "confidence_score": 0.92}, {"sector_name": "Olival B", "recommendation_action": "defer", "irrigation_depth_mm": null, "confidence_score": 0.79}],
+        "weather_summary": {
+          "et0_mm": 3.8,
+          "rainfall_mm": 4.0,
+          "forecast_rain_next_48h_mm": 8.5
+        },
+        "sectors": [
+          {
+            "sector_name": "Olival A",
+            "recommendation_action": "skip",
+            "irrigation_depth_mm": null,
+            "confidence_score": 0.92
+          },
+          {
+            "sector_name": "Olival B",
+            "recommendation_action": "defer",
+            "irrigation_depth_mm": null,
+            "confidence_score": 0.79
+          }
+        ],
         "total_active_alerts": 0,
         "missing_data_priorities": [],
         "setup_completion_pct": 100.0
@@ -348,8 +760,31 @@
       "context": {
         "farm_name": "Herdade Nova",
         "date": "2026-07-17",
-        "weather_summary": {"et0_mm": 6.1, "rainfall_mm": 0.0, "forecast_rain_next_48h_mm": 0.0},
-        "sectors": [{"sector_name": "Amendoal 1", "recommendation_action": "irrigate", "irrigation_depth_mm": 21.0, "confidence_score": 0.9}, {"sector_name": "Amendoal 2", "recommendation_action": "irrigate", "irrigation_depth_mm": 19.0, "confidence_score": 0.87}, {"sector_name": "Amendoal 3", "recommendation_action": "skip", "irrigation_depth_mm": null, "confidence_score": 0.83}],
+        "weather_summary": {
+          "et0_mm": 6.1,
+          "rainfall_mm": 0.0,
+          "forecast_rain_next_48h_mm": 0.0
+        },
+        "sectors": [
+          {
+            "sector_name": "Amendoal 1",
+            "recommendation_action": "irrigate",
+            "irrigation_depth_mm": 21.0,
+            "confidence_score": 0.9
+          },
+          {
+            "sector_name": "Amendoal 2",
+            "recommendation_action": "irrigate",
+            "irrigation_depth_mm": 19.0,
+            "confidence_score": 0.87
+          },
+          {
+            "sector_name": "Amendoal 3",
+            "recommendation_action": "skip",
+            "irrigation_depth_mm": null,
+            "confidence_score": 0.83
+          }
+        ],
         "total_active_alerts": 0,
         "missing_data_priorities": [],
         "setup_completion_pct": 100.0
@@ -362,10 +797,30 @@
       "context": {
         "farm_name": "Vale Verde",
         "date": "2026-07-17",
-        "weather_summary": {"et0_mm": 4.6, "rainfall_mm": 0.0, "forecast_rain_next_48h_mm": 2.0},
-        "sectors": [{"sector_name": "Talhão 1", "recommendation_action": null, "irrigation_depth_mm": null, "confidence_score": null}, {"sector_name": "Talhão 2", "recommendation_action": "skip", "irrigation_depth_mm": null, "confidence_score": 0.55}],
+        "weather_summary": {
+          "et0_mm": 4.6,
+          "rainfall_mm": 0.0,
+          "forecast_rain_next_48h_mm": 2.0
+        },
+        "sectors": [
+          {
+            "sector_name": "Talhão 1",
+            "recommendation_action": null,
+            "irrigation_depth_mm": null,
+            "confidence_score": null
+          },
+          {
+            "sector_name": "Talhão 2",
+            "recommendation_action": "skip",
+            "irrigation_depth_mm": null,
+            "confidence_score": 0.55
+          }
+        ],
         "total_active_alerts": 2,
-        "missing_data_priorities": ["irrigation_system", "crop_profile"],
+        "missing_data_priorities": [
+          "irrigation_system",
+          "crop_profile"
+        ],
         "setup_completion_pct": 50.0
       }
     },
@@ -376,8 +831,31 @@
       "context": {
         "farm_name": "Courela Alta",
         "date": "2026-07-17",
-        "weather_summary": {"et0_mm": 5.0, "rainfall_mm": 0.0, "forecast_rain_next_48h_mm": 11.4},
-        "sectors": [{"sector_name": "Areia", "recommendation_action": "irrigate", "irrigation_depth_mm": 8.0, "confidence_score": 0.82}, {"sector_name": "Argila", "recommendation_action": "defer", "irrigation_depth_mm": null, "confidence_score": 0.81}, {"sector_name": "Baixio", "recommendation_action": "skip", "irrigation_depth_mm": null, "confidence_score": 0.9}],
+        "weather_summary": {
+          "et0_mm": 5.0,
+          "rainfall_mm": 0.0,
+          "forecast_rain_next_48h_mm": 11.4
+        },
+        "sectors": [
+          {
+            "sector_name": "Areia",
+            "recommendation_action": "irrigate",
+            "irrigation_depth_mm": 8.0,
+            "confidence_score": 0.82
+          },
+          {
+            "sector_name": "Argila",
+            "recommendation_action": "defer",
+            "irrigation_depth_mm": null,
+            "confidence_score": 0.81
+          },
+          {
+            "sector_name": "Baixio",
+            "recommendation_action": "skip",
+            "irrigation_depth_mm": null,
+            "confidence_score": 0.9
+          }
+        ],
         "total_active_alerts": 1,
         "missing_data_priorities": [],
         "setup_completion_pct": 100.0
@@ -390,10 +868,31 @@
       "context": {
         "farm_name": "Campo Longo",
         "date": "2026-07-17",
-        "weather_summary": {"et0_mm": null, "rainfall_mm": 0.0, "forecast_rain_next_48h_mm": 0.0},
-        "sectors": [{"sector_name": "A", "recommendation_action": "irrigate", "irrigation_depth_mm": 14.0, "confidence_score": 0.42}, {"sector_name": "B", "recommendation_action": null, "irrigation_depth_mm": null, "confidence_score": null}],
+        "weather_summary": {
+          "et0_mm": null,
+          "rainfall_mm": 0.0,
+          "forecast_rain_next_48h_mm": 0.0
+        },
+        "sectors": [
+          {
+            "sector_name": "A",
+            "recommendation_action": "irrigate",
+            "irrigation_depth_mm": 14.0,
+            "confidence_score": 0.42
+          },
+          {
+            "sector_name": "B",
+            "recommendation_action": null,
+            "irrigation_depth_mm": null,
+            "confidence_score": null
+          }
+        ],
         "total_active_alerts": 3,
-        "missing_data_priorities": ["weather_observations", "probe", "irrigation_system"],
+        "missing_data_priorities": [
+          "weather_observations",
+          "probe",
+          "irrigation_system"
+        ],
         "setup_completion_pct": 25.0
       }
     }

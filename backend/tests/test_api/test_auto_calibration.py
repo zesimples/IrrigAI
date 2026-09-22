@@ -4,6 +4,7 @@ POST /sectors/{sector_id}/auto-calibration/run computes and saves deterministic
 soil bounds for one owned sector. Success returns the saved calibration metadata;
 insufficient probe data returns 422. Ownership is enforced by Access.
 """
+
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -29,9 +30,7 @@ _OWNER_EMAIL = "you@irrigai.dev"  # matches the authenticated client fixture in 
 
 
 async def _owned_chain(db: AsyncSession, *, name: str) -> tuple[str, str, ProbeDepth]:
-    owner = (
-        await db.execute(select(User).where(User.email == _OWNER_EMAIL))
-    ).scalar_one_or_none()
+    owner = (await db.execute(select(User).where(User.email == _OWNER_EMAIL))).scalar_one_or_none()
     if owner is None:
         owner = User(email=_OWNER_EMAIL, name="API Test Fixture", hashed_password="x")
         db.add(owner)
@@ -66,12 +65,16 @@ async def calibratable_sector(db: AsyncSession):
         frac = phase / 12
         tri = frac if frac <= 1 else (2 - frac)
         v = round(lo + span * tri, 4)
-        db.add(ProbeReading(
-            probe_depth_id=depth.id,
-            timestamp=base + timedelta(hours=i),
-            raw_value=v, calibrated_value=v,
-            unit="vwc_m3m3", quality_flag="ok",
-        ))
+        db.add(
+            ProbeReading(
+                probe_depth_id=depth.id,
+                timestamp=base + timedelta(hours=i),
+                raw_value=v,
+                calibrated_value=v,
+                unit="vwc_m3m3",
+                quality_flag="ok",
+            )
+        )
     await db.commit()
     yield sector_id
     await delete_farm_subtree(db, farm_id)
@@ -82,22 +85,24 @@ async def insufficient_sector(db: AsyncSession):
     """Owned sector with a probe but too few readings to calibrate."""
     farm_id, sector_id, depth = await _owned_chain(db, name="Insufficient")
     base = datetime.now(UTC) - timedelta(hours=5)
-    for i in range(5):     # < CALIB_MIN_READINGS
-        db.add(ProbeReading(
-            probe_depth_id=depth.id,
-            timestamp=base + timedelta(hours=i),
-            raw_value=0.44, calibrated_value=0.44,
-            unit="vwc_m3m3", quality_flag="ok",
-        ))
+    for i in range(5):  # < CALIB_MIN_READINGS
+        db.add(
+            ProbeReading(
+                probe_depth_id=depth.id,
+                timestamp=base + timedelta(hours=i),
+                raw_value=0.44,
+                calibrated_value=0.44,
+                unit="vwc_m3m3",
+                quality_flag="ok",
+            )
+        )
     await db.commit()
     yield sector_id
     await delete_farm_subtree(db, farm_id)
 
 
 @pytest.mark.asyncio
-async def test_run_calibration_success(
-    client: AsyncClient, db: AsyncSession, calibratable_sector
-):
+async def test_run_calibration_success(client: AsyncClient, db: AsyncSession, calibratable_sector):
     sector_id = calibratable_sector
 
     resp = await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
@@ -111,16 +116,18 @@ async def test_run_calibration_success(
     # Before this run the sector used the plot preset (0.16); after, the calibration.
     assert body["previous_fc"] == pytest.approx(0.16)
     assert body["changed"] is True
-    assert body["cleared_customization"] is False     # nothing was customized
+    assert body["cleared_customization"] is False  # nothing was customized
     # No override → the calibration is what the engine will use.
     assert body["applied"] is True
     assert body["effective_source"] == "probe_calibrated"
     assert body["effective_fc"] == pytest.approx(body["observed_fc"])
 
     # Persisted exactly one row that recommendations will pick up.
-    rows = (await db.execute(
-        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
-    )).scalars().all()
+    rows = (
+        (await db.execute(select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)))
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].observed_fc == pytest.approx(body["observed_fc"])
 
@@ -135,10 +142,12 @@ async def test_run_calibration_is_idempotent_upsert(
     r2 = await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
     assert r1.status_code == 200 and r2.status_code == 200
 
-    rows = (await db.execute(
-        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
-    )).scalars().all()
-    assert len(rows) == 1     # upsert, not duplicate
+    rows = (
+        (await db.execute(select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)))
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1  # upsert, not duplicate
 
     # First run is a fresh calibration; re-running on the same data reports no change.
     assert r1.json()["changed"] is True
@@ -146,17 +155,21 @@ async def test_run_calibration_is_idempotent_upsert(
     assert b2["changed"] is False
     assert b2["previous_fc"] == pytest.approx(r1.json()["observed_fc"])
 
-    history_response = await client.get(
-        f"/api/v1/sectors/{sector_id}/calibration-runs"
-    )
+    history_response = await client.get(f"/api/v1/sectors/{sector_id}/calibration-runs")
     assert history_response.status_code == 200
     history = history_response.json()
     assert len(history) == 2
     assert {row["status"] for row in history} == {"applied", "superseded"}
 
-    rows = (await db.execute(
-        select(ProbeCalibrationRun).where(ProbeCalibrationRun.sector_id == sector_id)
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(ProbeCalibrationRun).where(ProbeCalibrationRun.sector_id == sector_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(rows) == 2
 
 
@@ -167,11 +180,19 @@ async def test_run_calibration_overrides_customization(
     """Recency rule: pressing the button overrides a prior manual soil
     customization — it clears is_customized so the calibration takes effect."""
     sector_id = calibratable_sector
-    db.add(SectorCropProfile(
-        sector_id=sector_id, crop_type="almond", mad=0.5,
-        root_depth_mature_m=0.6, root_depth_young_m=0.3,
-        field_capacity=0.171, wilting_point=0.089, stages=[], is_customized=True,
-    ))
+    db.add(
+        SectorCropProfile(
+            sector_id=sector_id,
+            crop_type="almond",
+            mad=0.5,
+            root_depth_mature_m=0.6,
+            root_depth_young_m=0.3,
+            field_capacity=0.171,
+            wilting_point=0.089,
+            stages=[],
+            is_customized=True,
+        )
+    )
     await db.commit()
 
     resp = await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
@@ -182,14 +203,78 @@ async def test_run_calibration_overrides_customization(
     assert body["applied"] is True
     assert body["effective_source"] == "probe_calibrated"
     assert body["effective_fc"] == pytest.approx(body["observed_fc"])
-    assert body["previous_fc"] == pytest.approx(0.171)   # what it used before
+    assert body["previous_fc"] == pytest.approx(0.171)  # what it used before
     assert body["changed"] is True
 
     # And the SCP customization flag is actually off now, so the engine uses calib.
-    scp = (await db.execute(
-        select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
-    )).scalar_one()
+    scp = (
+        await db.execute(select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id))
+    ).scalar_one()
     assert scp.is_customized is False
+
+
+@pytest.mark.asyncio
+async def test_chat_calibration_has_manual_button_precedence_and_audit(
+    client, db, calibratable_sector
+):
+    from app.access import AccessController
+    from app.models import ChatAction
+    from app.services.chat_actions import _execute
+
+    sector_id = calibratable_sector
+    profile = SectorCropProfile(
+        sector_id=sector_id,
+        crop_type="almond",
+        mad=0.5,
+        root_depth_mature_m=0.6,
+        root_depth_young_m=0.3,
+        field_capacity=0.171,
+        wilting_point=0.089,
+        stages=[],
+        is_customized=True,
+    )
+    db.add(profile)
+    await db.commit()
+    button = await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
+    assert button.status_code == 200
+    await db.refresh(profile)
+    profile.is_customized = True
+    await db.commit()
+    user = (await db.execute(select(User).where(User.email == _OWNER_EMAIL))).scalar_one()
+    result = await _execute(
+        ChatAction(action_type="run_calibration", sector_id=sector_id, user_id=user.id, params={}),
+        access=AccessController(db, user),
+        db=db,
+    )
+    for key in (
+        "observed_fc",
+        "observed_refill",
+        "previous_fc",
+        "previous_refill",
+        "effective_fc",
+        "effective_pwp",
+        "effective_source",
+        "applied",
+        "changed",
+        "cleared_customization",
+    ):
+        assert result[key] == button.json()[key]
+    assert profile.is_customized is False
+    runs = (
+        (
+            await db.execute(
+                select(ProbeCalibrationRun).where(ProbeCalibrationRun.sector_id == sector_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(runs) == 2
+    assert all(run.source == "manual" and run.created_by_id == user.id for run in runs)
+    # The chat operation leaves commit ownership to the action transaction.
+    await db.rollback()
+    await db.refresh(profile)
+    assert profile.is_customized is True
 
 
 @pytest.mark.asyncio
@@ -201,11 +286,19 @@ async def test_manual_edit_overrides_calibration_after(
     sector_id = calibratable_sector
     # Sectors normally have an (auto-created) crop profile; the fixture doesn't, so
     # add a non-customized one for the manual-edit endpoint to update.
-    db.add(SectorCropProfile(
-        sector_id=sector_id, crop_type="almond", mad=0.5,
-        root_depth_mature_m=0.6, root_depth_young_m=0.3,
-        field_capacity=0.16, wilting_point=0.07, stages=[], is_customized=False,
-    ))
+    db.add(
+        SectorCropProfile(
+            sector_id=sector_id,
+            crop_type="almond",
+            mad=0.5,
+            root_depth_mature_m=0.6,
+            root_depth_young_m=0.3,
+            field_capacity=0.16,
+            wilting_point=0.07,
+            stages=[],
+            is_customized=False,
+        )
+    )
     await db.commit()
 
     await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
@@ -217,10 +310,10 @@ async def test_manual_edit_overrides_calibration_after(
     )
     assert resp.status_code == 200
 
-    scp = (await db.execute(
-        select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
-    )).scalar_one()
-    assert scp.is_customized is True          # manual edit overrides calibration again
+    scp = (
+        await db.execute(select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id))
+    ).scalar_one()
+    assert scp.is_customized is True  # manual edit overrides calibration again
 
     # Confirming the recency loop: a fresh calibration run would again clear it.
     rerun = await client.post(f"/api/v1/sectors/{sector_id}/auto-calibration/run")
@@ -239,9 +332,11 @@ async def test_run_calibration_insufficient_data_returns_422(
     detail = resp.json()["detail"]
     assert "48" in detail and "VWC" in detail
 
-    rows = (await db.execute(
-        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
-    )).scalars().all()
+    rows = (
+        (await db.execute(select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)))
+        .scalars()
+        .all()
+    )
     assert len(rows) == 0
 
 
@@ -254,12 +349,16 @@ async def tension_sector(db: AsyncSession):
     depth.sensor_type = "soil_tension"
     base = datetime.now(UTC) - timedelta(hours=59)
     for i in range(60):
-        db.add(ProbeReading(
-            probe_depth_id=depth.id,
-            timestamp=base + timedelta(hours=i),
-            raw_value=35.0, calibrated_value=35.0,
-            unit="soil_tension_cbar", quality_flag="ok",
-        ))
+        db.add(
+            ProbeReading(
+                probe_depth_id=depth.id,
+                timestamp=base + timedelta(hours=i),
+                raw_value=35.0,
+                calibrated_value=35.0,
+                unit="soil_tension_cbar",
+                quality_flag="ok",
+            )
+        )
     await db.commit()
     yield sector_id
     await delete_farm_subtree(db, farm_id)
@@ -277,16 +376,16 @@ async def test_run_calibration_tension_only_explains_sensor_type(
     detail = resp.json()["detail"].lower()
     assert "tensão" in detail or "watermark" in detail
 
-    rows = (await db.execute(
-        select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)
-    )).scalars().all()
+    rows = (
+        (await db.execute(select(ProbeCalibration).where(ProbeCalibration.sector_id == sector_id)))
+        .scalars()
+        .all()
+    )
     assert len(rows) == 0
 
 
 @pytest.mark.asyncio
-async def test_status_calibration_available_true_for_vwc(
-    client: AsyncClient, calibratable_sector
-):
+async def test_status_calibration_available_true_for_vwc(client: AsyncClient, calibratable_sector):
     resp = await client.get(f"/api/v1/sectors/{calibratable_sector}/status")
     assert resp.status_code == 200
     assert resp.json()["calibration_available"] is True
@@ -300,9 +399,7 @@ async def test_status_includes_plot_fields(
     resp = await client.get(f"/api/v1/sectors/{calibratable_sector}/status")
     assert resp.status_code == 200
     body = resp.json()
-    sector = (
-        await db.execute(select(Sector).where(Sector.id == calibratable_sector))
-    ).scalar_one()
+    sector = (await db.execute(select(Sector).where(Sector.id == calibratable_sector))).scalar_one()
     assert body["plot_id"] == sector.plot_id
     assert body["plot_name"] == "P"
 
@@ -319,12 +416,16 @@ async def cyclic_sector(db: AsyncSession):
     for _cycle in range(4):
         v = 0.38  # irrigation spike
         for _ in range(80):  # ~6.7 days of 2h-step decay
-            db.add(ProbeReading(
-                probe_depth_id=depth.id,
-                timestamp=ts,
-                raw_value=round(v, 4), calibrated_value=round(v, 4),
-                unit="vwc_m3m3", quality_flag="ok",
-            ))
+            db.add(
+                ProbeReading(
+                    probe_depth_id=depth.id,
+                    timestamp=ts,
+                    raw_value=round(v, 4),
+                    calibrated_value=round(v, 4),
+                    unit="vwc_m3m3",
+                    quality_flag="ok",
+                )
+            )
             ts += timedelta(hours=2)
             v = max(v - 0.001, 0.29)
     await db.commit()
@@ -333,9 +434,7 @@ async def cyclic_sector(db: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_preview_sees_soil_moisture_sectors(
-    client: AsyncClient, cyclic_sector
-):
+async def test_preview_sees_soil_moisture_sectors(client: AsyncClient, cyclic_sector):
     """GET /auto-calibration (preview) must accept real VWC depths
     (sensor_type "soil_moisture") — it used to match only the legacy
     "moisture" and 404'd every real sector while /run worked."""
@@ -346,9 +445,7 @@ async def test_preview_sees_soil_moisture_sectors(
 
 
 @pytest.mark.asyncio
-async def test_status_calibration_available_false_for_tension(
-    client: AsyncClient, tension_sector
-):
+async def test_status_calibration_available_false_for_tension(client: AsyncClient, tension_sector):
     resp = await client.get(f"/api/v1/sectors/{tension_sector}/status")
     assert resp.status_code == 200
     assert resp.json()["calibration_available"] is False

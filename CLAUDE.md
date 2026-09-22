@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Paused session — 2026-09-10: read before running commands
+
+The user stopped for the day. All A0–A4 implementation/review edits remain local and uncommitted; **do not commit, push, deploy, or resume database recovery without the user's direction**.
+
+Codex mistakenly seeded the development database and recreated Esporão, Conqueiros, and Amendoas do Lago. Production was not accessed. The user approved a separate backup restore and assessment, which succeeded in `irrigai_recovery_20260910`; **development is not yet recovered**. Preserve that database, the backup `backups/irrigai_20260910_092012.sql.gz`, and Docker volumes. Do not run `make seed` or a whole-database rollback.
+
+Resume from these handoffs:
+
+- [Recovery assessment and next steps](docs/development-recovery-assessment-2026-09-10.md): original IDs, recoverable counts, schema differences, and selective-recovery plan. Obtain approval, snapshot current development, and rehearse on a separate clone before applying recovery. The development worker remains running and has ingested new data into the replacement farms; preserve and reassess it.
+- [Partial A0–A4 fixes and outstanding tests](docs/claude-a0-a4-review-fixes-2026-09-10.md): return to these fixes after recovery. Frontend tests/typecheck passed, but the backend run was not clean and several regressions/eval improvements remain unfinished.
+- [Current session summary](AGENTS.md#recent-session-handoff): pause state and operating safeguards.
+
+Last checked revisions: development `019a556f37dd`, recovery `1c13f632d1a6`, isolated test DB `irrigai_ai_review_20260910` at `a0d5b179c368`. The uncommitted `a0d5b179c368` migration has not been applied to development. Never run pytest cleanup against development. Override **both** `DATABASE_URL` and `DATABASE_URL_SYNC` for isolated operations and verify the actual database name first; overriding only the async URL caused this incident.
+
 ## Project overview
 
 IrrigAI is a precision-irrigation decision-support platform. A **deterministic agronomic engine** computes water-balance recommendations (ET₀, crop demand, drainage thresholds, dosage); an **LLM explanation layer** (OpenAI GPT-4o-mini) converts those recommendations into natural-language explanations — the LLM never makes agronomic decisions. A background **ingestion worker** pulls probe readings and weather data from external providers on a schedule.

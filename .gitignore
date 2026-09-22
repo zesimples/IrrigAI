@@ -43,11 +43,14 @@ alembic/versions/*.pyc
 
 # TypeScript build cache
 *.tsbuildinfo
+frontend/test-results/
+frontend/playwright-report/
 
 # Misc
 *.log
 .codex
 backups/*.sql.gz
+backups/recovery-preserved-*/
 
 # Visual brainstorming sessions
 .superpowers/

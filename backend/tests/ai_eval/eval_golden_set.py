@@ -18,6 +18,8 @@ from app.ai.openai_client import OpenAIChatClient, get_chat_client
 from app.config import Settings
 from app.schemas.ai import AgronomicInterpretation
 from tests.ai_eval.harness import (
+    assert_confidence_is_server_derived,
+    assert_engine_reason_is_preserved,
     assert_evidence_ids_match_registry,
     assert_evidence_sources_resolve,
     assert_farm_urgent_actions_match_engine,
@@ -33,6 +35,11 @@ def _load_cases() -> list[dict]:
     payload = json.loads(_CASES_PATH.read_text(encoding="utf-8"))
     cases = payload["cases"]
     assert 18 <= len(cases) <= 22, "golden set should stay close to 20 cases"
+    cases.extend(
+        json.loads(_CASES_PATH.with_name("additional_surfaces.json").read_text(encoding="utf-8"))[
+            "cases"
+        ]
+    )
     return cases
 
 
@@ -64,6 +71,13 @@ def _prompt_for(case: dict) -> tuple[str, str]:
         system = prompt_templates.PROBE_ADVISORY_PT.format(signal_json=context_json)
     elif surface == "farm":
         system = prompt_templates.FARM_SUMMARY_PT.format(context_json=context_json)
+    elif surface in {"alert_explanation", "change_analysis", "irrigation_effectiveness"}:
+        template = {
+            "alert_explanation": prompt_templates.ANOMALY_EXPLANATION_PT,
+            "change_analysis": prompt_templates.SECTOR_CHANGE_ANALYSIS_PT,
+            "irrigation_effectiveness": prompt_templates.IRRIGATION_EFFECTIVENESS_PT,
+        }[surface]
+        system = template.format(context_json=context_json)
     else:  # pragma: no cover - fixture schema guard
         raise AssertionError(f"unknown eval surface: {surface}")
     return system, case["user_message"]
@@ -86,19 +100,41 @@ async def test_live_golden_context(case: dict, live_client: OpenAIChatClient) ->
             "recommendation": "recommendation",
             "probe": "probe_diagnosis",
             "farm": "farm_summary",
+            "alert_explanation": "alert_explanation",
+            "change_analysis": "change_analysis",
+            "irrigation_effectiveness": "irrigation_effectiveness",
         }[case["surface"]],
     )
     assert isinstance(result, AgronomicInterpretation)
+    assert not result.degraded, "A degraded fallback is not a successful live-model evaluation"
 
     if case["surface"] == "probe":
+        # Mirror interpret_probe_patterns_structured(): the evidence registry cites
+        # paths under the "probe_signal" wrapper, but confidence is derived from the
+        # unwrapped stats. Skipping this step would evaluate a shape production
+        # never returns.
+        result = assistant._apply_deterministic_confidence(
+            result,
+            case["context"],
+            explanation_status="degraded" if result.degraded else "generated",
+        )
         result = assistant._apply_probe_recommendation_guard(case["context"], result)
 
     assert_response_is_pt_pt(result)
     assert_evidence_sources_resolve(result, evidence_context)
     assert_evidence_ids_match_registry(result, evidence_context)
+    # A1: confidence is a deterministic function of the engine and the data, never
+    # of how confident the sentence sounds. Probe surfaces wrap the context under
+    # "probe_signal" for the evidence registry only — confidence is derived from the
+    # unwrapped stats, exactly as `_apply_probe_recommendation_guard` does.
+    assert_confidence_is_server_derived(
+        result,
+        case["context"] if case["surface"] == "probe" else evidence_context,
+    )
 
     if case["surface"] == "probe":
         assert_probe_guard_holds(result, case["context"])
+        assert_engine_reason_is_preserved(result, case["context"])
         assert_no_raw_vwc_decimals(result)
     elif case["surface"] == "farm":
         assert_farm_urgent_actions_match_engine(result, case["context"])

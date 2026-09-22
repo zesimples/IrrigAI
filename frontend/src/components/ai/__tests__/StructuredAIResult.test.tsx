@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { describe, it, expect } from "vitest";
 
 import { StructuredAIResult } from "../StructuredAIResult";
 
@@ -102,5 +103,61 @@ describe("StructuredAIResult", () => {
     expect(screen.getByText("Floração")).toBeInTheDocument();
     expect(screen.getAllByText("Depleção")).toHaveLength(1);
     expect(screen.queryByText("30 mm")).not.toBeInTheDocument();
+  });
+});
+
+describe("StructuredAIResult confidence", () => {
+  const base = {
+    summary: "Reserva adequada.",
+    risk_level: "low" as const,
+    irrigation_advice: "Não regar.",
+    evidence: [],
+    missing_data: [],
+    confidence_score: 0.68,
+    confidence_explanation: "explicação antiga",
+    recommended_actions: [],
+  };
+
+  it("reports engine confidence and data quality separately, not a bare percentage", () => {
+    render(
+      <StructuredAIResult
+        interpretation={{
+          ...base,
+          confidence: {
+            engine_confidence: "high",
+            data_quality: "stale",
+            explanation_status: "generated",
+            score: 0.68,
+            basis: "Confiança alta do motor determinístico · leituras de sonda antigas.",
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText(/Confiança alta do motor determinístico/)).toBeInTheDocument();
+    expect(screen.getByText(/leituras de sonda antigas/)).toBeInTheDocument();
+    expect(screen.queryByText(/68%/)).not.toBeInTheDocument();
+  });
+
+  it("does not present a missing probe reading as a confident measurement", () => {
+    render(
+      <StructuredAIResult
+        interpretation={{
+          ...base,
+          confidence: {
+            engine_confidence: "unknown",
+            data_quality: "missing",
+            explanation_status: "generated",
+            score: 0.26,
+            basis: "Sem recomendação determinística recente · sem leitura directa do solo.",
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText(/sem leitura directa do solo/)).toBeInTheDocument();
+  });
+
+  it("falls back to the legacy percentage for pre-A1 payloads", () => {
+    render(<StructuredAIResult interpretation={base} />);
+    expect(screen.getByText(/68%/)).toBeInTheDocument();
   });
 });

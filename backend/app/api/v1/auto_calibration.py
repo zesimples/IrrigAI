@@ -44,6 +44,7 @@ _CHANGE_EPS_M3M3 = 0.005
 
 # ── Response schemas ──────────────────────────────────────────────────────────
 
+
 class SoilPresetMatchOut(BaseModel):
     preset_id: str
     preset_name_pt: str
@@ -57,7 +58,7 @@ class SoilMatchResultOut(BaseModel):
     current_preset: SoilPresetMatchOut | None
     best_match: SoilPresetMatchOut
     all_matches: list[SoilPresetMatchOut]
-    status: str                         # "validated" | "better_match_found" | "no_good_match"
+    status: str  # "validated" | "better_match_found" | "no_good_match"
 
 
 class ObservedSoilPointsOut(BaseModel):
@@ -85,9 +86,9 @@ class ProbeCalibrationOut(BaseModel):
     *effective refill line* (operational lower bound), not a measured true PMP."""
 
     sector_id: str
-    observed_fc: float          # m³/m³ — calibrated CC (drained upper limit)
-    observed_refill: float      # m³/m³ — effective refill / operational lower bound
-    method: str                 # "cycles" | "envelope"
+    observed_fc: float  # m³/m³ — calibrated CC (drained upper limit)
+    observed_refill: float  # m³/m³ — effective refill / operational lower bound
+    method: str  # "cycles" | "envelope"
     num_cycles: int
     consistency: float
     window_days: int
@@ -99,11 +100,11 @@ class ProbeCalibrationOut(BaseModel):
     # on the chart — e.g. "CC 17→24" — not just the calibration-row delta.
     previous_fc: float | None = None
     previous_refill: float | None = None
-    effective_fc: float | None = None            # m³/m³ now used by the engine
+    effective_fc: float | None = None  # m³/m³ now used by the engine
     effective_pwp: float | None = None
-    effective_source: str = "probe_calibrated"   # resolve_sector_soil_bounds source
-    changed: bool = True                          # effective bounds moved before→after
-    applied: bool = True                          # calibration is what the engine uses
+    effective_source: str = "probe_calibrated"  # resolve_sector_soil_bounds source
+    changed: bool = True  # effective bounds moved before→after
+    applied: bool = True  # calibration is what the engine uses
     # True when this run turned off a soil customization so the calibration could
     # take precedence (the recency rule: pressing the button overrides a manual edit).
     cleared_customization: bool = False
@@ -174,6 +175,7 @@ class CalibrationHistoryOut(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+
 @router.get("/sectors/{sector_id}/auto-calibration", response_model=AutoCalibrationOut)
 async def get_auto_calibration(sector_id: str, access: Access, db: AsyncSession = Depends(get_db)):
     sector = await access.sector(sector_id)
@@ -214,81 +216,15 @@ async def run_probe_calibration(
     recommendation. A later manual soil/CC-PMP edit re-sets is_customized and
     overrides the calibration again.
     """
-    from app.engine.pipeline import resolve_sector_soil_bounds
-
     await access.sector(sector_id)
-
-    # The bounds the engine used BEFORE this run (what the user currently sees) —
-    # resolved before compute_and_save mutates the calibration row.
-    before = await resolve_sector_soil_bounds(sector_id, db)
-
-    saved = await _calib_service.compute_and_save(
+    payload = await _calib_service.run_manual(
         sector_id,
         db,
-        source="manual",
-        created_by_id=str(access.current_user.id),
-    )
-    if saved is None:
-        # Report the actual blocker (tension-only probe, too few VWC readings,
-        # implausible envelope) rather than a generic "insufficient data".
-        reason = await _service.diagnose_unavailable(sector_id, db)
-        raise HTTPException(422, detail=reason)
-
-    # Recency rule: the button overrides a prior manual customization so the fresh
-    # calibration takes precedence in the resolver.
-    scp = (await db.execute(
-        select(SectorCropProfile).where(SectorCropProfile.sector_id == sector_id)
-    )).scalar_one_or_none()
-    cleared_customization = bool(scp and scp.is_customized)
-    if cleared_customization:
-        scp.is_customized = False
-    await db.flush()
-
-    # autoflush makes resolve see the new calibration row + cleared customization.
-    after = await resolve_sector_soil_bounds(sector_id, db)
-    changed = (
-        before.fc is None
-        or abs(before.fc - after.fc) >= _CHANGE_EPS_M3M3
-        or abs(before.pwp - after.pwp) >= _CHANGE_EPS_M3M3
-    )
-
-    await audit.log(
-        "probe_calibration_computed",
-        "sector",
-        sector_id,
-        db,
-        before_data={"source": before.source, "fc": before.fc, "pwp": before.pwp},
-        after_data={
-            "observed_fc": saved.observed_fc,
-            "observed_refill": saved.observed_refill,
-            "method": saved.method,
-            "effective_source": after.source,
-            "effective_fc": after.fc,
-            "effective_pwp": after.pwp,
-            "cleared_customization": cleared_customization,
-            "changed": changed,
-        },
+        user_id=access.current_user.id,
+        diagnoser=_service,
     )
     await db.commit()
-
-    return ProbeCalibrationOut(
-        sector_id=sector_id,
-        observed_fc=saved.observed_fc,
-        observed_refill=saved.observed_refill,
-        method=saved.method,
-        num_cycles=saved.num_cycles,
-        consistency=saved.consistency,
-        window_days=saved.window_days,
-        computed_at=saved.computed_at,
-        previous_fc=before.fc,
-        previous_refill=before.pwp,
-        effective_fc=after.fc,
-        effective_pwp=after.pwp,
-        effective_source=after.source,
-        changed=changed,
-        applied=after.source == "probe_calibrated",
-        cleared_customization=cleared_customization,
-    )
+    return ProbeCalibrationOut(**payload)
 
 
 @router.get(
@@ -302,13 +238,17 @@ async def list_calibration_runs(
 ):
     await access.sector(sector_id)
     rows = (
-        await db.execute(
-            select(ProbeCalibrationRun)
-            .where(ProbeCalibrationRun.sector_id == sector_id)
-            .order_by(ProbeCalibrationRun.computed_at.desc())
-            .limit(100)
+        (
+            await db.execute(
+                select(ProbeCalibrationRun)
+                .where(ProbeCalibrationRun.sector_id == sector_id)
+                .order_by(ProbeCalibrationRun.computed_at.desc())
+                .limit(100)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [CalibrationHistoryOut.model_validate(row) for row in rows]
 
 
@@ -326,12 +266,16 @@ async def apply_calibration_run(
         raise HTTPException(404, detail="Calibration run not found")
     await access.sector(str(run.sector_id))
 
-    before = (await db.execute(
-        select(ProbeCalibration).where(ProbeCalibration.sector_id == run.sector_id)
-    )).scalar_one_or_none()
-    scp = (await db.execute(
-        select(SectorCropProfile).where(SectorCropProfile.sector_id == run.sector_id)
-    )).scalar_one_or_none()
+    before = (
+        await db.execute(
+            select(ProbeCalibration).where(ProbeCalibration.sector_id == run.sector_id)
+        )
+    ).scalar_one_or_none()
+    scp = (
+        await db.execute(
+            select(SectorCropProfile).where(SectorCropProfile.sector_id == run.sector_id)
+        )
+    ).scalar_one_or_none()
     if scp and scp.is_customized:
         scp.is_customized = False
     await _calib_service.apply_run(run, db)
@@ -449,6 +393,7 @@ async def dismiss_auto_calibration(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _to_out(result: AutoCalibrationResult) -> AutoCalibrationOut:
     from app.engine.auto_calibration import SoilPresetMatch
 
@@ -473,7 +418,9 @@ def _to_out(result: AutoCalibrationResult) -> AutoCalibrationOut:
             analysis_depths_cm=result.observed.analysis_depths_cm,
         ),
         match=SoilMatchResultOut(
-            current_preset=_match_out(result.match.current_preset) if result.match.current_preset else None,
+            current_preset=_match_out(result.match.current_preset)
+            if result.match.current_preset
+            else None,
             best_match=_match_out(result.match.best_match),
             all_matches=[_match_out(m) for m in result.match.all_matches],
             status=result.match.status,
@@ -520,7 +467,9 @@ async def queue_farm_calibration_sweep(
 
     try:
         run = await enqueue_sweep(
-            farm_id, db, auto_apply=auto_apply,
+            farm_id,
+            db,
+            auto_apply=auto_apply,
             triggered_by_id=str(access.current_user.id),
         )
     except SweepAlreadyRunning as exc:
@@ -582,9 +531,7 @@ async def get_calibration_sweep_run(
             failed=run.failed,
         ),
         outcomes=(
-            [SectorSweepOutcomeOut(**o) for o in run.outcomes]
-            if run.outcomes is not None
-            else None
+            [SectorSweepOutcomeOut(**o) for o in run.outcomes] if run.outcomes is not None else None
         ),
         error=run.error,
         queued_at=run.queued_at,

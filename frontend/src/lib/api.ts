@@ -6,6 +6,11 @@ import type {
   CalibrationHistoryRun,
   CalibrationSweepRun,
   ChatResult,
+  ChatActionOut,
+  AnalysisProvenance,
+  ProposedActionOut,
+  FeedbackReason,
+  AgronomicEvidence,
   ChatConversation,
   ChatConversationDetail,
   ChatTurn,
@@ -57,6 +62,10 @@ import type {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/v1";
 
 export const TOKEN_KEY = "irrigai_token";
+/** Every locally cached AI analysis lives under this prefix so logout can clear
+ *  them in one sweep. A stored analysis is scoped data, not a UI preference. */
+export const AI_CACHE_PREFIX = "irrigai_ai_analysis:";
+const USER_KEY = "irrigai_user_scope";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -65,10 +74,47 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  // A JWT's subject is a stable per-user key; without it a cached analysis keyed
+  // by sector alone survives a change of user on a shared browser.
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1] ?? ""));
+    const subject = String(payload?.sub ?? "");
+    const previous = localStorage.getItem(USER_KEY);
+    if (subject && previous && previous !== subject) clearAiAnalysisCache();
+    if (subject) localStorage.setItem(USER_KEY, subject);
+  } catch {
+    // A token we cannot read is a reason to drop caches, never to keep them.
+    clearAiAnalysisCache();
+  }
+}
+
+export function getUserScope(): string {
+  if (typeof window === "undefined") return "anon";
+  try {
+    return localStorage.getItem(USER_KEY) ?? "anon";
+  } catch {
+    return "anon";
+  }
+}
+
+export function clearAiAnalysisCache(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const doomed: string[] = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(AI_CACHE_PREFIX)) doomed.push(key);
+    }
+    doomed.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    /* private mode or blocked storage — nothing cached, nothing to clear */
+  }
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+  clearAiAnalysisCache();
 }
 
 class ApiError extends Error {
@@ -388,11 +434,16 @@ export const chatApi = {
       message: string;
       sector_id?: string | null;
       conversation_id?: string | null;
+      client_message_id?: string | null;
     },
     callbacks: {
       onDelta: (text: string) => void;
       onConversation?: (conversationId: string, messageId: string) => void;
+      /** Stage labels the backend emits while the turn is still running. They are
+       *  fixed Portuguese strings, never model output. */
+      onProgress?: (label: string, stage: string) => void;
     },
+    signal?: AbortSignal,
   ): Promise<ChatResult> => {
     const token = getToken();
     const response = await fetch(`${API_BASE}/farms/${farmId}/chat/stream`, {
@@ -402,6 +453,7 @@ export const chatApi = {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(body),
+      signal,
     });
     if (!response.ok || !response.body) {
       const payload = await response.json().catch(() => ({ detail: response.statusText }));
@@ -415,6 +467,7 @@ export const chatApi = {
     let conversationId = body.conversation_id ?? "";
     let messageId = "";
     let donePayload: Partial<ChatResult> = {};
+    let receivedDone = false;
 
     const consumeEvent = (block: string) => {
       let event = "message";
@@ -429,12 +482,18 @@ export const chatApi = {
         conversationId = String(payload.conversation_id ?? "");
         messageId = String(payload.message_id ?? "");
         callbacks.onConversation?.(conversationId, messageId);
+      } else if (event === "progress") {
+        callbacks.onProgress?.(
+          String(payload.label ?? ""),
+          String(payload.stage ?? ""),
+        );
       } else if (event === "delta") {
         const text = String(payload.text ?? "");
         reply += text;
         callbacks.onDelta(text);
       } else if (event === "done") {
         donePayload = payload;
+        receivedDone = true;
       } else if (event === "error") {
         throw new ApiError(500, String(payload.detail ?? "Erro no assistente."));
       }
@@ -452,16 +511,39 @@ export const chatApi = {
       if (done) break;
     }
     if (buffer.trim()) consumeEvent(buffer);
+    if (!receivedDone) throw new ApiError(502, "Resposta interrompida antes da confirmação. Envia de novo para retomar.");
 
     return {
       reply,
       conversation_id: conversationId,
       message_id: messageId,
-      proposed_action: (donePayload.proposed_action as ProposedAction | null) ?? null,
+      proposed_action: (donePayload.proposed_action as ProposedActionOut | null) ?? null,
       degraded: Boolean(donePayload.degraded),
       model_name: (donePayload.model_name as string | null) ?? null,
+      evidence: (donePayload.evidence as AgronomicEvidence[] | undefined) ?? [],
+      context_version: (donePayload.context_version as string | undefined) ?? "",
+      contract_version: (donePayload.contract_version as string | undefined) ?? "",
+      recommendation_id: (donePayload.recommendation_id as string | null) ?? null,
+      validation_status:
+        (donePayload.validation_status as ChatResult["validation_status"]) ?? "validated",
+      data_timestamps: (donePayload.data_timestamps as Record<string, string>) ?? {},
+      status: (donePayload.status as ChatResult["status"]) ?? "complete",
     };
   },
+  quickAction: (
+    farmId: string,
+    body: {
+      kind: "farm_summary" | "explain_sector" | "missing_data";
+      sector_id?: string | null;
+      conversation_id?: string | null;
+    },
+  ) => post<ChatResult>(`/farms/${farmId}/chat/quick-action`, body),
+  confirmAction: (farmId: string, actionId: string) =>
+    post<ChatActionOut>(`/farms/${farmId}/chat/actions/${actionId}/confirm`),
+  cancelAction: (farmId: string, actionId: string) =>
+    post<ChatActionOut>(`/farms/${farmId}/chat/actions/${actionId}/cancel`),
+  analysisVersion: (sectorId: string) =>
+    get<AnalysisProvenance>(`/sectors/${sectorId}/ai-analysis-version`),
   explainSector: (sectorId: string, userNotes?: string) =>
     post<AITextResponse & { explanation: string }>(`/sectors/${sectorId}/explain`, {
       user_notes: userNotes ?? null,
@@ -489,6 +571,9 @@ export const chatApi = {
     chat_message_id?: string;
     entity_id?: string;
     comment?: string;
+    reason?: FeedbackReason;
+    context_version?: string;
+    contract_version?: string;
   }) => post<{ id: string }>("/ai/feedback", body),
 };
 

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StructuredAIResult } from "@/components/ai/StructuredAIResult";
-import { chatApi, fieldObservationsApi } from "@/lib/api";
+import { AI_CACHE_PREFIX, chatApi, fieldObservationsApi, getUserScope } from "@/lib/api";
 import { formatDecimal } from "@/lib/utils";
-import type { AgronomicInterpretation } from "@/types";
+import type { AgronomicInterpretation, AnalysisProvenance } from "@/types";
 
 // ─── Audio ───────────────────────────────────────────────────────────────────
 
@@ -121,12 +121,17 @@ function AssistantResult({
   result,
   structured,
   timestamp,
+  historical,
   onCopy,
+  onRefresh,
 }: {
   result: string;
   structured: AgronomicInterpretation | null;
   timestamp: Date | null;
+  /** The inputs behind this analysis have changed since it was produced. */
+  historical: boolean;
   onCopy: () => void;
+  onRefresh: () => void;
 }) {
   const timeLabel = timestamp
     ? Date.now() - timestamp.getTime() < 120_000
@@ -138,6 +143,22 @@ function AssistantResult({
     <section className="mb-[26px] bg-[#f0ece0] border border-olive/30 rounded-xl overflow-hidden animate-fade-up">
       {/* Top accent bar */}
       <div className="h-[3px] bg-gradient-to-r from-olive/70 via-olive/40 to-transparent" />
+
+      {historical && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-300/60 bg-amber-50 px-5 py-2 sm:px-7">
+          <p className="text-[12px] text-amber-900">
+            Análise histórica — os dados mudaram ou a actualidade não foi confirmada. Não é
+            aconselhamento para a recomendação actual.
+          </p>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="rounded-md border border-amber-400 bg-white/70 px-2.5 py-1 text-[12px] font-medium text-amber-900 hover:bg-white"
+          >
+            Actualizar análise
+          </button>
+        </div>
+      )}
 
       <div className="px-5 pt-5 pb-6 sm:px-7">
         {/* Header */}
@@ -186,7 +207,11 @@ interface Props {
   onSaved?: () => void | Promise<void>;
 }
 
-export function SectorAnalysis({
+export function SectorAnalysis(props: Props) {
+  return <ScopedSectorAnalysis key={`${getUserScope()}:${props.sectorId}`} {...props} />;
+}
+
+function ScopedSectorAnalysis({
   sectorId,
   et0Mm,
   probeExternalId,
@@ -199,27 +224,79 @@ export function SectorAnalysis({
   const [structured, setStructured] = useState<AgronomicInterpretation | null>(null);
   const [resultTimestamp, setResultTimestamp] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [provenance, setProvenance] = useState<AnalysisProvenance | null>(null);
+  const [historical, setHistorical] = useState(false);
+  const requestGeneration = useRef(0);
+  useEffect(() => () => { requestGeneration.current += 1; }, []);
 
-  // Restore last AI result from localStorage so it survives tab/panel toggles
-  const storageKey = `sector-analysis-result:${sectorId}`;
+  // A stored analysis is scoped data, not a UI preference: the key carries the
+  // user so a shared browser cannot show the previous tenant's analysis, and the
+  // stored provenance is what decides whether it is still current.
+  const storageKey = `${AI_CACHE_PREFIX}${getUserScope()}:${sectorId}`;
   useEffect(() => {
+    let restored: AnalysisProvenance | null = null;
     try {
       const stored = localStorage.getItem(storageKey);
       if (stored) {
-        const { text, structured: cachedStructured, ts } = JSON.parse(stored) as {
+        const {
+          text,
+          structured: cachedStructured,
+          ts,
+          provenance: cachedProvenance,
+        } = JSON.parse(stored) as {
           text: string;
           structured?: AgronomicInterpretation | null;
           ts: number;
+          provenance?: AnalysisProvenance | null;
         };
         setResult(text);
         setStructured(cachedStructured ?? null);
         setResultTimestamp(new Date(ts));
+        restored = cachedProvenance ?? null;
+        setProvenance(restored);
+        // A pre-A3 entry carries no provenance, so it cannot be shown as current.
+        setHistorical(true);
+      } else {
+        setResult(null);
+        setStructured(null);
+        setResultTimestamp(null);
+        setProvenance(null);
+        setHistorical(false);
       }
-    } catch { /* ignore */ }
+    } catch { /* private mode or blocked storage */ }
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey]);
+  }, [storageKey, sectorId]);
+
+  useEffect(() => {
+    if (!provenance) return;
+    let cancelled = false;
+    let sequence = 0;
+    const check = async () => {
+      const request = ++sequence;
+      try {
+        const current = await chatApi.analysisVersion(sectorId);
+        if (!cancelled && request === sequence) setHistorical(
+          current.context_version !== provenance.context_version ||
+          current.contract_version !== provenance.contract_version,
+        );
+      } catch {
+        if (!cancelled && request === sequence) setHistorical(true);
+      }
+    };
+    void check();
+    const timer = window.setInterval(check, 30_000);
+    window.addEventListener("focus", check);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", check);
+    };
+  }, [provenance, sectorId]);
 
   async function handleAnalyse() {
+    const generation = ++requestGeneration.current;
+    const isCurrent = () => generation === requestGeneration.current;
     setLoading(true);
     setError(null);
     try {
@@ -246,13 +323,17 @@ export function SectorAnalysis({
           observed_at: new Date().toISOString(),
           expires_at: expiresAt.toISOString(),
         });
+        if (!isCurrent()) return;
       }
 
       const res = await chatApi.explainSector(sectorId);
+      if (!isCurrent()) return;
       const ts = new Date();
       setResult(res.explanation);
       setStructured(res.structured ?? null);
       setResultTimestamp(ts);
+      setProvenance(res.provenance ?? null);
+      setHistorical(true);
       setSoilCondition("");
       setNotes("");
       playResultChime();
@@ -263,13 +344,14 @@ export function SectorAnalysis({
             text: res.explanation,
             structured: res.structured ?? null,
             ts: ts.getTime(),
+            provenance: res.provenance ?? null,
           }),
         );
       } catch { /* quota exceeded or SSR */ }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Erro ao contactar o assistente.");
+      if (isCurrent()) setError(e instanceof Error ? e.message : "Erro ao contactar o assistente.");
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }
 
@@ -322,7 +404,9 @@ export function SectorAnalysis({
             result={result}
             structured={structured}
             timestamp={resultTimestamp}
+            historical={historical}
             onCopy={handleCopy}
+            onRefresh={handleAnalyse}
           />
         )}
 

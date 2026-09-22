@@ -4,6 +4,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.api.v1 import chat as chat_router
 from app.config import get_settings
 from app.limiter import limiter
 from app.main import app
@@ -12,6 +13,20 @@ from app.main import app
 # not reset between tests), so the accumulated count trips 429s late in the
 # suite. No test asserts rate-limiting behaviour, so disable it process-wide.
 limiter.enabled = False
+
+
+# The per-user daily AI quota is the same trap one layer up: it is a real Redis
+# counter keyed by user and day, and the deterministic suite authenticates as the
+# single seeded owner. Left alone, the chat tests burn a real production-shaped
+# budget (200/day) and every run after the ~200th request in a day fails with 429s
+# that look like product bugs. The router's imported reference is replaced here;
+# tests/test_ai/test_ai_runtime.py exercises the real quota logic directly against
+# a fake Redis, so its coverage is untouched.
+async def _no_daily_ai_quota(_user_id: str) -> None:
+    return None
+
+
+chat_router.consume_daily_ai_quota = _no_daily_ai_quota
 
 _TEST_CLEANUP_STATEMENTS = (
     "DELETE FROM recommendation_reason",

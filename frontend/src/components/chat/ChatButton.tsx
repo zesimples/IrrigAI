@@ -7,15 +7,22 @@ import { ChatPanel } from "./ChatPanel";
 interface ChatButtonProps {
   farmId: string;
   sectorId?: string;
+  /** Let the host page re-read data an AI-proposed action changed. */
+  onActionCompleted?: () => void;
 }
 
-export function ChatButton({ farmId, sectorId }: ChatButtonProps) {
+export function ChatButton({ farmId, sectorId, onActionCompleted }: ChatButtonProps) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
       {open && (
-        <ChatPanel farmId={farmId} sectorId={sectorId} onClose={() => setOpen(false)} />
+        <ChatPanel
+          farmId={farmId}
+          sectorId={sectorId}
+          onClose={() => setOpen(false)}
+          onActionCompleted={onActionCompleted}
+        />
       )}
       <button
         onClick={() => setOpen((o) => !o)}

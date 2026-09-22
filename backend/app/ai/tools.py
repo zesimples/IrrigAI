@@ -7,7 +7,7 @@ ownership via AccessController before returning anything.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,12 +20,41 @@ from app.ai.context_builder import (
     get_weather_summary,
 )
 from app.schemas.ai import ProposedAction
+from app.services.field_observation_service import (
+    get_active_field_observations,
+    serialize_observation,
+)
 
 
 @dataclass
 class ToolScope:
     farm_id: str | None
     sector_id: str | None
+
+
+@dataclass
+class ToolSession:
+    """Per-turn memo so independent block reads share one canonical context.
+
+    Five tools project five blocks out of the same ten-block sector context. Built
+    once per tool call that was five full context builds — each one a fresh sweep of
+    probe readings, outcomes, calibration and weather — for one chat turn.
+    """
+
+    sector_contexts: dict[str, dict] = field(default_factory=dict)
+
+    async def sector_context(self, sector_id: str, db: AsyncSession) -> dict:
+        cached = self.sector_contexts.get(sector_id)
+        if cached is None:
+            cached = (
+                await AssistantContextBuilder().build_sector_ai_context(
+                    sector_id,
+                    db,
+                    compact=False,
+                )
+            ).to_dict()
+            self.sector_contexts[sector_id] = cached
+        return cached
 
 
 TOOL_SPECS: list[dict] = [
@@ -87,10 +116,33 @@ TOOL_SPECS: list[dict] = [
         "type": "function",
         "function": {
             "name": "get_weather",
-            "description": "Observações meteorológicas recentes e previsão de curto prazo da exploração.",
+            "description": (
+                "Observações meteorológicas recentes e previsão de curto prazo NO ÂMBITO "
+                "do setor em conversa (estação do talhão) ou, sem setor, a estação "
+                "representativa da exploração. A resposta indica sempre o âmbito usado."
+            ),
             "parameters": {
                 "type": "object",
-                "properties": {"farm_id": {"type": "string"}},
+                "properties": {
+                    "sector_id": {"type": "string"},
+                    "farm_id": {"type": "string"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_field_observations",
+            "description": (
+                "Notas de campo activas registadas pelo utilizador para este setor, "
+                "com data de observação, validade e se foram confirmadas. Notas não "
+                "confirmadas são relatos por validar, nunca medições."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"sector_id": {"type": "string"}},
                 "required": [],
             },
         },
@@ -247,8 +299,14 @@ async def execute_tool(
     access: AccessController,
     db: AsyncSession,
     scope: ToolScope,
+    session: ToolSession | None = None,
 ) -> dict:
+    session = session if session is not None else ToolSession()
     try:
+        if scope.farm_id and args.get("farm_id") not in (None, scope.farm_id):
+            return dict(_ACCESS_DENIED)
+        if scope.sector_id and args.get("sector_id") not in (None, scope.sector_id):
+            return dict(_ACCESS_DENIED)
         if name == "get_farm_overview":
             return await _get_farm_overview(_resolve(args, scope, "farm_id"), access, db)
         if name == "get_sector_status":
@@ -270,7 +328,17 @@ async def execute_tool(
                 scope,
             )
         if name == "get_weather":
-            return await _get_weather(_resolve(args, scope, "farm_id"), access, db)
+            return await _get_weather(
+                _resolve(args, scope, "farm_id"),
+                _resolve(args, scope, "sector_id"),
+                access,
+                db,
+                scope,
+            )
+        if name == "get_field_observations":
+            return await _get_field_observations(
+                _resolve(args, scope, "sector_id"), access, db, scope
+            )
         if name in {
             "get_outcomes",
             "get_calibration_status",
@@ -284,6 +352,7 @@ async def execute_tool(
                 access,
                 db,
                 scope,
+                session,
             )
         if name.startswith("propose_"):
             return await _propose(name, args, access, db, scope)
@@ -314,11 +383,13 @@ async def _get_farm_overview(farm_id, access, db) -> dict:
     return {"farm": ctx.farm_name, "sectors": sectors, "active_alerts": ctx.total_active_alerts}
 
 
-async def _require_sector_scope(sector_id, access, scope) -> None:
+async def _require_sector_scope(sector_id, access, scope):
+    """Ownership check that also returns the resolved sector (for plot scope)."""
+    if scope.sector_id and sector_id != scope.sector_id:
+        raise HTTPException(404, detail="Sector not found")
     if scope.farm_id:
-        await access.sector_in_farm(sector_id, scope.farm_id)
-    else:
-        await access.sector(sector_id)
+        return await access.sector_in_farm(sector_id, scope.farm_id)
+    return await access.sector(sector_id)
 
 
 async def _get_sector_status(sector_id, access, db, scope) -> dict:
@@ -362,24 +433,60 @@ async def _get_water_events(sector_id, days, access, db, scope) -> dict:
     return {"water_events": await get_sector_water_events(sector_id, db, days=days)}
 
 
-async def _get_weather(farm_id, access, db) -> dict:
+_FARM_SCOPE_NOTE = (
+    "Meteorologia representativa da exploração — numa exploração com estações por "
+    "talhão pode não descrever todos os talhões."
+)
+
+
+async def _get_weather(farm_id, sector_id, access, db, scope) -> dict:
+    """Resolve weather in the sector's own scope, exactly like the engine does.
+
+    A farm can carry one station per plot (the Innoliva pattern). Answering a
+    sector question with farm-wide rows silently attributes another polo's ET0 and
+    rain to this one, so the sector's plot resolves the scope and the answer says
+    which scope it used.
+    """
     if not farm_id:
         return {"error": "missing_farm_id"}
+
+    if scope.farm_id and farm_id != scope.farm_id:
+        raise HTTPException(404, detail="Farm not found")
     await access.farm(farm_id)
-    return await get_weather_summary(farm_id, db)
+    plot_id: str | None = None
+    if sector_id:
+        sector = await access.sector_in_farm(sector_id, farm_id)
+        plot_id = getattr(sector, "plot_id", None)
+
+    summary = await get_weather_summary(farm_id, db, plot_id=plot_id)
+    resolved_plot_id = summary.get("weather_plot_id", plot_id)
+    observations = summary.get("recent_observations") or []
+    forecast = summary.get("forecast") or []
+    return {
+        **summary,
+        "scope": (
+            {"level": "plot", "plot_id": resolved_plot_id, "sector_id": sector_id}
+            if sector_id and resolved_plot_id
+            else {"level": "farm", "farm_id": farm_id, "plot_id": None, "note": _FARM_SCOPE_NOTE}
+        ),
+        "latest_observation_at": observations[0].get("timestamp") if observations else None,
+        "forecast_from": forecast[0].get("date") if forecast else None,
+    }
 
 
-async def _get_sector_context_block(name, sector_id, access, db, scope) -> dict:
+async def _get_field_observations(sector_id, access, db, scope) -> dict:
     if not sector_id:
         return {"error": "missing_sector_id"}
     await _require_sector_scope(sector_id, access, scope)
-    context = (
-        await AssistantContextBuilder().build_sector_ai_context(
-            sector_id,
-            db,
-            compact=False,
-        )
-    ).to_dict()
+    rows = await get_active_field_observations(sector_id, db, active_only=True, limit=10)
+    return {"field_observations": [serialize_observation(row) for row in rows]}
+
+
+async def _get_sector_context_block(name, sector_id, access, db, scope, session) -> dict:
+    if not sector_id:
+        return {"error": "missing_sector_id"}
+    await _require_sector_scope(sector_id, access, scope)
+    context = await session.sector_context(sector_id, db)
     if name == "get_outcomes":
         return {"outcomes": context["outcomes"]}
     if name == "get_calibration_status":
@@ -411,7 +518,8 @@ async def _propose(name, args, access, db, scope) -> dict:
         rec_id = args.get("recommendation_id")
         if not rec_id:
             return {"error": "missing_recommendation_id"}
-        await access.recommendation(rec_id)
+        recommendation = await access.recommendation(rec_id)
+        await _require_sector_scope(recommendation.sector_id, access, scope)
         if name == "propose_override":
             depth = args.get("depth_mm")
             reason = args.get("reason", "")
@@ -419,7 +527,7 @@ async def _propose(name, args, access, db, scope) -> dict:
                 type="override_recommendation",
                 summary=f"Substituir a recomendação para {depth} mm — {reason}".strip(),
                 recommendation_id=rec_id,
-                sector_id=scope.sector_id,
+                sector_id=recommendation.sector_id,
                 params={"custom_depth_mm": depth, "override_reason": reason},
             )
         elif name == "propose_accept_recommendation":
@@ -427,7 +535,7 @@ async def _propose(name, args, access, db, scope) -> dict:
                 type="accept_recommendation",
                 summary="Aceitar a recomendação atual.",
                 recommendation_id=rec_id,
-                sector_id=scope.sector_id,
+                sector_id=recommendation.sector_id,
             )
         else:
             reason = args.get("reason", "")
@@ -435,7 +543,7 @@ async def _propose(name, args, access, db, scope) -> dict:
                 type="reject_recommendation",
                 summary="Rejeitar a recomendação atual.",
                 recommendation_id=rec_id,
-                sector_id=scope.sector_id,
+                sector_id=recommendation.sector_id,
                 params={"notes": reason} if reason else {},
             )
     else:

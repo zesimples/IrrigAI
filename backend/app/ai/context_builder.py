@@ -952,6 +952,7 @@ async def get_weather_summary(
         .all()
     )
     return {
+        "weather_plot_id": weather_plot_id,
         "recent_observations": [
             {
                 "timestamp": o.timestamp.isoformat(),

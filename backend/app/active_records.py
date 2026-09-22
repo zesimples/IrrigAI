@@ -9,7 +9,7 @@ diverging as new traversals are added.
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Farm, Plot, Sector
+from app.models import Farm, Plot, Probe, Sector
 
 
 def active_farms_stmt() -> Select:
@@ -30,10 +30,26 @@ def active_sectors_stmt(plot_id: str) -> Select:
     )
 
 
+def active_probes_stmt(farm_id: str | None = None) -> Select:
+    """Select probes only through an active ownership chain, optionally by farm."""
+    statement = (
+        select(Probe)
+        .join(Sector, Probe.sector_id == Sector.id)
+        .join(Plot, Sector.plot_id == Plot.id)
+        .join(Farm, Plot.farm_id == Farm.id)
+        .where(
+            Sector.is_archived.is_(False),
+            Plot.is_archived.is_(False),
+            Farm.is_archived.is_(False),
+        )
+    )
+    if farm_id is not None:
+        statement = statement.where(Farm.id == farm_id)
+    return statement
+
+
 async def get_active_farm(db: AsyncSession, farm_id: str) -> Farm | None:
-    return (
-        await db.execute(active_farms_stmt().where(Farm.id == farm_id))
-    ).scalar_one_or_none()
+    return (await db.execute(active_farms_stmt().where(Farm.id == farm_id))).scalar_one_or_none()
 
 
 async def get_active_sector(db: AsyncSession, sector_id: str) -> Sector | None:

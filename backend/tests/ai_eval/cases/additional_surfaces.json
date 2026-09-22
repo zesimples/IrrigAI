@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "provenance": "Synthetic regression fixtures using the production context field names; not pilot observations.",
+  "cases": [
+    {
+      "id": "alert-stale-probe",
+      "surface": "alert_explanation",
+      "user_message": "Explica este alerta: leituras antigas.",
+      "context": {"alert": {"alert_type": "stale_probe", "severity": "medium", "title": "Leituras antigas", "description": "A sonda não transmite há dois dias. Confirmar comunicação antes de interpretar o estado hídrico.", "data": {"hours_since_reading": 48}}}
+    },
+    {
+      "id": "change-no-readings",
+      "surface": "change_analysis",
+      "user_message": "O que mudou neste setor nas últimas 72 horas?",
+      "context": {
+        "analysis_type": "sector_change_analysis", "window_hours": 72,
+        "sector": {"name": "Olival"},
+        "current_context": {"engine_decision": {"action": "skip", "confidence_level": "low"}, "probe_state": {"live": null, "data_quality": {}}, "alerts_and_limitations": {"known_limitations": ["Sem leituras de sonda no período."]}},
+        "current_context_summary": {"probe_data_quality": {}, "water_balance": {}, "known_limitations": ["Sem leituras de sonda no período."]},
+        "probe_changes": [], "water_event_changes": [],
+        "recommendation_change": {"latest": null, "previous": null},
+        "weather_changes": {"observations": [], "forecast": []},
+        "known_limitations": ["Sem dados suficientes para quantificar alterações."]
+      }
+    },
+    {
+      "id": "effectiveness-without-matched-event",
+      "surface": "irrigation_effectiveness",
+      "user_message": "A rega recente foi eficaz?",
+      "context": {
+        "scope": {"sector": {"name": "Olival"}},
+        "engine_decision": {"action": "skip", "confidence_level": "low"},
+        "probe_state": {"live": null, "data_quality": {}},
+        "irrigation_execution": {"manual_events": [], "probe_detected_events": [], "flowmeter_detected_events": []},
+        "outcomes": {"count": 0, "latest": null, "recent": []},
+        "alerts_and_limitations": {"known_limitations": ["Não existe evento de rega associado nem resposta de sonda para avaliar a eficácia."]}
+      }
+    }
+  ]
+}

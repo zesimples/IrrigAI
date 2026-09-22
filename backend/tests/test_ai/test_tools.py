@@ -82,7 +82,9 @@ async def test_sector_status_returns_actionable_recommendation_identity(monkeypa
 @pytest.mark.asyncio
 async def test_propose_override_no_mutation_and_validates_access():
     access = AsyncMock()
-    access.recommendation.return_value = object()  # ownership ok
+    from types import SimpleNamespace
+
+    access.recommendation.return_value = SimpleNamespace(sector_id="sec-1")
     db = AsyncMock()
     out = await execute_tool(
         "propose_override",
