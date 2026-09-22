@@ -4,8 +4,9 @@ This supersedes the September 10 implementation checkpoint. Development recovery
 was completed separately on September 21; see
 [the recovery record](development-recovery-completed-2026-09-21.md).
 
-Status: **local review fixes implemented and verified; uncommitted.** The full
-A4 release/pilot gate remains pending as described below.
+Status: **implemented, verified, committed and pushed.** Commit
+`05ea921 feat(ai): complete A0-A4 grounding and recovery fixes` is on
+`origin/main`. The full A4 release/pilot gate remains pending as described below.
 
 ## Scope and state
 
@@ -136,3 +137,24 @@ transactionally. Development now reports `a0d5b179c368`, both `reply_to_id` and
 rows have null values for the new columns, as expected for backward compatibility.
 The backend's in-container health check reports database and Redis `ok`; no service
 restart was needed. Keep this backup with the recovery-preserved archives.
+
+## Next-session handoff
+
+The user asked to preserve this state for the next session. Start by reading this
+document and `AGENTS.md`. The focused A0–A4 commit is already pushed; do not create
+a duplicate commit. Local development is at `a0d5b179c368`, while production was
+not accessed or deployed. Recovery databases, rehearsal databases, protected
+backups and the untracked recovery scripts remain preserved. Intentional untracked
+files include `AGENTS.md`, recovery tooling, design handoff material and older
+planning documents; they were excluded from the A0–A4 commit.
+
+Verified results to carry forward: full backend `928 passed, 10 skipped`; final
+targeted backend `260 passed`; frontend `139 passed`; frontend lint/build passed;
+browser SSE proxy test passed; isolated Alembic downgrade/upgrade/check passed;
+23 card evaluations passed and the final five-case multi-turn evaluation passed.
+
+The next authorized work is review of the pushed batch and preparation for a
+separate production deployment/pilot. Production migration and deployment still
+require the documented three-file Caddy procedure and must not be inferred from
+the local development migration. Do not rerun recovery, seed against development,
+or start Part B.
