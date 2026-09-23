@@ -85,7 +85,9 @@ def _prompt_for(case: dict) -> tuple[str, str]:
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["id"])
 @pytest.mark.asyncio
-async def test_live_golden_context(case: dict, live_client: OpenAIChatClient) -> None:
+async def test_live_golden_context(
+    case: dict, live_client: OpenAIChatClient, record_property
+) -> None:
     system_prompt, user_message = _prompt_for(case)
     assistant = IrrigationAssistant(AssistantContextBuilder(), live_client, "pt")
     evidence_context = (
@@ -120,6 +122,9 @@ async def test_live_golden_context(case: dict, live_client: OpenAIChatClient) ->
         )
         result = assistant._apply_probe_recommendation_guard(case["context"], result)
 
+    record_property("degraded", bool(getattr(result, "degraded", False)))
+    # The exact response judged here, for the human review pack.
+    record_property("output", result.model_dump(mode="json"))
     assert_response_is_pt_pt(result)
     assert_evidence_sources_resolve(result, evidence_context)
     assert_evidence_ids_match_registry(result, evidence_context)

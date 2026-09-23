@@ -111,7 +111,9 @@ class _StubAccess:
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["id"])
 @pytest.mark.asyncio
-async def test_live_multiturn_chat(case: dict, live_client: OpenAIChatClient, monkeypatch) -> None:
+async def test_live_multiturn_chat(
+    case: dict, live_client: OpenAIChatClient, monkeypatch, record_property
+) -> None:
     tool_results: dict = case["tool_results"]
     observed: list[dict] = []
     drafts: list[str] = []
@@ -152,6 +154,14 @@ async def test_live_multiturn_chat(case: dict, live_client: OpenAIChatClient, mo
     # The API accumulates verified evidence across a conversation; the eval must do
     # the same or it measures a handicapped version of the product.
     prior_evidence: list[dict] = []
+    # validated / repaired / fallback per turn: a repair that then passes is invisible
+    # in the pass count, so it is recorded (see tests/ai_eval/conftest.py).
+    turn_statuses: list[str] = []
+    turn_issues: list[list[str]] = []
+    record_property("turn_statuses", turn_statuses)
+    record_property("turn_issues", turn_issues)
+    turn_replies: list[dict] = []  # the exact replies judged, for the human review pack
+    record_property("turn_replies", turn_replies)
 
     for turn in case["turns"]:
         observed.clear()  # Only this turn's reads may support current claims.
@@ -169,6 +179,17 @@ async def test_live_multiturn_chat(case: dict, live_client: OpenAIChatClient, mo
             LEDGER.provider_failures.append(f"{case['id']}: {type(exc).__name__}: {exc}")
             pytest.fail(f"provider failure (not a model-quality result): {exc}")
 
+        turn_statuses.append(result.validation_status)
+        turn_issues.append(list(result.validation_issues))
+        turn_replies.append(
+            {
+                "user": turn,
+                "reply": result.reply,
+                "proposed_action": result.proposed_action.model_dump(mode="json")
+                if result.proposed_action
+                else None,
+            }
+        )
         try:
             _check_turn(case, result, observed, prior_evidence, turn)
         except AssertionError as exc:

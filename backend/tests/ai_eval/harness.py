@@ -133,10 +133,37 @@ def assert_probe_guard_holds(
     assert all("urgente" not in action.lower() for action in interpretation.recommended_actions)
 
 
+_PT_COUNTS = {
+    "um": 1,
+    "uma": 1,
+    "dois": 2,
+    "duas": 2,
+    "três": 3,
+    "tres": 3,
+    "quatro": 4,
+    "cinco": 5,
+    "seis": 6,
+    "sete": 7,
+    "oito": 8,
+    "nove": 9,
+    "dez": 10,
+}
+_SECTOR_COUNT_RE = re.compile(
+    r"\b(\d+|" + "|".join(_PT_COUNTS) + r")\s+se(?:c)?tor(?:es)?\b", re.IGNORECASE
+)
+
+
 def assert_farm_urgent_actions_match_engine(
     interpretation: AgronomicInterpretation,
     context: dict,
 ) -> None:
+    """Urgency must track the engine, judged over the whole response.
+
+    Every engine-irrigate sector must be named in an urgent line, no other sector may
+    be, and a headline that names none ("Rega urgente em dois sectores") must state the
+    engine's count. Checking each sentence alone rejected that correct headline while
+    letting an answer drop an urgent sector unnoticed.
+    """
     sectors = context.get("sectors") or []
     actions = {
         str(sector.get("sector_name") or sector.get("name")): sector.get(
@@ -148,16 +175,34 @@ def assert_farm_urgent_actions_match_engine(
     urgent_segments = [
         segment
         for text in _response_text(interpretation)
-        for segment in re.split(r"[\n.;]", text)
+        # A "." between digits is a decimal point ("21.0 mm"), not a sentence end.
+        for segment in re.split(r"[\n;]|(?<!\d)\.(?!\d)", text)
         if "rega urgente" in segment.lower()
     ]
+    if not urgent_segments:
+        return
+    if not irrigating:
+        raise AssertionError(
+            f"urgent irrigation claimed with no irrigate action: {urgent_segments[0]!r}"
+        )
+    named_as_urgent: set[str] = set()
     for segment in urgent_segments:
-        if not irrigating:
-            raise AssertionError(f"urgent irrigation claimed with no irrigate action: {segment!r}")
         named = {name for name in actions if name.lower() in segment.lower()}
-        assert named, f"urgent irrigation does not identify an engine-irrigate sector: {segment!r}"
         invalid = named - irrigating
         assert not invalid, f"non-irrigate sectors listed as urgent: {sorted(invalid)}"
+        if named:
+            named_as_urgent |= named
+            continue
+        count = _SECTOR_COUNT_RE.search(segment)
+        assert count, f"urgent irrigation names no sector and states no count: {segment!r}"
+        stated = count.group(1).lower()
+        stated = int(stated) if stated.isdigit() else _PT_COUNTS[stated]
+        assert stated == len(irrigating), (
+            f"urgent sector count {stated} does not match the engine's {len(irrigating)}: "
+            f"{segment!r}"
+        )
+    missing = irrigating - named_as_urgent
+    assert not missing, f"engine-irrigate sectors never named as urgent: {sorted(missing)}"
 
 
 # ---------------------------------------------------------------------------

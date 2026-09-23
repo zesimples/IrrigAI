@@ -10,7 +10,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "e2e": "playwright test",
-    "e2e:ui": "playwright test --ui"
+    "e2e:ui": "playwright test --ui",
+    "e2e:chat-review": "BACKEND_INTERNAL_URL=http://127.0.0.1:8101 next build && playwright test --config playwright.chat-review.config.ts"
   },
   "dependencies": {
     "@sentry/nextjs": "^8.0.0",

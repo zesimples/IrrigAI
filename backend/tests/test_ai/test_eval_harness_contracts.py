@@ -317,3 +317,73 @@ class TestActionLifecycleAssertion:
     def test_rejects_an_empty_lifecycle(self):
         with pytest.raises(AssertionError, match="no action lifecycle"):
             assert_action_lifecycle_is_terminal([])
+
+
+class TestFarmUrgencyCheckedAtResponseLevel:
+    """2026-09-23: the per-sentence check rejected a correct live answer — a headline
+    "Rega urgente em dois sectores" followed by each sector named with its dose — while
+    accepting one that named a single urgent sector and silently dropped the other. The
+    rule now judges the whole response: every engine-irrigate sector must be named as
+    urgent, none other may be, and an unnamed urgent headline must state the right count.
+    """
+
+    CONTEXT = {
+        "sectors": [
+            {"sector_name": "Amendoal 1", "recommendation_action": "irrigate"},
+            {"sector_name": "Amendoal 2", "recommendation_action": "irrigate"},
+            {"sector_name": "Amendoal 3", "recommendation_action": "skip"},
+        ]
+    }
+
+    def test_accepts_the_observed_headline_with_every_sector_named(self):
+        result = _interpretation(
+            summary="Rega urgente em dois sectores. Sem necessidade em um sector.",
+            recommended_actions=[
+                "Rega urgente: Amendoal 1 - 21,0 mm",
+                "Rega urgente: Amendoal 2 - 19,0 mm",
+                "Sem necessidade: Amendoal 3",
+            ],
+        )
+        assert_farm_urgent_actions_match_engine(result, self.CONTEXT)
+
+    def test_a_decimal_point_does_not_end_the_sentence(self):
+        # Observed live: splitting on every "." cut "21.0 mm" in two and lost Amendoal 2.
+        result = _interpretation(
+            summary="Rega urgente: Amendoal 1 (21.0 mm), Amendoal 2 (19.0 mm).",
+        )
+        assert_farm_urgent_actions_match_engine(result, self.CONTEXT)
+
+    def test_rejects_dropping_an_urgent_sector(self):
+        result = _interpretation(irrigation_advice="Rega urgente: Amendoal 1.")
+        with pytest.raises(AssertionError, match="Amendoal 2"):
+            assert_farm_urgent_actions_match_engine(result, self.CONTEXT)
+
+    def test_rejects_an_unnamed_headline_with_the_wrong_count(self):
+        result = _interpretation(
+            summary="Rega urgente em três sectores.",
+            irrigation_advice="Rega urgente: Amendoal 1 e Amendoal 2.",
+        )
+        with pytest.raises(AssertionError, match="count"):
+            assert_farm_urgent_actions_match_engine(result, self.CONTEXT)
+
+    def test_rejects_an_unnamed_headline_with_no_count(self):
+        result = _interpretation(
+            summary="Há rega urgente.",
+            irrigation_advice="Rega urgente: Amendoal 1 e Amendoal 2.",
+        )
+        with pytest.raises(AssertionError):
+            assert_farm_urgent_actions_match_engine(result, self.CONTEXT)
+
+    def test_rejects_a_skip_sector_listed_as_urgent(self):
+        result = _interpretation(
+            irrigation_advice="Rega urgente: Amendoal 1, Amendoal 2 e Amendoal 3."
+        )
+        with pytest.raises(AssertionError, match="Amendoal 3"):
+            assert_farm_urgent_actions_match_engine(result, self.CONTEXT)
+
+    def test_rejects_urgency_when_no_sector_irrigates(self):
+        context = {"sectors": [{"sector_name": "Sul", "recommendation_action": "skip"}]}
+        with pytest.raises(AssertionError):
+            assert_farm_urgent_actions_match_engine(
+                _interpretation(summary="Rega urgente em um sector."), context
+            )

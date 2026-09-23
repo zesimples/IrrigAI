@@ -29,14 +29,19 @@ def main():
         # Explicit opt-in: only the bounded synthetic/anonymised fixture suites.
         # Both DB URLs and Redis stay isolated, including autouse pytest cleanup.
         os.environ["LLM_PROVIDER"] = "openai"
-        if arguments not in ([], ["chat"]):
-            raise SystemExit("live-eval accepts only an optional 'chat' subset")
+        # `case <id>` re-runs one fixture case (all suites) with full tracebacks, to
+        # investigate an intermittent failure without paying for the whole set.
+        selected = arguments[1] if len(arguments) == 2 and arguments[0] == "case" else None
+        if arguments not in ([], ["chat"]) and selected is None:
+            raise SystemExit("live-eval accepts only an optional 'chat' or 'case <id>' subset")
         suites = (
             ["tests/ai_eval/eval_chat_multiturn.py"]
-            if arguments
+            if arguments == ["chat"]
             else ["tests/ai_eval/eval_golden_set.py", "tests/ai_eval/eval_chat_multiturn.py"]
         )
         arguments = [*suites, "-q", "-ra", "--tb=short"]
+        if selected is not None:
+            arguments = [*suites, "-q", "-ra", "--tb=long", "-k", selected]
     url = make_url(os.environ["DATABASE_URL_SYNC"])
     async_url = make_url(os.environ["DATABASE_URL"])
     if (async_url.host, async_url.port, async_url.username, async_url.database) != (
