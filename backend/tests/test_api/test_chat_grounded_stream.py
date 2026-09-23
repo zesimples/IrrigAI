@@ -510,3 +510,46 @@ async def test_analysis_version_is_tenant_scoped(noauth_client, grounded_farm):
         f"/api/v1/sectors/{grounded_farm['sector_id']}/ai-analysis-version"
     )
     assert response.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_a_grounding_fallback_is_not_reported_as_an_outage(client, grounded_farm):
+    """Review 2026-09-23: the model answered, it just failed validation. Marking it
+    degraded made the panel also claim the AI service was unavailable."""
+    _install(
+        ScriptedClient(
+            [
+                LLMToolResponse(
+                    content=None,
+                    tool_calls=[LLMToolCall(id="1", name="get_sector_status", arguments={})],
+                ),
+                LLMToolResponse(content="Aplica 37 mm hoje neste setor.", tool_calls=[]),
+                LLMToolResponse(content="Aplica 37 mm hoje neste setor.", tool_calls=[]),
+            ]
+        )
+    )
+    url = f"/api/v1/farms/{grounded_farm['farm_id']}/chat"
+    body = (
+        await client.post(
+            url, json={"message": "quanto rego?", "sector_id": grounded_farm["sector_id"]}
+        )
+    ).json()
+
+    assert body["validation_status"] == "fallback"
+    assert body["degraded"] is False
+    detail = (await client.get(f"{url}/conversations/{body['conversation_id']}")).json()
+    stored = next(row for row in detail["messages"] if row["id"] == body["message_id"])
+    assert stored["degraded"] is False
+    assert stored["validation_status"] == "fallback"
+
+
+@pytest.mark.asyncio
+async def test_a_quick_action_keeps_its_status_when_reopened(client, grounded_farm):
+    """Review 2026-09-23: live it said validated; reopened, the missing metadata read
+    as fallback and showed the "not supported by the data" banner."""
+    base = f"/api/v1/farms/{grounded_farm['farm_id']}/chat"
+    body = (await client.post(f"{base}/quick-action", json={"kind": "farm_summary"})).json()
+
+    detail = (await client.get(f"{base}/conversations/{body['conversation_id']}")).json()
+    stored = next(row for row in detail["messages"] if row["id"] == body["message_id"])
+    assert stored["validation_status"] == body["validation_status"]

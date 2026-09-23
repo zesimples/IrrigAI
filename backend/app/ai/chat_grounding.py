@@ -226,6 +226,9 @@ class GroundedFacts:
     fields: dict[str, set[float]] = field(default_factory=dict)
     ambiguous_scope: bool = False
     by_sector: dict[str, GroundedFacts] = field(default_factory=dict)
+    # Reads that carry no sector (farm weather) in a multi-sector turn. They support
+    # only clauses that name no sector, and never borrow a sector's values.
+    farm_level: GroundedFacts | None = None
 
     def add(self, unit: str, value: float) -> None:
         self.values.setdefault(unit, set()).add(round(float(value), 3))
@@ -308,6 +311,7 @@ def collect_facts(
         return GroundedFacts(
             ambiguous_scope=True,
             by_sector={key: _collect_single(calls, user_message) for key, calls in grouped.items()},
+            farm_level=_collect_single(unscoped, user_message) if unscoped else None,
         )
     return _collect_single(unscoped, user_message)
 
@@ -382,9 +386,8 @@ def validate_reply(reply: str, facts: GroundedFacts) -> ValidationResult:
         return ValidationResult([GroundingIssue("empty_reply", "A resposta está vazia.")])
     if facts.by_sector:
         for clause in _CLAUSE_SPLIT_RE.split(reply):
-            if not extract_numeric_claims(clause) and not (
-                _advises(clause, _IRRIGATE_DIRECTIVE_RE) or _advises_skip(clause)
-            ):
+            stance = _advises(clause, _IRRIGATE_DIRECTIVE_RE) or _advises_skip(clause)
+            if not extract_numeric_claims(clause) and not stance:
                 continue
             matches = [
                 item
@@ -394,7 +397,9 @@ def validate_reply(reply: str, facts: GroundedFacts) -> ValidationResult:
                     r"(?<!\w)" + re.escape(item.sector_name) + r"(?!\w)", clause, re.IGNORECASE
                 )
             ]
-            if len(matches) != 1:
+            if not matches and not stance and facts.farm_level is not None:
+                issues.extend(validate_reply(clause, facts.farm_level).issues)
+            elif len(matches) != 1:
                 issues.append(
                     GroundingIssue(
                         "ambiguous_scope",

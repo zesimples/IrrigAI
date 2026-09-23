@@ -241,7 +241,10 @@ class ChatAgent:
                         proposed=proposed,
                         tool_calls=tool_calls,
                         facts=facts,
-                        degraded=True,
+                        # The model was reachable; it did not converge. `degraded`
+                        # means the AI service was unavailable, which the panel
+                        # tells the user in so many words.
+                        degraded=False,
                         validation_status="fallback",
                         issues=["tool_loop_exhausted"],
                     )
@@ -263,7 +266,9 @@ class ChatAgent:
                     proposed=proposed,
                     tool_calls=tool_calls,
                     facts=facts,
-                    degraded=status == "fallback",
+                    # A grounding fallback is reported by validation_status (and
+                    # counted in ai_chat_turns_total); it is not an outage.
+                    degraded=False,
                     validation_status=status,
                     issues=issues,
                 )

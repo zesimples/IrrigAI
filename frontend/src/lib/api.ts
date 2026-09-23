@@ -511,7 +511,7 @@ export const chatApi = {
       if (done) break;
     }
     if (buffer.trim()) consumeEvent(buffer);
-    if (!receivedDone) throw new ApiError(502, "Resposta interrompida antes da confirmação. Envia de novo para retomar.");
+    if (!receivedDone) throw new ApiError(502, "a resposta foi interrompida antes de terminar");
 
     return {
       reply,

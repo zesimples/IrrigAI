@@ -497,3 +497,52 @@ class TestEngineAuthorityCannotBeBypassed:
     )
     def test_irrigation_advice_agreeing_with_the_engine_passes(self, reply):
         assert validate_reply(reply, self._irrigate_facts()).ok
+
+
+class TestFarmLevelFactsInMultiSectorTurns:
+    """Review 2026-09-23: weather read in a farm conversation carries no sector, and it
+    was discarded whenever the overview named more than one sector — so a correct
+    "Prevê-se 8 mm de chuva" fell back, inflating the fallback rate for good answers.
+    """
+
+    def _facts(self) -> GroundedFacts:
+        return collect_facts(
+            [
+                {
+                    "tool": "get_farm_overview",
+                    "result": {
+                        "sectors": [
+                            {
+                                "sector_id": "a",
+                                "name": "Olival",
+                                "action": "skip",
+                                "depletion_mm": 8,
+                            },
+                            {
+                                "sector_id": "b",
+                                "name": "Vinha",
+                                "action": "irrigate",
+                                "irrigation_depth_mm": 12,
+                                "depletion_mm": 40,
+                            },
+                        ]
+                    },
+                },
+                {"tool": "get_weather", "result": {"rainfall_mm": 8.0, "et0_mm": 4.2}},
+            ]
+        )
+
+    def test_farm_level_weather_grounds_without_naming_a_sector(self):
+        assert validate_reply("Prevê-se 8 mm de chuva nas próximas 48 horas.", self._facts()).ok
+
+    def test_a_sector_value_still_needs_its_sector_named(self):
+        assert not validate_reply("A depleção é de 40 mm.", self._facts()).ok
+
+    def test_advice_still_needs_its_sector_named(self):
+        result = validate_reply("Deves regar hoje.", self._facts())
+        assert any(issue.kind == "ambiguous_scope" for issue in result.issues)
+
+    def test_sector_clauses_are_still_checked_against_their_own_sector(self):
+        facts = self._facts()
+        assert validate_reply("Prevê-se 8 mm de chuva. Vinha: aplica 12 mm.", facts).ok
+        assert not validate_reply("Prevê-se 8 mm de chuva. Olival: aplica 12 mm.", facts).ok

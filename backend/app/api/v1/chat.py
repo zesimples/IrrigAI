@@ -907,6 +907,13 @@ async def run_quick_action(
         surface=body.kind,
         evidence=([item.model_dump() for item in structured.evidence] if structured else None),
     )
+    validation_status = "fallback" if message.degraded else "validated"
+    # Reopened messages read their status from response_metadata; without it they
+    # default to "fallback" and a sound summary reopened with the fallback banner.
+    message.response_metadata = {
+        "validation_status": validation_status,
+        "contract_version": CONTRACT_VERSION,
+    }
     await db.commit()
     return ChatResponse(
         reply=text,
@@ -915,7 +922,7 @@ async def run_quick_action(
         degraded=message.degraded,
         evidence=structured.evidence if structured else [],
         contract_version=CONTRACT_VERSION,
-        validation_status="fallback" if message.degraded else "validated",
+        validation_status=validation_status,
     )
 
 

@@ -64,6 +64,11 @@ const ACTION_STATUS_LABEL: Record<string, string> = {
   legacy: "Proposta anterior — o resultado não ficou registado. Pede uma nova.",
 };
 
+// Error details are interpolated into a sentence that supplies its own full stop.
+function asClause(detail: string): string {
+  return detail.replace(/[\s.]+$/, "");
+}
+
 function newTurnId(): string {
   return `turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -169,6 +174,12 @@ export function ChatPanel({
     setLoading(busy);
   };
 
+  // The server rejects continuing another scope's conversation, and listing them
+  // put another sector's transcript under this sector's header.
+  const scopedConversations = conversations.filter(
+    (conversation) => conversation.sector_id === (sectorId ?? null),
+  );
+
   const pushAssistant = (text: string) =>
     setMessages((prev) => [...prev, { role: "assistant", text }]);
 
@@ -214,7 +225,7 @@ export function ChatPanel({
     } catch (e) {
       if (generation !== generationRef.current) return;
       const detail = e instanceof Error ? e.message : "Erro desconhecido";
-      pushAssistant(`Não foi possível completar esta acção: ${detail}. Tente novamente.`);
+      pushAssistant(`Não foi possível completar esta acção: ${asClause(detail)}. Tente novamente.`);
     } finally {
       if (generation === generationRef.current) setBusy(false);
     }
@@ -304,7 +315,7 @@ export function ChatPanel({
                 ...message,
                 text: aborted
                   ? "Resposta interrompida. Envia de novo para retomar."
-                  : `Erro ao contactar o assistente: ${detail}. Tente novamente.`,
+                  : `Erro ao contactar o assistente: ${asClause(detail)}. Tente novamente.`,
                 degraded: true,
                 status: "interrupted",
               }
@@ -341,8 +352,13 @@ export function ChatPanel({
       if (result.status === "succeeded") onActionCompleted?.();
     } catch (e) {
       if (generation !== generationRef.current) return;
-      const body = (e as { body?: { status?: ProposedActionOut["status"] } }).body;
-      const detail = e instanceof Error ? e.message : "Erro desconhecido";
+      // A failed confirm returns 422 with the action itself as the body: its
+      // error_detail is the server's PT reason. The ApiError message is only the
+      // HTTP status text ("Unprocessable Entity"), never shown to the user.
+      const body = (e as {
+        body?: { status?: ProposedActionOut["status"]; error_detail?: string | null };
+      }).body;
+      const detail = body?.error_detail || "Não foi possível executar a acção.";
       updateAction(index, { ...action, status: body?.status ?? "failed", error_detail: detail });
     } finally {
       if (generation === generationRef.current) setBusy(false);
@@ -411,7 +427,7 @@ export function ChatPanel({
           <p className="text-xs text-emerald-200">Dados da exploração em contexto</p>
         </div>
         <div className="flex items-center gap-1">
-          {conversations.length > 0 && (
+          {scopedConversations.length > 0 && (
             <button
               type="button"
               onClick={() => setPickerOpen((open) => !open)}
@@ -453,7 +469,7 @@ export function ChatPanel({
             Conversas anteriores
           </p>
           <ul className="space-y-1">
-            {conversations.map((conversation) => (
+            {scopedConversations.map((conversation) => (
               <li key={conversation.id}>
                 <button
                   type="button"
@@ -522,7 +538,7 @@ export function ChatPanel({
                 Resposta interrompida — não é uma resposta completa.
               </p>
             )}
-            {msg.role === "assistant" && msg.validationStatus === "fallback" && (
+            {msg.role === "assistant" && msg.validationStatus === "fallback" && !msg.degraded && (
               <p className="mt-1 max-w-[85%] text-[10px] text-amber-700">
                 Resposta determinística — a explicação gerada não ficou sustentada pelos dados.
               </p>

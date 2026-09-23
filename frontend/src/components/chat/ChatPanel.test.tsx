@@ -126,16 +126,25 @@ describe("ChatPanel", () => {
     // Opening Histórico mid-confirm bumped the generation counter, so the confirm's
     // finally never cleared `loading` and its result was dropped — the panel stuck on
     // "A pensar…" while the server had already committed the write.
+    // Both in this panel's scope (only same-scope conversations are listed). The
+    // first is auto-resumed on open; the second is the one the user picks.
+    const currentConversation = {
+      id: "c-current", title: "Conversa actual", sector_id: "s1",
+      last_message_at: "2026-09-02T10:00:00Z",
+    };
     const otherConversation = {
-      id: "c-other", title: "Outra conversa", sector_id: "s-other",
+      id: "c-other", title: "Outra conversa", sector_id: "s1",
       last_message_at: "2026-09-01T10:00:00Z",
     };
+    const conversationDetail = (id: string) => Promise.resolve(
+      id === "c-other"
+        ? { id, messages: [{ id: "m9", role: "assistant", content: "antiga", created_at: "2026-09-01T10:00:00Z" }] }
+        : { id, messages: [] },
+    ) as any;
 
     function setUp() {
-      (chatApi.conversations as any).mockResolvedValue([otherConversation]);
-      vi.mocked(chatApi.conversation).mockResolvedValue({
-        id: "c-other", messages: [{ id: "m9", role: "assistant", content: "antiga", created_at: "2026-09-01T10:00:00Z" }],
-      } as any);
+      (chatApi.conversations as any).mockResolvedValue([currentConversation, otherConversation]);
+      vi.mocked(chatApi.conversation).mockImplementation((_farm, id) => conversationDetail(id));
       vi.mocked(chatApi.streamChat).mockImplementation(streamReturning({ proposed_action: {
         type: "run_calibration", summary: "Calibrar setor", action_id: "a1", status: "pending", params: {},
       } }));
@@ -166,10 +175,8 @@ describe("ChatPanel", () => {
     });
 
     it("allows switching conversations again once the turn has finished", async () => {
-      (chatApi.conversations as any).mockResolvedValue([otherConversation]);
-      vi.mocked(chatApi.conversation).mockResolvedValue({
-        id: "c-other", messages: [{ id: "m9", role: "assistant", content: "antiga", created_at: "2026-09-01T10:00:00Z" }],
-      } as any);
+      (chatApi.conversations as any).mockResolvedValue([currentConversation, otherConversation]);
+      vi.mocked(chatApi.conversation).mockImplementation((_farm, id) => conversationDetail(id));
       vi.mocked(chatApi.streamChat).mockImplementation(streamReturning({}));
       render(<ChatPanel farmId="f1" sectorId="s1" onClose={() => {}} />);
       fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "olá" } });
@@ -183,12 +190,73 @@ describe("ChatPanel", () => {
     it("refuses to swap the transcript from an already-open picker", async () => {
       const { onActionCompleted, resolve } = setUp();
       fireEvent.click(await screen.findByLabelText("Conversas anteriores"));
+      await waitFor(() => expect(chatApi.conversation).toHaveBeenCalledWith("f1", "c-current"));
       await askAndConfirm();
       fireEvent.click(screen.getByText("Outra conversa"));
       await act(async () => resolve({ status: "succeeded", error_detail: null }));
-      expect(chatApi.conversation).not.toHaveBeenCalled();
+      expect(chatApi.conversation).not.toHaveBeenCalledWith("f1", "c-other");
       expect(onActionCompleted).toHaveBeenCalled();
       expect(screen.getByPlaceholderText(/pergunta/i)).not.toBeDisabled();
+    });
+  });
+
+  describe("pilot-readiness fixes (review 2026-09-23)", () => {
+    const row = (id: string, title: string, sector_id: string | null) => ({
+      id, title, sector_id, last_message_at: "2026-09-01T10:00:00Z",
+    });
+
+    it("lists only conversations in the current scope", async () => {
+      (chatApi.conversations as any).mockResolvedValue([
+        row("c-a", "Deste setor A", "s1"),
+        row("c-b", "Deste setor B", "s1"),
+        row("c-other", "Outro setor", "s-other"),
+        row("c-farm", "Da exploração", null),
+      ]);
+      vi.mocked(chatApi.conversation).mockResolvedValue({ id: "c-a", messages: [] } as any);
+      render(<ChatPanel farmId="f1" sectorId="s1" onClose={() => {}} />);
+      fireEvent.click(await screen.findByLabelText("Conversas anteriores"));
+      expect(screen.getByText("Deste setor B")).toBeInTheDocument();
+      expect(screen.queryByText("Outro setor")).not.toBeInTheDocument();
+      expect(screen.queryByText("Da exploração")).not.toBeInTheDocument();
+    });
+
+    it("shows the server's reason when a confirmation fails", async () => {
+      vi.mocked(chatApi.streamChat).mockImplementation(streamReturning({ proposed_action: {
+        type: "run_calibration", summary: "Calibrar setor", action_id: "a1", status: "pending", params: {},
+      } }));
+      vi.mocked(chatApi.confirmAction).mockRejectedValueOnce(Object.assign(new Error("Unprocessable Entity"), {
+        body: { status: "failed", error_detail: "Este sector não tem sonda associada." },
+      }));
+      render(<ChatPanel farmId="f1" sectorId="s1" onClose={() => {}} />);
+      fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "calibrar" } });
+      fireEvent.click(screen.getByLabelText("Enviar"));
+      fireEvent.click(await screen.findByText("Confirmar"));
+      expect(await screen.findByText(/Este sector não tem sonda associada/)).toBeInTheDocument();
+      expect(screen.queryByText(/Unprocessable/)).not.toBeInTheDocument();
+    });
+
+    it("words a failed send as one well-formed instruction", async () => {
+      vi.mocked(chatApi.streamChat).mockRejectedValueOnce(new Error("A resposta foi interrompida antes de terminar."));
+      render(<ChatPanel farmId="f1" onClose={() => {}} />);
+      fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "olá" } });
+      fireEvent.click(screen.getByLabelText("Enviar"));
+      const message = await screen.findByText(/Erro ao contactar o assistente/);
+      expect(message.textContent).not.toMatch(/\.\./);
+      expect(message.textContent).toMatch(/Tente novamente\.$/);
+    });
+
+    it.each([
+      { degraded: true, status: "fallback", shows: /serviço de IA não estava disponível/, hides: /não ficou sustentada/ },
+      { degraded: false, status: "fallback", shows: /não ficou sustentada/, hides: /serviço de IA não estava disponível/ },
+    ])("names one cause per fallback (degraded: $degraded)", async ({ degraded, status, shows, hides }) => {
+      (chatApi.conversations as any).mockResolvedValue([row("c-a", "Conversa", null)]);
+      vi.mocked(chatApi.conversation).mockResolvedValue({
+        id: "c-a", messages: [{ id: "m1", role: "assistant", content: "resposta", degraded,
+          validation_status: status, created_at: "2026-09-01T10:00:00Z" }],
+      } as any);
+      render(<ChatPanel farmId="f1" onClose={() => {}} />);
+      expect(await screen.findByText(shows)).toBeInTheDocument();
+      expect(screen.queryByText(hides)).not.toBeInTheDocument();
     });
   });
 
