@@ -2,13 +2,35 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current state — 2026-09-23: read before running commands
+## Current state — 2026-09-23 (evening): read before running commands
 
-Development recovery is **complete**, and the A0–A4 AI grounding work is **committed and pushed** (`05ea921`, plus the review fixes on top). Production has **not** been deployed and is two migrations behind; the deploy plan is `docs/deploy-plan-a0-a4-2026-09-23.md`.
+**A4 is not passed.** All local verification is done; what remains needs production access
+or people — see [the A4 completion report](docs/a4-completion-report-2026-09-23.md), which is
+the authoritative record and supersedes earlier "28/28" claims.
 
-- **Development** is at migration head `a0d5b179c368`. The original Esporão, Conqueiros and Amendoas do Lago identities and their historical subtrees are restored and active; the seed-incident replacement farms are archived with every replacement record retained. See [the recovery record](docs/development-recovery-completed-2026-09-21.md).
-- **Production** was last verified at `1c13f632d1a6` (2026-07-29) — confirm with `alembic current` before acting. It needs exactly two migrations, `019a556f37dd` then `a0d5b179c368`, and also still carries the undeployed code-only `1aa77d1` (`no_candidate` reason split). Migrate BEFORE swapping images, with all three Compose files (see **Production deploys**).
-- **Archived replacement probes keep the same provider `external_id` as the restored active probes.** That is permanent, and it is why `active_probes_stmt(farm_id=...)` exists in `active_records.py`: any lookup of a probe by provider external id MUST be scoped to active records *and* to the requesting farm, or ingested readings land on an archived probe. Do not "simplify" a provider-id lookup back to a global query.
+- **Local commits are NOT pushed.** `origin/main` is at `23ea0c7`; local `main` carries Codex's
+  `50476ff` plus the A4 batch (`80f9716`, `8e6cdec`, `77ef9b8`, `81164fe`, `593853c`, docs).
+  Pushing is awaiting approval.
+- **Development** is at `a0d5b179c368`. **Production** was last verified at `1c13f632d1a6`
+  (2026-07-29) and needs exactly `019a556f37dd` → `a0d5b179c368`; nothing has been deployed.
+  Use [the deploy plan](docs/deploy-plan-a0-a4-2026-09-23.md) — `docs/runbooks/deploy.md` is stale.
+- **Farm irrigation advice is now written by a deterministic guard**
+  (`assistant._apply_farm_recommendation_guard`) from per-sector engine decisions, as the probe
+  guard does. The model had been telling growers that a sector with *no* recommendation needed
+  no water (10/10 runs on one case), because the prompt itself said "if none irrigates, write
+  'todos os sectores'". **"No recommendation" is never "no need"** — keep that distinction in any
+  farm-level surface.
+- **Archived replacement probes keep the same provider `external_id` as the restored active probes.**
+  That is permanent, and it is why `active_probes_stmt(farm_id=...)` exists in `active_records.py`:
+  any lookup of a probe by provider external id MUST be scoped to active records *and* to the
+  requesting farm. Do not "simplify" it back to a global query. Several ops scripts still do the
+  global lookup (listed in the report's backlog) — do not run them against recovered data.
+- **There is no AI kill switch.** To pause the AI, set `OPENAI_API_KEY` to a non-empty invalid
+  value and recreate `backend`; an *empty* key makes AI endpoints 500, `LLM_DAILY_REQUEST_LIMIT=0`
+  means unlimited, and `LLM_PROVIDER=mock` shows mock text to growers.
+- **Live evaluation:** `run_isolated_review live-eval [chat | case <id>]`; set `AI_EVAL_REPORT`
+  for per-case repairs, fallbacks, drafts, latency and tokens. A pass count alone hid the farm
+  defect — read the report.
 
 Standing safeguards — these are what the September incident cost, so keep them:
 
@@ -305,6 +327,12 @@ Detailed tracking in `docs/handoff-codex-2026-06-17.md`.
 - **`ChatPanel.loadConversation` bumps `generationRef`**, so opening Histórico while a confirm is in flight strands `setLoading(false)` behind a stale-generation guard that nothing else clears. The user sees "A pensar…" forever and concludes the action did not run — **after the soil-bounds write committed**.
 - **Confirming a chat calibration clears `is_customized` and overwrites an agronomist's manual CC/PMP**, disclosed to the user as the single fixed sentence "Correr a calibração inteligente do setor."; the card never renders `action_type` or `params`. And a model-authored `depth_mm` is persisted via `float(depth)` with no bounds check — the only model-supplied number that becomes a persisted agronomic value, and the only one not passed through `_bounded_int`.
 Deploy sequence, pre-checks and lock guidance (the `chat_message → recommendation` FK needs `lock_timeout` and a window outside 03:50–05:30 UTC) are in `docs/deploy-plan-a0-a4-2026-09-23.md`. **`docs/runbooks/deploy.md` is stale** — it uses two Compose files and the containerised nginx; this host needs all three including `docker-compose.caddy.yml` or public 502s follow.
+
+**A4 verification cycle (Claude Code, 2026-09-23, `80f9716`..`593853c`, local, NOT pushed; no migration) — gate NOT passed; see `docs/a4-completion-report-2026-09-23.md`.** Local evidence complete; production migration/deploy/Caddy streaming, human review (`docs/a4-human-review-pack-2026-09-23.md`) and the pilot (`docs/a4-pilot-protocol-2026-09-23.md`) remain. Lessons worth keeping:
+- **A pass count is not evidence.** Every earlier live "28/28" was blind to the farm summary calling an unassessed sector "sem necessidade", because nothing checked no-need claims. The eval now records per case (`AI_EVAL_REPORT`) repairs, fallbacks, drafts, latency and tokens; judge the report, and replay old bad outputs against a changed check before trusting a clean run.
+- **Prompt edits to fix one case can break others** — the first prompt fix took `farm-no-irrigation` from 0/10 to 9/10 failing. Measure every farm case ×10 after any farm-prompt change, and prefer a deterministic guard for decision fields.
+- **The SSE browser test runs the production standalone build** (`npm run e2e:chat-review`, CI job `frontend-chat-stream`) and fails without `Cache-Control: no-transform` — the Next server buffers otherwise. It does not verify Caddy.
+- Chat messages written in one transaction share `created_at`; order with `chat_memory.MESSAGE_ORDER` (question before answer), never `created_at` alone.
 
 **PENDING DEPLOY (`1aa77d1`, pushed to `origin/main` 2026-07-29, code-only, no migration — `--build backend worker frontend`):** `no_candidate` split into `not_applicable` vs `insufficient_data` (see the bullet under **Calibration auto-apply**). Everything else in the background-sweep cycle above IS deployed; this one is not, so prod still shows every uncalibratable sector as "sem dados suficientes". `worker` is in the rebuild list because the Monday sweep emits the refined reasons. **Metric caveat:** the refined `reason` labels only reach `irrigai_calibration_auto_apply_total` on the auto-apply path — with every prod flag OFF, a flag-off preview tallies and lists sectors but records no metric at all, so the split is visible in the UI detail list and not yet in Prometheus. Deliberately not widened: making previews emit metrics would let every click of *correr* inflate the Monday trend line. If farm-wide coverage is wanted in Prometheus without opting a farm in, the clean shape is a separate scheduler-set gauge, not the click-driven counter.
 

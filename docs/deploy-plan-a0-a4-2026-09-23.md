@@ -1,181 +1,255 @@
-# Production deploy plan — A0–A4 (`05ea921`) + the pending `1aa77d1`
+# Production deploy plan — A0–A4 + review fixes
 
-Written 2026-09-23. Companion to
-[the independent review](claude-a0-a4-independent-review-2026-09-23.md).
+Revised 2026-09-23 after checking every step against the repository's actual Compose
+files, Dockerfiles, Alembic environment and migration code, and rehearsing the
+migration on the disposable review database. Companion to
+[the independent review](claude-a0-a4-independent-review-2026-09-23.md) and
+[the A4 completion report](a4-completion-report-2026-09-23.md).
 
-> **Status:** the six blocking defects from the review are **fixed and committed**, and
-> the live evaluation passed (28/28) against the fixed validator. The migrations and
-> sequence below are unaffected by the fixes — no new migration was added. The review's
-> "Important" findings remain open; none of them is a deploy blocker.
+**Nothing in this plan has been run against production.** It requires explicit
+approval for each operation listed in [Approvals required](#approvals-required).
 
----
+## Corrections to the first version of this plan
 
-## What is actually pending
+The first version (same day) had two defects that would have mattered:
+
+1. **It stopped `db-backup` and never restarted it.** The service is
+   `restart: unless-stopped`, so a manual stop keeps it down until someone starts it
+   again — production would have silently stopped taking backups, the failure class
+   behind the 2026-08-24 outage. Step 8 now restarts and verifies it.
+2. **It said production's backup container still ran the old inline entrypoint.**
+   That observation came from the *development* recovery record (2026-09-21).
+   Production received `ops/db-backup.sh` on 2026-08-24 (`9a29a92`, `c689981`,
+   deployed and verified). Step 1 checks it instead of assuming either way.
+
+It also lacked a working rollback: images are rebuilt under the same tag, so "redeploy
+the previous image" had nothing to point at. Step 3 now tags them first.
+
+## What is being deployed
 
 | | |
 |---|---|
-| Prod code | last deployed `c689981` (2026-08-24 outage fix) |
-| Prod schema | last **verified** `1c13f632d1a6` (2026-07-29) — re-confirm before acting |
-| Undeployed commits | `1aa77d1` (code-only), `05ea921` (A0–A4), `00b3e86` (docs) |
-| Migrations to apply | exactly two: `019a556f37dd`, then `a0d5b179c368` |
-| New env vars | **none** |
-| Compose / Dockerfile changes | **none** |
+| Target code | `origin/main` at the commit named in the completion report |
+| Schema, last verified on prod | `1c13f632d1a6` (2026-07-29) — **re-check in step 1** |
+| Migrations to apply | `019a556f37dd`, then `a0d5b179c368` (linear chain, single head) |
+| New env vars / Compose / Dockerfile changes | none |
+| Services rebuilt | `backend`, `worker`, `frontend` (swapped together) |
 
-The Alembic chain is strictly linear with a single head (verified by reading all
-27 revision files), so `alembic upgrade head` applies exactly those two steps:
+**Which application code production is running is not known.** The source checkout
+includes `1aa77d1` (it is an ancestor of `c689981`, deployed 2026-08-24), but that
+deploy changed only `docker-compose.yml` and `ops/`, so the backend/worker/frontend
+*images* may predate it. Step 1 records what each running image actually contains.
 
-```
-1c13f632d1a6  →  019a556f37dd  →  a0d5b179c368   (head)
-```
+## Verified locally before writing this (review DB `irrigai_ai_review_20260921`)
 
-`1aa77d1` (the `no_candidate` → `not_applicable`/`insufficient_data` split) has been
-pending since 2026-07-29 and carries no migration. It is an ancestor of `05ea921`, so
-deploying `main` ships it automatically. **If A0–A4 is held, `1aa77d1` can be shipped
-on its own** by building that commit specifically — it needs no migration and no
-frontend/worker coordination beyond the usual three-service rebuild.
+| Claim the plan relies on | Evidence |
+|---|---|
+| `PGOPTIONS` reaches the Alembic session | Alembic uses `DATABASE_URL_SYNC` (psycopg2/libpq). Through `docker compose run -e PGOPTIONS="-c lock_timeout=5s"`, `current_setting('lock_timeout')` = `5s` |
+| A lock conflict fails fast and leaves no partial schema | Downgraded to `1c13f632d1a6`, held `ROW EXCLUSIVE` on `recommendation` (what scheduler writes take), ran the upgrade: `LockNotAvailable: canceling statement due to lock timeout` after ~5 s; revision still `1c13f632d1a6`, `chat_action` absent |
+| The upgrade itself is fast | After releasing the lock: both migrations in 1.4 s including container start; `alembic check`: no new operations |
+| **Migrate-before-swap is safe** | Production's current code (`c689981`) run against the migrated schema: **762 passed, 10 skipped, 0 failed** — the old image works during the window |
+| The reverse is unsafe | The new code selects `chat_message.reply_to_id` on every chat turn |
 
-## The runbook is stale — do not follow `docs/runbooks/deploy.md` verbatim
+## Conventions
 
-It uses **two** Compose files and assumes the containerised nginx. The current host
-runs **systemd Caddy** on 80/443 and needs **three** files, including the
-production-local, untracked `docker-compose.caddy.yml`, which is what publishes
-`127.0.0.1:8000` and `127.0.0.1:3000` for Caddy to reach. Omitting it removes those
-publications and produces **public 502s**. Also: never `--remove-orphans` on this host
-(`irrigai_grafana` and `irrigai_prometheus` belong to the deployment), and do not start
-the committed Compose nginx/certbot services.
-
-Throughout, `DC` means:
+Run from the production checkout, with `.env` loaded (`set -a; . ./.env; set +a`) so
+`$POSTGRES_USER`/`$POSTGRES_DB` resolve. Every command uses all three Compose files:
 
 ```bash
 DC="docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.caddy.yml"
 ```
 
----
+Never start the committed nginx/certbot services, never use `--remove-orphans`
+(`irrigai_grafana` and `irrigai_prometheus` belong to this deployment), and never
+omit `docker-compose.caddy.yml` (it publishes `127.0.0.1:8000` and `:3000` for
+systemd Caddy — without it the public site returns 502).
 
-## Pre-checks (before touching anything)
-
-1. **Confirm the real schema head.**
-   ```bash
-   $DC exec -T backend alembic current
-   ```
-   Expect `1c13f632d1a6`. Anything else — stop and re-plan; the two-step assumption
-   above is what makes this deploy cheap.
-
-2. **Prove the new constraints cannot fail.** Cheap insurance given that
-   `37eabad4a828` would have failed on prod for exactly this reason.
-   ```sql
-   SELECT count(*) FROM chat_message WHERE reply_to_id IS NOT NULL;               -- expect 0 (or column-missing)
-   SELECT conversation_id, client_message_id, count(*) FROM chat_message
-     WHERE client_message_id IS NOT NULL GROUP BY 1,2 HAVING count(*) > 1;        -- expect 0 rows
-   SELECT count(*) FROM chat_message;                                             -- size, for lock planning
-   ```
-
-3. **Confirm backup freshness** before a schema change — `BACKUP_DIR/.last_full_verify`
-   age, and that the latest archive ends with pg_dump's completion trailer. The
-   `db-backup` container still runs the **old inline entrypoint** on this host
-   (recorded 2026-09-21), so trust the verified archives, not its log lines.
-   `docker stop irrigai-db-backup-1` before `git pull` — the script is bind-mounted and
-   bash reads it incrementally.
-
-4. **Check disk headroom.** The 2026-08-24 outage was a full `/`.
-
-5. **Pick the window: NOT 03:50–05:30 UTC.** Monday `probe_calibration` runs 04:00 and
-   `daily_recommendations` 05:00. See the lock note below.
+**Window:** not 03:50–05:30 UTC (Monday calibration 04:00, daily recommendations 05:00),
+and not while `db-backup` is mid-dump (step 1 checks).
 
 ---
 
-## Sequence
+## 1. Read-only checks — stop on any unexpected answer
 
-### 1. Pull
 ```bash
-docker stop irrigai-db-backup-1
-git pull origin main
+git status --short && git log --oneline -1          # clean checkout, known commit
+$DC ps                                              # all services up; note monitoring containers
+$DC exec -T backend alembic current                 # expect 1c13f632d1a6
+df -h / && docker system df                         # headroom, see below
 ```
 
-### 2. Build all three images first
+Record what the running images contain, so rollback and the stale "is `1aa77d1`
+deployed?" question are answered from fact:
+
 ```bash
+for s in backend worker frontend; do
+  echo "$s $($DC images -q $s) $(docker inspect -f '{{.Created}}' $($DC images -q $s))"
+done
+$DC exec -T backend grep -c not_applicable app/services/probe_calibration_service.py   # 1 ⇒ 1aa77d1 running, 0 ⇒ older
+$DC exec -T worker  grep -c not_applicable app/services/probe_calibration_service.py   # the worker image separately
+```
+
+Backup service and last verified backup:
+
+```bash
+$DC exec -T db-backup head -3 /usr/local/bin/db-backup.sh     # the script, not an inline entrypoint
+$DC logs --tail=30 db-backup                                  # sleeping between cycles, not mid-dump
+ls -lt backups/ | head -5                                     # newest archive and its age
+cat backups/.last_full_verify                                  # last full restore-verification
+```
+
+**Disk:** stop if `/` has less than **10 GB** free. Basis: three image rebuilds need a
+few GB, the step-2 chat dump is small, and `db-backup` is stopped for the window so its
+~20 GB restore-verification cannot run concurrently. Its own floor
+(`BACKUP_MIN_FREE_MB=20480`) must still hold after the deploy for the next cycle.
+
+Code markers above were checked against Git: each one discriminates the commit it
+names (the first draft grepped a file that never contains the marker).
+
+**Constraint pre-checks** (read-only; they prove the new constraints cannot fail):
+
+```sql
+SELECT count(*) FROM chat_message;                                   -- lock-planning size
+SELECT column_name FROM information_schema.columns
+ WHERE table_name='chat_message' AND column_name IN ('reply_to_id','status','client_message_id');
+                                                                    -- expect 0 rows
+```
+
+## 2. Backup the tables the migration touches
+
+The migrations alter `chat_message` and `ai_response_feedback` and create
+`chat_action`; a downgrade discards new columns and `chat_action`. A table-scoped dump
+is small, fast, and exactly covers that:
+
+```bash
+$DC stop db-backup                     # after confirming it is sleeping (step 1)
+# $POSTGRES_USER / $POSTGRES_DB come from .env (see Conventions)
+$DC exec -T db pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
+  -t chat_conversation -t chat_message -t ai_response_feedback \
+  > backups/pre-a0a4-chat-$(date -u +%Y%m%dT%H%MZ).dump
+sha256sum backups/pre-a0a4-chat-*.dump
+$DC exec -T db pg_restore --list < backups/pre-a0a4-chat-*.dump | head   # readable
+```
+
+The newest daily full archive (step 1) is the whole-database fallback; record its name
+and its `.last_full_verify` date in the deploy record.
+
+## 3. Tag the running images for rollback
+
+```bash
+for s in backend worker frontend; do
+  docker tag "$($DC images -q $s)" "irrigai-rollback/$s:pre-a0a4"
+done
+```
+
+## 4. Pull and build — nothing is swapped yet
+
+```bash
+git pull origin main
 $DC build backend worker frontend
 ```
-Build before migrating so a build failure costs nothing.
 
-### 3. Migrate — before swapping any image
+A build failure here costs nothing: the old containers are still serving.
+
+## 5. Migrate, before any image swap
+
 ```bash
 $DC run --rm -e PGOPTIONS="-c lock_timeout=5s" backend alembic upgrade head
+$DC exec -T backend alembic current      # still the OLD container: expect a0d5b179c368
 ```
 
-**Why the lock timeout.** `019a556f37dd` adds
-`chat_message.recommendation_id → recommendation`, which takes `ACCESS EXCLUSIVE` on
-`chat_message` **and `SHARE ROW EXCLUSIVE` on `recommendation`**. Row validation is
-trivial (every value is NULL), but if it lands while the scheduler is writing
-`recommendation`, the `ALTER` queues — and because Postgres lock queues are FIFO, every
-subsequent write to `recommendation` queues behind it. A 50 ms DDL becomes a multi-minute
-write stall. A 5 s timeout turns that into a clean retry instead.
+If it fails with `LockNotAvailable`, nothing changed (rehearsed above). Wait and
+re-run; do not raise the timeout — a long wait is what blocks the recommendation table.
 
-Everything else is safe on a live large table: `chat_action` is a new empty table;
-`chat_message.status` uses a PG11+ fast default (metadata-only, no rewrite); the partial
-unique index and both unique constraints are over columns that are NULL in every existing
-row; nothing touches a hypertable.
+## 6. Swap all three together
 
-**Migrating ahead of the swap is safe** — the currently-running image never writes
-`status`, `reply_to_id` or `client_message_id`, so the server defaults and the new CHECK
-satisfy its inserts. The reverse is fatal in the now-familiar way: the new image's
-`_open_turn` selects `reply_to_id` on **every** chat turn, so code-before-migration
-reproduces the `irrigation_fingerprint` outage class — every chat request 500s.
-
-### 4. Swap all three services together
 ```bash
 $DC up -d --no-deps backend worker frontend
 ```
 
-All three, in one command, for concrete reasons:
-- **frontend** sends `client_message_id` and consumes the new SSE / `ProposedActionOut`
-  shape. Old frontend + new backend silently loses turn resume; new frontend + old
-  backend 500s on unknown fields.
-- **worker** carries `active_probes_stmt`, `probe_calibration_service` and
-  `recommendation_service` changes and runs the scheduler. A stale worker image has
-  bitten this project repeatedly (flowmeter 406; the sweep drain job).
+Together, because the new frontend sends `client_message_id` and reads the new SSE and
+`ProposedActionOut` shapes, and the worker carries the ingestion (`active_probes_stmt`)
+and calibration changes and runs the scheduler.
 
-### 5. Verify
+## 7. Verify
+
 ```bash
-$DC exec -T backend alembic current                      # expect a0d5b179c368
-$DC exec -T backend python -c "import json,urllib.request; print(json.load(urllib.request.urlopen('http://localhost:8000/health')))"
-curl -sf https://irrigai.95.111.254.42.nip.io/health
-$DC logs --tail=200 worker | grep -i "jobs registered"   # expect 8
+$DC ps                                                        # all healthy; monitoring still up
+curl -sf http://127.0.0.1:8000/health                         # db ok, redis ok
+curl -sfo /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/login
+curl -sf https://irrigai.95.111.254.42.nip.io/health          # through Caddy
+$DC logs --tail=200 worker | grep "jobs registered"           # expect 8
+$DC exec -T backend grep -c _NEGATION_BRIDGE_RE app/ai/chat_grounding.py   # 2 ⇒ new code (0 in 05ea921)
+$DC exec -T worker  grep -c _NEGATION_BRIDGE_RE app/ai/chat_grounding.py
+$DC logs --since=10m backend worker | grep -iE "error|MultipleResultsFound|Traceback"
 ```
-Then, in the UI: log in; open a sector; send one chat message and confirm the SSE
-progress appears *before* the answer (this is what the `no-transform` header fixes, and
-its e2e guard is currently unreachable — see the review); check the Boletim and one
-recommendation render.
 
-### 6. Watch for 15 minutes
-`$DC logs -f backend worker frontend`. Specifically watch for `MultipleResultsFound` from
-ingestion — prod has no archived duplicate `external_id`s (the recovery was
-development-only), so the `active_probes_stmt` change should be behaviourally inert
-there, but that is the assumption most worth falsifying early.
+`MultipleResultsFound` is the assumption most worth falsifying early: production has no
+archived duplicate provider IDs (the recovery was development-only), so the
+`active_probes_stmt` change should be inert there.
 
----
+**Caddy streaming** — the check no local test can stand in for. Inspect the site block
+for `encode` and `reverse_proxy` options:
 
-## Known cosmetic breakage on deploy
+```bash
+sudo caddy adapt --config /etc/caddy/Caddyfile 2>/dev/null | head -60 || sudo cat /etc/caddy/Caddyfile
+```
 
-`irrigai_ai_response_feedback_total` changes labels from `["surface","rating"]` to
-`["surface","reason","rating"]`. Existing Grafana panels and any recording rules over it
-break — old series stop, new series start with no continuity. Cardinality is fine
-(`reason` is a 4-value `Literal`). Worth noting in the deploy record; not a blocker.
+Then, in a browser on the public URL, open a sector, ask one question, and record
+from DevTools → Network the `chat/stream` timing: the first `progress` event must
+arrive well before `done`. Repeat with `curl -N` and a real session token, timestamping
+each event line. One question costs one bounded model call and writes one
+conversation owned by the testing user; no farm data changes.
+
+## 8. Restore the backup service — do not skip
+
+```bash
+$DC start db-backup
+$DC ps db-backup                      # running
+$DC logs --tail=20 db-backup          # started a cycle, or sleeping until the next
+```
+
+## 9. Watch for 15 minutes, then write the deploy record
+
+Record: commit, image IDs before and after, `alembic current`, dump name + SHA-256,
+health outputs, worker job count, Caddy timings, and any errors seen.
 
 ## Rollback
 
-Both migrations have correct, order-safe `downgrade()` bodies. Downgrading discards the
-new columns and the whole `chat_action` table — i.e. any proposed/confirmed action
-recorded after the deploy. For a code-only problem, redeploy the previous image and
-**leave the schema forward**: the old code ignores the new columns entirely, so there is
-no need to downgrade to roll back. See `docs/runbooks/rollback.md`.
+- **Code only** (the usual case): the old code runs on the new schema (762/0 above), so
+  **do not downgrade**. Re-point each service at its rollback tag, then recreate:
+  ```bash
+  for s in backend worker frontend; do
+    docker tag "irrigai-rollback/$s:pre-a0a4" "$(docker inspect -f '{{index .RepoTags 0}}' "$($DC images -q $s)")"
+  done
+  $DC up -d --no-deps backend worker frontend
+  ```
+- **Schema** (only if the migration itself is at fault): `alembic downgrade 1c13f632d1a6`
+  discards the new columns and the whole `chat_action` table; restore from the step-2 dump
+  if chat history must be recovered. Both `downgrade()` bodies were verified to reverse
+  their upgrades on the review database.
+- Either way, `$DC start db-backup` if it is stopped.
+
+## Known cosmetic breakage
+
+`irrigai_ai_response_feedback_total` gains a `reason` label; existing Grafana panels on it
+lose continuity. Low cardinality (4 values). Not a blocker.
 
 ## After a successful deploy
 
-- Two one-line `CREATE INDEX CONCURRENTLY` on the new `recommendation_id` FK columns
-  (`chat_message`, `chat_action`). Both are `ON DELETE SET NULL` with no index, which
-  makes bulk farm-subtree deletes quadratic — and this project does those routinely.
-- The five performance indexes from `g7h8i9j0k1l2` are still missing on prod
-  (long-standing dev/prod drift); `CREATE INDEX CONCURRENTLY IF NOT EXISTS` any time.
-- Recreate the `db-backup` container so it picks up `ops/db-backup.sh` instead of the old
-  inline entrypoint.
+- `CREATE INDEX CONCURRENTLY` on the two new `recommendation_id` columns
+  (`chat_message`, `chat_action`) — `ON DELETE SET NULL` with no index makes bulk
+  farm-subtree deletes quadratic.
+- The five `g7h8i9j0k1l2` performance indexes are still missing on prod (known drift).
+- Update `docs/runbooks/deploy.md`, which still describes two Compose files and nginx.
+
+## Approvals required
+
+Each of these is a separate production operation, none authorised yet:
+
+1. **Read-only inspection** — step 1 and the Caddyfile read.
+2. **Backup-service stop + chat-table dump** — step 2.
+3. **Image tag, pull and build** — steps 3–4 (no service change).
+4. **Production migration** — step 5.
+5. **Service swap** — step 6, then 7–8.
+6. **Public streaming check** — one real chat question from a test account (step 7).

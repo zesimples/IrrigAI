@@ -553,3 +553,41 @@ async def test_a_quick_action_keeps_its_status_when_reopened(client, grounded_fa
     detail = (await client.get(f"{base}/conversations/{body['conversation_id']}")).json()
     stored = next(row for row in detail["messages"] if row["id"] == body["message_id"])
     assert stored["validation_status"] == body["validation_status"]
+
+
+class _ProviderDown(MockChatClient):
+    """Every model call fails, as it would with the provider unreachable or disabled."""
+
+    last_model = "unavailable"
+
+    async def run_tool_loop(self, *args, **kwargs):
+        raise ConnectionError("provider unavailable")
+
+    async def complete_structured(self, *args, **kwargs):
+        raise ConnectionError("provider unavailable")
+
+
+@pytest.mark.asyncio
+async def test_an_ai_outage_is_honest_and_leaves_the_engine_recommendation_available(
+    client, grounded_farm
+):
+    """A4.5: the deterministic recommendation must stay usable when the AI is not.
+
+    Characterises existing behaviour; it is also the pilot's stop lever — with no
+    dedicated switch, taking the provider away is how the AI is paused.
+    """
+    _install(_ProviderDown())
+    chat = await client.post(
+        f"/api/v1/farms/{grounded_farm['farm_id']}/chat",
+        json={"message": "quanto rego?", "sector_id": grounded_farm["sector_id"]},
+    )
+    assert chat.status_code == 200
+    body = chat.json()
+    assert body["degraded"] is True
+    assert "temporariamente indisponível" in body["reply"]
+
+    recommendation = await client.get(
+        f"/api/v1/recommendations/{grounded_farm['recommendation_id']}"
+    )
+    assert recommendation.status_code == 200
+    assert recommendation.json()["action"] == "skip"
