@@ -22,6 +22,7 @@ from tests.ai_eval.harness import (
     assert_engine_reason_is_preserved,
     assert_evidence_ids_match_registry,
     assert_evidence_sources_resolve,
+    assert_farm_no_need_claims_match_engine,
     assert_farm_urgent_actions_match_engine,
     assert_no_raw_vwc_decimals,
     assert_probe_guard_holds,
@@ -121,6 +122,10 @@ async def test_live_golden_context(
             explanation_status="degraded" if result.degraded else "generated",
         )
         result = assistant._apply_probe_recommendation_guard(case["context"], result)
+    elif case["surface"] == "farm":
+        # Mirror summarize_farm_structured(): irrigation advice is written from the
+        # engine's per-sector decisions, not trusted from the model.
+        result = assistant._apply_farm_recommendation_guard(case["context"], result)
 
     record_property("degraded", bool(getattr(result, "degraded", False)))
     # The exact response judged here, for the human review pack.
@@ -143,3 +148,4 @@ async def test_live_golden_context(
         assert_no_raw_vwc_decimals(result)
     elif case["surface"] == "farm":
         assert_farm_urgent_actions_match_engine(result, case["context"])
+        assert_farm_no_need_claims_match_engine(result, case["context"])

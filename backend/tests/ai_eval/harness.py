@@ -133,7 +133,31 @@ def assert_probe_guard_holds(
     assert all("urgente" not in action.lower() for action in interpretation.recommended_actions)
 
 
+def _sentences(interpretation: AgronomicInterpretation) -> list[str]:
+    """Response sentences; a "." between digits is a decimal point, not an end."""
+    return [
+        segment
+        for text in _response_text(interpretation)
+        # Only digit.digit is a decimal point ("21.0 mm"); "Talhão 2." ends a sentence.
+        for segment in re.split(r"[\n;]|\.(?!\d)|(?<!\d)\.", text)
+        if segment.strip()
+    ]
+
+
+def _names_in(segment: str, names) -> set[str]:
+    """Sector names mentioned as whole words. Short names ("A") match case-sensitively,
+    or the Portuguese article "a" would name sector A in nearly every sentence."""
+    found = set()
+    for name in names:
+        flags = 0 if len(name) <= 2 else re.IGNORECASE
+        if re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", segment, flags):
+            found.add(name)
+    return found
+
+
 _PT_COUNTS = {
+    "nenhum": 0,
+    "nenhuma": 0,
     "um": 1,
     "uma": 1,
     "dois": 2,
@@ -172,22 +196,12 @@ def assert_farm_urgent_actions_match_engine(
         for sector in sectors
     }
     irrigating = {name for name, action in actions.items() if action == "irrigate"}
-    urgent_segments = [
-        segment
-        for text in _response_text(interpretation)
-        # A "." between digits is a decimal point ("21.0 mm"), not a sentence end.
-        for segment in re.split(r"[\n;]|(?<!\d)\.(?!\d)", text)
-        if "rega urgente" in segment.lower()
-    ]
+    urgent_segments = [s for s in _sentences(interpretation) if "rega urgente" in s.lower()]
     if not urgent_segments:
         return
-    if not irrigating:
-        raise AssertionError(
-            f"urgent irrigation claimed with no irrigate action: {urgent_segments[0]!r}"
-        )
     named_as_urgent: set[str] = set()
     for segment in urgent_segments:
-        named = {name for name in actions if name.lower() in segment.lower()}
+        named = _names_in(segment, actions)
         invalid = named - irrigating
         assert not invalid, f"non-irrigate sectors listed as urgent: {sorted(invalid)}"
         if named:
@@ -201,6 +215,8 @@ def assert_farm_urgent_actions_match_engine(
             f"urgent sector count {stated} does not match the engine's {len(irrigating)}: "
             f"{segment!r}"
         )
+    if not irrigating and not named_as_urgent:
+        return  # every urgent line stated a count, and each matched zero
     missing = irrigating - named_as_urgent
     assert not missing, f"engine-irrigate sectors never named as urgent: {sorted(missing)}"
 
@@ -208,6 +224,62 @@ def assert_farm_urgent_actions_match_engine(
 # ---------------------------------------------------------------------------
 # Part A assertions
 # ---------------------------------------------------------------------------
+
+
+_NO_NEED_RE = re.compile(
+    r"sem necessidade|n[ãa]o (?:requer|precisa|necessita)|n[ãa]o h[áa] necessidade|"
+    r"n[ãa]o (?:[ée]|ser[áa]) (?:necess[áa]ri[oa]|precis[oa]) (?:regar|irrigar|rega)|"
+    r"dispensa(?:r)? (?:a )?rega",
+    re.IGNORECASE,
+)
+
+
+def assert_farm_no_need_claims_match_engine(
+    interpretation: AgronomicInterpretation,
+    context: dict,
+) -> None:
+    """A "no irrigation needed" claim may name only engine skip/defer sectors.
+
+    A sector with no recommendation has no decision to report, and an irrigate sector
+    described as not needing water contradicts the engine outright.
+    """
+    actions = {
+        str(sector.get("sector_name") or sector.get("name")): sector.get(
+            "recommendation_action", sector.get("action")
+        )
+        for sector in context.get("sectors") or []
+    }
+    resting = {name for name, action in actions.items() if action in ("skip", "defer")}
+    for segment in _sentences(interpretation):
+        if not _NO_NEED_RE.search(segment):
+            continue
+        if re.search(r"\btod[oa]s\b", segment, re.IGNORECASE):
+            others = sorted(set(actions) - resting)
+            assert not others, f"'todos' claimed no need, but not for {others}: {segment!r}"
+        named = _names_in(segment, actions)
+        # A count right after the phrase ("sem necessidade em um") is checked as a count;
+        # the same sentence may carry another ("rega urgente em dois sectores").
+        tail = segment[_NO_NEED_RE.search(segment).end() :]
+        counted = re.match(
+            r"\s*(?:de rega\s+)?(?:em|n[oa]s?)\s+(\d+|" + "|".join(_PT_COUNTS) + r")\b",
+            tail,
+            re.IGNORECASE,
+        )
+        if not named and counted:
+            stated = counted.group(1).lower()
+            stated = int(stated) if stated.isdigit() else _PT_COUNTS[stated]
+            assert stated == len(resting), (
+                f"no-need count {stated} does not match the engine's {len(resting)}: {segment!r}"
+            )
+            continue
+        # An unnamed claim is about every sector, unless scoped to the assessed ones.
+        if not named and not re.search(r"avaliad|com recomenda|com decis", segment, re.IGNORECASE):
+            others = sorted(set(actions) - resting)
+            assert not others, f"unscoped no-need claim, but not for {others}: {segment!r}"
+        invalid = named - resting
+        assert not invalid, (
+            f"no-need claim names sectors the engine did not rest: {sorted(invalid)} — {segment!r}"
+        )
 
 
 def assert_confidence_is_server_derived(

@@ -9,6 +9,7 @@ from tests.ai_eval.harness import (
     assert_engine_reason_is_preserved,
     assert_evidence_ids_match_registry,
     assert_evidence_sources_resolve,
+    assert_farm_no_need_claims_match_engine,
     assert_farm_urgent_actions_match_engine,
     assert_no_raw_vwc_decimals,
     assert_notes_are_data_not_instructions,
@@ -387,3 +388,100 @@ class TestFarmUrgencyCheckedAtResponseLevel:
             assert_farm_urgent_actions_match_engine(
                 _interpretation(summary="Rega urgente em um sector."), context
             )
+
+
+class TestFarmNoNeedClaimsMatchEngine:
+    """2026-09-23, observed live: a farm summary said "O sector B não requer rega" for a
+    sector with no engine recommendation at all — asserting a decision the engine never
+    made — and nothing checked no-need claims in either direction.
+    """
+
+    CONTEXT = {
+        "sectors": [
+            {"sector_name": "A", "recommendation_action": "irrigate"},
+            {"sector_name": "B", "recommendation_action": None},
+            {"sector_name": "C", "recommendation_action": "skip"},
+        ]
+    }
+
+    def test_rejects_the_observed_claim_about_a_sector_without_a_decision(self):
+        result = _interpretation(
+            summary="O sector A precisa de rega urgente com 14 mm. O sector B não requer rega.",
+        )
+        with pytest.raises(AssertionError, match="B"):
+            assert_farm_no_need_claims_match_engine(result, self.CONTEXT)
+
+    def test_accepts_saying_a_sector_has_no_recommendation(self):
+        result = _interpretation(
+            summary="Sector B: sem recomendação gerada. Sem necessidade: sector C.",
+        )
+        assert_farm_no_need_claims_match_engine(result, self.CONTEXT)
+
+    def test_rejects_calling_an_irrigate_sector_not_needed(self):
+        result = _interpretation(irrigation_advice="Sem necessidade de rega: sector A e sector C.")
+        with pytest.raises(AssertionError, match="A"):
+            assert_farm_no_need_claims_match_engine(result, self.CONTEXT)
+
+    def test_rejects_all_sectors_when_one_still_irrigates(self):
+        result = _interpretation(summary="Sem necessidade: todos os sectores.")
+        with pytest.raises(AssertionError, match="todos"):
+            assert_farm_no_need_claims_match_engine(result, self.CONTEXT)
+
+    def test_a_one_letter_name_is_not_matched_by_an_article(self):
+        # "a rega" must not read as sector "A" being named.
+        result = _interpretation(summary="Sem necessidade: sector C, a rega pode esperar.")
+        assert_farm_no_need_claims_match_engine(result, self.CONTEXT)
+
+
+class TestFarmClaimsWithoutSectorNames:
+    """2026-09-23, observed live: "Não é necessário irrigar neste momento" for a farm
+    with an unassessed sector passed the check, which only looked at named sectors and
+    "todos". An unnamed claim is a claim about every sector."""
+
+    CONTEXT = {
+        "sectors": [
+            {"sector_name": "Talhão 1", "recommendation_action": None},
+            {"sector_name": "Talhão 2", "recommendation_action": "skip"},
+        ]
+    }
+
+    def test_rejects_a_blanket_no_need_claim_over_an_undecided_sector(self):
+        result = _interpretation(irrigation_advice="Não é necessário irrigar neste momento.")
+        with pytest.raises(AssertionError, match="Talhão 1"):
+            assert_farm_no_need_claims_match_engine(result, self.CONTEXT)
+
+    def test_accepts_a_claim_qualified_to_the_assessed_sectors(self):
+        result = _interpretation(
+            irrigation_advice="Sem necessidade de rega nos sectores avaliados."
+        )
+        assert_farm_no_need_claims_match_engine(result, self.CONTEXT)
+
+    def test_accepts_a_blanket_claim_when_every_sector_rests(self):
+        context = {"sectors": [{"sector_name": "Talhão 2", "recommendation_action": "skip"}]}
+        result = _interpretation(irrigation_advice="Não é necessário irrigar neste momento.")
+        assert_farm_no_need_claims_match_engine(result, context)
+
+    def test_zero_urgent_sectors_is_a_count_that_can_be_checked(self):
+        stated = _interpretation(summary="Rega urgente: nenhum sector.")
+        assert_farm_urgent_actions_match_engine(stated, self.CONTEXT)
+        irrigating = {"sectors": [{"sector_name": "Norte", "recommendation_action": "irrigate"}]}
+        with pytest.raises(AssertionError, match="count"):
+            assert_farm_urgent_actions_match_engine(stated, irrigating)
+
+
+class TestFarmSentenceAndCountParsing:
+    """2026-09-23: two false failures on correct live answers."""
+
+    def test_a_period_after_a_sector_number_ends_the_sentence(self):
+        # "Talhão 2." ends a sentence; only digit.digit is a decimal point.
+        context = TestFarmClaimsWithoutSectorNames.CONTEXT
+        result = _interpretation(summary="Sem necessidade: Talhão 2. Sem recomendação: Talhão 1.")
+        assert_farm_no_need_claims_match_engine(result, context)
+
+    def test_a_counted_no_need_claim_is_checked_against_the_resting_count(self):
+        context = TestFarmUrgencyCheckedAtResponseLevel.CONTEXT  # two irrigate, one skip
+        right = _interpretation(summary="Rega urgente em dois sectores, sem necessidade em um.")
+        assert_farm_no_need_claims_match_engine(right, context)
+        wrong = _interpretation(summary="Rega urgente em um sector, sem necessidade em dois.")
+        with pytest.raises(AssertionError, match="count"):
+            assert_farm_no_need_claims_match_engine(wrong, context)
