@@ -401,3 +401,99 @@ class TestNegatedDirectives:
 
     def test_explaining_an_irrigate_decision_is_not_a_skip_directive(self):
         assert validate_reply("A recomendação é regar 12 mm hoje.", self._irrigate_facts()).ok
+
+
+class TestEngineAuthorityCannotBeBypassed:
+    """Independent review 2026-09-23 (B1-B3).
+
+    The negation scan added for the regression above suppressed a directive whenever
+    *any* negation appeared earlier in a comma-joined sentence, so ordinary Portuguese
+    ("não choveu, por isso deves regar") switched off every engine-authority check. A
+    negation only inverts a directive it is attached to; and a negated irrigation
+    directive is itself advice not to irrigate.
+    """
+
+    def _skip_facts(self, **extra) -> GroundedFacts:
+        return collect_facts(
+            [
+                {
+                    "tool": "get_sector_status",
+                    "result": {
+                        "action": "skip",
+                        "irrigation_depth_mm": 0.0,
+                        "depletion_mm": 12.0,
+                        **extra,
+                    },
+                }
+            ]
+        )
+
+    def _irrigate_facts(self, **extra) -> GroundedFacts:
+        return collect_facts(
+            [
+                {
+                    "tool": "get_sector_status",
+                    "result": {"action": "irrigate", "irrigation_depth_mm": 12.0, **extra},
+                }
+            ]
+        )
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "Hoje não choveu, por isso deves regar 12 mm.",
+            "Não há previsão de chuva, por isso aplica 12 mm hoje.",
+            "Sem rega nas últimas 48 horas, recomendo regar hoje.",
+            "Como não choveu deves regar hoje.",
+        ],
+    )
+    def test_an_unrelated_negation_does_not_excuse_irrigation_advice(self, reply):
+        result = validate_reply(reply, self._skip_facts())
+        assert any(issue.kind == "engine_conflict" for issue in result.issues)
+
+    def test_an_unrelated_negation_does_not_excuse_advice_without_an_engine_decision(self):
+        result = validate_reply("Hoje não choveu, por isso deves regar.", collect_facts([]))
+        assert any(issue.kind == "missing_engine" for issue in result.issues)
+
+    def test_a_dose_cannot_ground_on_total_available_water(self):
+        result = validate_reply(
+            "Recomendo uma dotação de 120 mm para hoje.", self._skip_facts(taw_mm=120.0)
+        )
+        assert not result.ok
+        assert any(issue.kind == "engine_conflict" for issue in result.issues)
+
+    @pytest.mark.parametrize(
+        "reply",
+        ["A dotação de hoje é de 120 mm.", "Recomendo uma dose de 120 mm.", "Lâmina de 120 mm."],
+    )
+    def test_a_dose_label_binds_to_the_engine_dose_not_any_mm_field(self, reply):
+        assert not validate_reply(reply, self._irrigate_facts(taw_mm=120.0)).ok
+
+    def test_a_measurement_next_to_advice_is_not_read_as_the_dose(self):
+        facts = self._irrigate_facts(depletion_mm=40.0)
+        assert validate_reply("Deves regar 12 mm hoje: a depleção já atingiu 40 mm.", facts).ok
+
+    def test_past_applied_irrigation_is_still_quotable(self):
+        facts = self._skip_facts(last_irrigation_applied_mm=18.0)
+        assert validate_reply("A última rega aplicou 18 mm.", facts).ok
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "No Olival Norte podes saltar a rega.",
+            "Não é preciso regar hoje.",
+            "Não deves regar hoje.",
+            "Deixa a rega para amanhã.",
+            "Aguarda antes de regar hoje.",
+        ],
+    )
+    def test_advice_not_to_irrigate_contradicts_an_irrigate_decision(self, reply):
+        result = validate_reply(reply, self._irrigate_facts())
+        assert any(issue.kind == "engine_conflict" for issue in result.issues)
+
+    @pytest.mark.parametrize(
+        "reply",
+        ["Não deixes de regar hoje.", "Não há chuva prevista, por isso rega hoje 12 mm."],
+    )
+    def test_irrigation_advice_agreeing_with_the_engine_passes(self, reply):
+        assert validate_reply(reply, self._irrigate_facts()).ok

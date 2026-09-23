@@ -91,10 +91,16 @@ export function ChatPanel({
   // connection resumes the same turn instead of asking the model twice.
   const pendingTurnRef = useRef<{ id: string; text: string } | null>(null);
   const generationRef = useRef(0);
+  // Mirrors `loading` for code that cannot see current state — `loadConversation`
+  // is a useCallback whose closure holds a stale `loading`. While a send, quick
+  // action or confirmation owns the transcript, swapping it would bump the
+  // generation out from under that operation and strand `loading` forever.
+  const busyRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const loadConversation = useCallback(
     async (id: string) => {
+      if (busyRef.current) return;
       const generation = ++generationRef.current;
       const detail = await chatApi.conversation(farmId, id);
       if (generation !== generationRef.current) return;
@@ -127,6 +133,7 @@ export function ChatPanel({
     hasSentRef.current = false;
     generationRef.current += 1;
     pendingTurnRef.current = null;
+    busyRef.current = false;
     setLoading(false);
     setConversationId(null);
     setMessages([]);
@@ -157,6 +164,11 @@ export function ChatPanel({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const setBusy = (busy: boolean) => {
+    busyRef.current = busy;
+    setLoading(busy);
+  };
+
   const pushAssistant = (text: string) =>
     setMessages((prev) => [...prev, { role: "assistant", text }]);
 
@@ -176,7 +188,7 @@ export function ChatPanel({
     hasSentRef.current = true;
     const generation = ++generationRef.current;
     pushUser(action.label);
-    setLoading(true);
+    setBusy(true);
     try {
       // Quick actions run server-side so their result lands in the conversation
       // with its context, degraded status, and feedback — not only in this tab.
@@ -204,7 +216,7 @@ export function ChatPanel({
       const detail = e instanceof Error ? e.message : "Erro desconhecido";
       pushAssistant(`Não foi possível completar esta acção: ${detail}. Tente novamente.`);
     } finally {
-      if (generation === generationRef.current) setLoading(false);
+      if (generation === generationRef.current) setBusy(false);
     }
   }
 
@@ -221,7 +233,7 @@ export function ChatPanel({
     setMessages((prev) => retry
       ? [...prev.slice(0, -1), { role: "assistant", text: "" }]
       : [...prev, { role: "assistant", text: "" }]);
-    setLoading(true);
+    setBusy(true);
     setProgress("");
     const controller = new AbortController();
     abortRef.current = controller;
@@ -301,7 +313,7 @@ export function ChatPanel({
       );
     } finally {
       if (generation === generationRef.current) {
-        setLoading(false);
+        setBusy(false);
         setProgress("");
         abortRef.current = null;
       }
@@ -317,7 +329,7 @@ export function ChatPanel({
   async function confirmAction(index: number, action: ProposedActionOut) {
     if (!action.action_id) return;
     const generation = generationRef.current;
-    setLoading(true);
+    setBusy(true);
     try {
       // The server revalidates permissions, scope and recommendation freshness,
       // executes once, and records the outcome. The client only reports it.
@@ -333,7 +345,7 @@ export function ChatPanel({
       const detail = e instanceof Error ? e.message : "Erro desconhecido";
       updateAction(index, { ...action, status: body?.status ?? "failed", error_detail: detail });
     } finally {
-      if (generation === generationRef.current) setLoading(false);
+      if (generation === generationRef.current) setBusy(false);
     }
   }
 
@@ -403,8 +415,9 @@ export function ChatPanel({
             <button
               type="button"
               onClick={() => setPickerOpen((open) => !open)}
+              disabled={loading}
               aria-label="Conversas anteriores"
-              className="rounded-full px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-600"
+              className="rounded-full px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-600 disabled:opacity-50"
             >
               Histórico
             </button>
@@ -417,7 +430,8 @@ export function ChatPanel({
                 setMessages([]);
                 pendingTurnRef.current = null;
               }}
-              className="rounded-full px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-600"
+              disabled={loading}
+              className="rounded-full px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-600 disabled:opacity-50"
             >
               Nova
             </button>
@@ -448,6 +462,7 @@ export function ChatPanel({
                     setPickerOpen(false);
                     loadConversation(conversation.id).catch(() => {});
                   }}
+                  disabled={loading}
                   className="w-full rounded-lg px-2 py-1 text-left text-xs text-slate-700 hover:bg-white"
                 >
                   <span className="block truncate">{conversation.title ?? "Conversa"}</span>

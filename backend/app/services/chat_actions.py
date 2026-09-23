@@ -14,6 +14,7 @@ server-side identity, so:
 from __future__ import annotations
 
 import logging
+import math
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
@@ -295,9 +296,12 @@ async def _execute(action: ChatAction, *, access: AccessController, db: AsyncSes
             "irrigation_depth_mm": rec.irrigation_depth_mm,
             "override_notes": rec.override_notes,
         }
-        depth = params.get("custom_depth_mm")
-        if depth is not None:
-            rec.irrigation_depth_mm = float(depth)
+        # Checked again here, not only at proposal: params are model-derived and sit in
+        # a row between proposal and confirmation.
+        depth = validate_override_depth(params.get("custom_depth_mm"))
+        if depth is None:
+            raise ValueError("invalid_override_depth")
+        rec.irrigation_depth_mm = depth
         rec.override_notes = str(params.get("override_reason") or "Ajuste via assistente")[:2000]
         rec.is_accepted = True
         rec.accepted_at = datetime.now(UTC)
@@ -338,6 +342,24 @@ async def _execute(action: ChatAction, *, access: AccessController, db: AsyncSes
         }
 
     raise ValueError(f"unsupported_action_type:{action.action_type}")
+
+
+# A sanity bound, not an agronomic one: it rejects values no override can mean
+# (negative, NaN, 1e9 mm) without second-guessing an agronomist's real adjustment.
+MAX_OVERRIDE_DEPTH_MM = 200.0
+
+
+def validate_override_depth(value) -> float | None:
+    """A finite depth in [0, MAX_OVERRIDE_DEPTH_MM], or None when unusable."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        depth = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(depth) or not 0 <= depth <= MAX_OVERRIDE_DEPTH_MM:
+        return None
+    return depth
 
 
 async def _record_result_event(action: ChatAction, db: AsyncSession) -> None:

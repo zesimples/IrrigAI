@@ -341,3 +341,23 @@ async def test_another_users_action_is_not_found(client, db, action_farm):
     assert response.status_code == 404
     await db.delete(stranger)
     await db.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("params", [{"custom_depth_mm": -40}, {"custom_depth_mm": 1e9}, {}])
+async def test_an_invalid_override_depth_is_never_written(client, db, action_farm, params):
+    """Independent review 2026-09-23 (B6): params are model-derived; re-check at execution."""
+    _, action_id = await _propose(client, db, action_farm, action_type="override_recommendation")
+    row = await db.get(ChatAction, action_id)
+    row.params = params
+    await db.commit()
+
+    response = await client.post(
+        f"/api/v1/farms/{action_farm['farm_id']}/chat/actions/{action_id}/confirm"
+    )
+
+    assert response.json()["status"] == "failed"
+    db.expire_all()
+    rec = await db.get(Recommendation, action_farm["recommendation_id"])
+    assert rec.irrigation_depth_mm == 12.0
+    assert not rec.is_accepted

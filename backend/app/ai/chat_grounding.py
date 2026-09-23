@@ -84,47 +84,88 @@ _UNTRUSTED_TOOLS = {"get_field_observations"}
 
 _NO_IRRIGATION_ACTIONS = {"skip", "defer"}
 
-# A negation immediately before a directive inverts it: "não deves regar" contains
-# "deves regar", and matching it as advice to irrigate made the validator reject the
-# very answers it exists to protect. The live multi-turn evaluation found this.
-_NEGATION = r"(?<!n[ãa]o )(?<!n[ãa]o se )(?<!sem )(?<!nunca )(?<!evita )(?<!evitar )"
-
+# Directive phrases are matched affirmatively; whether a negation inverts one is
+# decided separately by `_is_negated`, so the same phrase list serves both stances.
 _IRRIGATE_DIRECTIVE_RE = re.compile(
-    _NEGATION + r"\b(deves?\s+regar|rega\s+(?:j[áa]|hoje|agora)|regar\s+(?:j[áa]|hoje|agora)|"
+    r"\b(deves?\s+regar|rega\s+(?:j[áa]|hoje|agora)|regar\s+(?:j[áa]|hoje|agora)|"
     r"rega\s+urgente|recomendo\s+regar|aplica(?:r)?|regue|regar\s+\d|"
-    r"dota[çc][ãa]o\s+recomendada)\b",
+    r"dota[çc][ãa]o\s+recomendada|"
+    r"(?:recomendo|aconselho|sugiro|proponho)\s+(?:uma\s+|a\s+)?"
+    r"(?:dota[çc][ãa]o|dose|l[âa]mina|rega))\b",
     re.IGNORECASE,
 )
 _SKIP_DIRECTIVE_RE = re.compile(
-    r"\b(n[ãa]o\s+reg(?:ues|ar|es)|salta\s+a\s+rega|adia(?:r)?\s+a\s+rega|"
-    r"dispensa(?:r)?\s+a\s+rega)\b",
+    r"\b(n[ãa]o\s+reg(?:ues|ar|es)|salta(?:r)?\s+(?:a\s+)?rega|pode[sm]?\s+saltar|"
+    r"adia(?:r)?\s+a\s+rega|dispensa(?:r)?\s+a\s+rega|"
+    r"deixa(?:r)?\s+(?:a\s+rega\s+)?para\s+amanh[ãa])\b",
     re.IGNORECASE,
 )
 
-# Portuguese negation often sits several words before the verb ("não é necessário
-# regar hoje"), which a fixed-width lookbehind cannot see. Scan the clause instead.
+# Sentence boundaries; a decimal point inside a number is not one.
+_SENTENCE_END_RE = re.compile(r"(?<!\d)\.(?!\d)|[;!?\n]")
+# Clauses, for binding numbers and sector names to their local context.
 _CLAUSE_SPLIT_RE = re.compile(
     r"(?<!\d)\.(?!\d)|[;!?\n]|\bmas\b|\bporém\b|\bcontudo\b", re.IGNORECASE
 )
-_NEGATED_CLAUSE_RE = re.compile(
+_NEGATION_WORD_RE = re.compile(
     r"\b(n[ãa]o|nem|sem|nunca|dispensa|dispensar|evita|evitar|desnecess[áa]ri[oa]|"
     r"escusad[oa]|adia|adiar|aguarda|aguardar)\b",
     re.IGNORECASE,
 )
+# A negation inverts a directive only when every word between them is one of these.
+# Portuguese puts the negation several words before the verb ("não é necessário
+# regar"), but an unrecognised word in between ("não choveu, por isso deves regar")
+# means the negation belongs to another proposition. Keep this list to modal and
+# advice vocabulary: an entry that can introduce its own proposition re-opens the
+# bypass this replaced, where any earlier "não" disabled every engine check.
+_NEGATION_BRIDGE_RE = re.compile(
+    r"\s*(?:(?:é|será|seria|está|se|te|lhe|me|nos|vos|a|o|de|ainda|já|hoje|agora|mais|"
+    r"mesmo|necess[áa]ri[oa]|preciso|precisa[sm]?|necessidade|há|vale|pena|antes|"
+    r"deve[sm]?|deverá|recomend[ao]|recomendamos|aconselh[ao]|aconselhável|convém|"
+    r"compensa|justifica)\s+)*",
+    re.IGNORECASE,
+)
+
+
+def _is_negated(text: str, start: int) -> bool:
+    """True when the directive starting at `start` is inverted by an attached negation."""
+    before = text[:start]
+    boundaries = list(_SENTENCE_END_RE.finditer(before))
+    sentence_start = boundaries[-1].end() if boundaries else 0
+    negations = list(_NEGATION_WORD_RE.finditer(before, sentence_start))
+    if not negations:
+        return False
+    return _NEGATION_BRIDGE_RE.fullmatch(before[negations[-1].end() :]) is not None
 
 
 def _advises(text: str, pattern: re.Pattern[str]) -> bool:
-    """True only for a directive in a clause that does not negate it."""
-    for clause in _CLAUSE_SPLIT_RE.split(text or ""):
-        match = pattern.search(clause)
-        if match is None:
-            continue
-        before = clause[: match.start()]
-        if _NEGATED_CLAUSE_RE.search(before):
-            continue
-        return True
-    return False
+    """True when the text carries an un-negated directive of this pattern."""
+    return any(not _is_negated(text, m.start()) for m in pattern.finditer(text or ""))
 
+
+def _advises_skip(text: str) -> bool:
+    """Advice not to irrigate: an explicit skip phrase, or a negated irrigation directive.
+
+    "Não é preciso regar hoje" contains no skip phrase but is advice not to irrigate;
+    treating it as neutral left an `irrigate` decision unguarded.
+    """
+    text = text or ""
+    return _advises(text, _SKIP_DIRECTIVE_RE) or any(
+        _is_negated(text, m.start()) for m in _IRRIGATE_DIRECTIVE_RE.finditer(text)
+    )
+
+
+# A quantity labelled as a dose can only be the engine's dose or an applied amount.
+# Without this, a dose claim grounded on any mm field in the turn — TAW included.
+_DOSE_LABEL_RE = r"dota[çc][ãa]o|dose\w*|l[âa]mina|aplica\w*|regar|\brega\b"
+_DOSE_KEYS = (
+    "irrigation_depth_mm",
+    "recommended_depth_mm",
+    "actual_applied_mm",
+    "last_irrigation_applied_mm",
+    "applied_mm",
+    "depth_mm",
+)
 
 _ABSOLUTE_TOLERANCE = 0.05
 _RELATIVE_TOLERANCE = 0.01
@@ -342,7 +383,7 @@ def validate_reply(reply: str, facts: GroundedFacts) -> ValidationResult:
     if facts.by_sector:
         for clause in _CLAUSE_SPLIT_RE.split(reply):
             if not extract_numeric_claims(clause) and not (
-                _advises(clause, _IRRIGATE_DIRECTIVE_RE) or _advises(clause, _SKIP_DIRECTIVE_RE)
+                _advises(clause, _IRRIGATE_DIRECTIVE_RE) or _advises_skip(clause)
             ):
                 continue
             matches = [
@@ -404,15 +445,22 @@ def validate_reply(reply: str, facts: GroundedFacts) -> ValidationResult:
             labels = list(
                 re.finditer(
                     r"deple[çc][ãa]o|d[eé]fice|chuva|precipita[çc][ãa]o|"
-                    r"dota[çc][ãa]o|aplica\w*|regar|\bTAW\b|\bET[₀0]\b|evapotranspira[çc][ãa]o",
+                    + _DOSE_LABEL_RE
+                    + r"|\bTAW\b|\bET[₀0]\b|evapotranspira[çc][ãa]o",
                     local,
                     re.IGNORECASE,
                 )
             )
             nearest_label = labels[-1].group(0) if labels else ""
+            # Advice, and a number that reads as the dose rather than as a measurement
+            # quoted beside it ("deves regar hoje: a depleção já atingiu 40 mm").
+            is_dose = _advises(local, _IRRIGATE_DIRECTIVE_RE) and (
+                not nearest_label
+                or re.fullmatch(_DOSE_LABEL_RE, nearest_label, re.IGNORECASE) is not None
+            )
             if (
                 claim.unit == "mm"
-                and _advises(local, _IRRIGATE_DIRECTIVE_RE)
+                and is_dose
                 and (
                     facts.engine_depth_mm is None
                     or not facts._matches([facts.engine_depth_mm], claim.value)
@@ -433,7 +481,10 @@ def validate_reply(reply: str, facts: GroundedFacts) -> ValidationResult:
                     r"chuva|precipita[çc][ãa]o",
                     ("rainfall_mm", "rain_effective_mm", "forecast_rain_next_48h"),
                 ),
+                (_DOSE_LABEL_RE, _DOSE_KEYS if claim.unit == "mm" else ()),
             ):
+                if not keys:
+                    continue
                 if re.search(label, nearest_label, re.IGNORECASE) and not facts._matches(
                     [v for key in keys for v in facts.fields.get(key, ())], claim.value
                 ):
@@ -456,7 +507,7 @@ def validate_reply(reply: str, facts: GroundedFacts) -> ValidationResult:
                     ),
                 )
             )
-        elif action == "irrigate" and _advises(reply, _SKIP_DIRECTIVE_RE):
+        elif action == "irrigate" and _advises_skip(reply):
             issues.append(
                 GroundingIssue(
                     kind="engine_conflict",

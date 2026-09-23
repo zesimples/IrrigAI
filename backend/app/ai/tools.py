@@ -19,11 +19,15 @@ from app.ai.context_builder import (
     get_sector_water_events,
     get_weather_summary,
 )
+from app.engine.pipeline import resolve_sector_soil_bounds
+from app.engine.soil_bounds import SOURCE_SCP_OVERRIDE
 from app.schemas.ai import ProposedAction
+from app.services.chat_actions import MAX_OVERRIDE_DEPTH_MM, validate_override_depth
 from app.services.field_observation_service import (
     get_active_field_observations,
     serialize_observation,
 )
+from app.utils.format_pt import fmt_pt
 
 
 @dataclass
@@ -225,10 +229,10 @@ TOOL_SPECS: list[dict] = [
                 "type": "object",
                 "properties": {
                     "recommendation_id": {"type": "string"},
-                    "depth_mm": {"type": "number"},
+                    "depth_mm": {"type": "number", "minimum": 0, "maximum": 200},
                     "reason": {"type": "string"},
                 },
-                "required": ["recommendation_id", "reason"],
+                "required": ["recommendation_id", "depth_mm", "reason"],
             },
         },
     },
@@ -519,13 +523,17 @@ async def _propose(name, args, access, db, scope) -> dict:
         if not rec_id:
             return {"error": "missing_recommendation_id"}
         recommendation = await access.recommendation(rec_id)
-        await _require_sector_scope(recommendation.sector_id, access, scope)
+        sector = await _require_sector_scope(recommendation.sector_id, access, scope)
         if name == "propose_override":
-            depth = args.get("depth_mm")
-            reason = args.get("reason", "")
+            # The only model-supplied number that becomes a persisted agronomic value.
+            depth = validate_override_depth(args.get("depth_mm"))
+            if depth is None:
+                return {"error": "invalid_depth_mm", "maximum_mm": MAX_OVERRIDE_DEPTH_MM}
+            reason = str(args.get("reason") or "").strip()
+            summary = f"Substituir a dotação do setor {sector.name} por {fmt_pt(depth)} mm"
             action = ProposedAction(
                 type="override_recommendation",
-                summary=f"Substituir a recomendação para {depth} mm — {reason}".strip(),
+                summary=f"{summary} — {reason}" if reason else f"{summary}.",
                 recommendation_id=rec_id,
                 sector_id=recommendation.sector_id,
                 params={"custom_depth_mm": depth, "override_reason": reason},
@@ -550,7 +558,7 @@ async def _propose(name, args, access, db, scope) -> dict:
         sector_id = args.get("sector_id") or scope.sector_id
         if not sector_id:
             return {"error": "missing_sector_id"}
-        await _require_sector_scope(sector_id, access, scope)
+        sector = await _require_sector_scope(sector_id, access, scope)
         if name == "propose_regenerate_recommendation":
             action = ProposedAction(
                 type="regenerate_recommendation",
@@ -558,9 +566,19 @@ async def _propose(name, args, access, db, scope) -> dict:
                 sector_id=sector_id,
             )
         else:  # propose_run_calibration
+            # Calibration clears the manual soil customization ("last action wins"),
+            # so a confirmation must say when it will overwrite an agronomist's limits.
+            # Keyed on the resolved source, never on the raw is_customized flag.
+            bounds = await resolve_sector_soil_bounds(sector_id, db)
+            summary = f"Correr a calibração inteligente do setor {sector.name}."
+            if bounds.source == SOURCE_SCP_OVERRIDE:
+                summary += (
+                    " Atenção: isto substitui os limites de solo definidos manualmente"
+                    " (CC/PMP) pelos valores calculados a partir da sonda."
+                )
             action = ProposedAction(
                 type="run_calibration",
-                summary="Correr a calibração inteligente do setor.",
+                summary=summary,
                 sector_id=sector_id,
             )
     return {"proposed_action": action.model_dump(), "status": "awaiting_confirmation"}

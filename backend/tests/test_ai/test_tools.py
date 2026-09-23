@@ -118,7 +118,12 @@ async def test_propose_override_access_denied_returns_error():
 
 
 @pytest.mark.asyncio
-async def test_propose_run_calibration_uses_scope_sector():
+async def test_propose_run_calibration_uses_scope_sector(monkeypatch):
+    # The proposal now resolves soil bounds to disclose a manual-override overwrite.
+    monkeypatch.setattr(
+        "app.ai.tools.resolve_sector_soil_bounds",
+        AsyncMock(return_value=SimpleNamespace(source="probe_calibrated")),
+    )
     access = AsyncMock()
     access.sector.return_value = object()
     db = AsyncMock()

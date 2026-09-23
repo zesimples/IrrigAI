@@ -254,3 +254,64 @@ class TestContextReuse:
                 )
 
         assert builder.await_count == 1
+
+
+class TestProposalSafety:
+    """Independent review 2026-09-23 (B5, B6).
+
+    A confirmed proposal is the first path on which LLM output mutates state, so what
+    the user confirms must be bounded and must say what it will overwrite.
+    """
+
+    def _access(self):
+        access = AsyncMock()
+        access.recommendation.return_value = SimpleNamespace(sector_id="selected")
+        access.sector_in_farm.return_value = SimpleNamespace(id="selected", name="Olival Norte")
+        return access
+
+    async def _propose(self, name, args):
+        return await execute_tool(
+            name,
+            args,
+            access=self._access(),
+            db=AsyncMock(),
+            scope=ToolScope(farm_id="owned", sector_id="selected"),
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("depth", [-40, 1e9, float("nan"), "doze", True, None])
+    async def test_an_out_of_range_override_depth_is_not_proposed(self, depth):
+        args = {"recommendation_id": "rec-1", "reason": "teste"}
+        if depth is not None:
+            args["depth_mm"] = depth
+        result = await self._propose("propose_override", args)
+        assert "error" in result
+        assert "proposed_action" not in result
+
+    @pytest.mark.asyncio
+    async def test_a_valid_override_carries_its_bounded_depth_and_sector(self):
+        result = await self._propose(
+            "propose_override", {"recommendation_id": "rec-1", "depth_mm": 12.5, "reason": "x"}
+        )
+        action = result["proposed_action"]
+        assert action["params"]["custom_depth_mm"] == 12.5
+        assert "12,5 mm" in action["summary"]
+        assert "Olival Norte" in action["summary"]
+
+    @pytest.mark.asyncio
+    async def test_calibration_summary_names_the_sector(self):
+        bounds = AsyncMock(return_value=SimpleNamespace(source="probe_calibrated"))
+        with patch("app.ai.tools.resolve_sector_soil_bounds", bounds):
+            result = await self._propose("propose_run_calibration", {})
+        summary = result["proposed_action"]["summary"]
+        assert "Olival Norte" in summary
+        assert "manualmente" not in summary
+
+    @pytest.mark.asyncio
+    async def test_calibration_discloses_that_it_replaces_manual_soil_limits(self):
+        bounds = AsyncMock(return_value=SimpleNamespace(source="scp_override"))
+        with patch("app.ai.tools.resolve_sector_soil_bounds", bounds):
+            result = await self._propose("propose_run_calibration", {})
+        summary = result["proposed_action"]["summary"]
+        assert "Olival Norte" in summary
+        assert "substitui os limites de solo definidos manualmente" in summary

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock
 
 import pytest
@@ -90,6 +91,11 @@ async def test_chat_agent_propose_calibration(monkeypatch):
                 "irrigation_depth_mm": 0,
             }
         ),
+    )
+    # The proposal now resolves soil bounds to disclose a manual-override overwrite.
+    monkeypatch.setattr(
+        "app.ai.tools.resolve_sector_soil_bounds",
+        AsyncMock(return_value=SimpleNamespace(source="probe_calibrated")),
     )
     access = AsyncMock()
     access.sector.return_value = object()

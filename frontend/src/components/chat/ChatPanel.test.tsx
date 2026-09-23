@@ -122,6 +122,76 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Acção executada.")).not.toBeInTheDocument();
   });
 
+  describe("loading a conversation while an action is confirming (review 2026-09-23, B4)", () => {
+    // Opening Histórico mid-confirm bumped the generation counter, so the confirm's
+    // finally never cleared `loading` and its result was dropped — the panel stuck on
+    // "A pensar…" while the server had already committed the write.
+    const otherConversation = {
+      id: "c-other", title: "Outra conversa", sector_id: "s-other",
+      last_message_at: "2026-09-01T10:00:00Z",
+    };
+
+    function setUp() {
+      (chatApi.conversations as any).mockResolvedValue([otherConversation]);
+      vi.mocked(chatApi.conversation).mockResolvedValue({
+        id: "c-other", messages: [{ id: "m9", role: "assistant", content: "antiga", created_at: "2026-09-01T10:00:00Z" }],
+      } as any);
+      vi.mocked(chatApi.streamChat).mockImplementation(streamReturning({ proposed_action: {
+        type: "run_calibration", summary: "Calibrar setor", action_id: "a1", status: "pending", params: {},
+      } }));
+      let resolve!: (value: any) => void;
+      vi.mocked(chatApi.confirmAction).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+      const onActionCompleted = vi.fn();
+      render(<ChatPanel farmId="f1" sectorId="s1" onClose={() => {}} onActionCompleted={onActionCompleted} />);
+      return { onActionCompleted, resolve: (value: any) => resolve(value) };
+    }
+
+    async function askAndConfirm() {
+      fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "calibrar" } });
+      fireEvent.click(screen.getByLabelText("Enviar"));
+      fireEvent.click(await screen.findByText("Confirmar"));
+      await waitFor(() => expect(chatApi.confirmAction).toHaveBeenCalled());
+    }
+
+    it("reports the committed action instead of stranding the spinner", async () => {
+      const { onActionCompleted, resolve } = setUp();
+      await askAndConfirm();
+      fireEvent.click(await screen.findByLabelText("Conversas anteriores"));
+      const row = screen.queryByText("Outra conversa");
+      if (row) fireEvent.click(row);
+      await act(async () => resolve({ status: "succeeded", error_detail: null }));
+      expect(onActionCompleted).toHaveBeenCalled();
+      expect(screen.getByPlaceholderText(/pergunta/i)).not.toBeDisabled();
+      expect(screen.queryByText(/A pensar/)).not.toBeInTheDocument();
+    });
+
+    it("allows switching conversations again once the turn has finished", async () => {
+      (chatApi.conversations as any).mockResolvedValue([otherConversation]);
+      vi.mocked(chatApi.conversation).mockResolvedValue({
+        id: "c-other", messages: [{ id: "m9", role: "assistant", content: "antiga", created_at: "2026-09-01T10:00:00Z" }],
+      } as any);
+      vi.mocked(chatApi.streamChat).mockImplementation(streamReturning({}));
+      render(<ChatPanel farmId="f1" sectorId="s1" onClose={() => {}} />);
+      fireEvent.change(screen.getByPlaceholderText(/pergunta/i), { target: { value: "olá" } });
+      fireEvent.click(screen.getByLabelText("Enviar"));
+      await screen.findByText("olá!");
+      fireEvent.click(await screen.findByLabelText("Conversas anteriores"));
+      fireEvent.click(screen.getByText("Outra conversa"));
+      expect(await screen.findByText("antiga")).toBeInTheDocument();
+    });
+
+    it("refuses to swap the transcript from an already-open picker", async () => {
+      const { onActionCompleted, resolve } = setUp();
+      fireEvent.click(await screen.findByLabelText("Conversas anteriores"));
+      await askAndConfirm();
+      fireEvent.click(screen.getByText("Outra conversa"));
+      await act(async () => resolve({ status: "succeeded", error_detail: null }));
+      expect(chatApi.conversation).not.toHaveBeenCalled();
+      expect(onActionCompleted).toHaveBeenCalled();
+      expect(screen.getByPlaceholderText(/pergunta/i)).not.toBeDisabled();
+    });
+  });
+
   it("sends a turn identity so a retry resumes instead of duplicating", async () => {
     (chatApi.streamChat as any).mockImplementation(streamReturning({}));
     render(<ChatPanel farmId="f1" onClose={() => {}} />);
