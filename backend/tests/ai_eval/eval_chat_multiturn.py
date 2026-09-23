@@ -162,6 +162,9 @@ async def test_live_multiturn_chat(
     record_property("turn_issues", turn_issues)
     turn_replies: list[dict] = []  # the exact replies judged, for the human review pack
     record_property("turn_replies", turn_replies)
+    # Every model draft, including those a repair replaced: judging whether a repair
+    # was a true or false positive needs the text it rejected.
+    record_property("drafts", drafts)
 
     for turn in case["turns"]:
         observed.clear()  # Only this turn's reads may support current claims.
