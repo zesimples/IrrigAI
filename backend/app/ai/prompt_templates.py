@@ -71,7 +71,7 @@ FORMATO — obrigatório:
 Responde com 4 a 7 pontos, um por linha:
 • [assunto]: [o essencial]
 
-Exemplos de assuntos: Rega urgente, Sem necessidade, Chuva prevista, Alertas, Sondas, Configuração.
+Exemplos de assuntos: Rega urgente, Sem necessidade, Sem recomendação, Chuva prevista, Alertas, Sondas, Configuração.
 Cada linha: máximo 20 palavras. Sem introdução. Sem conclusão. Sem parágrafos.
 
 REGRAS CRÍTICAS — lê com atenção:
@@ -82,7 +82,8 @@ REGRAS CRÍTICAS — lê com atenção:
 - O campo "irrigation_depth_mm" é apenas o volume calculado; NÃO indica necessidade de rega se "recommendation_action" ≠ "irrigate".
 - Para "Rega urgente": lista EXCLUSIVAMENTE os sectores com "recommendation_action": "irrigate", com o "irrigation_depth_mm" respectivo.
 - Para "Sem necessidade": agrupa numa só linha todos os sectores com "recommendation_action": "skip" ou "defer".
-- Se nenhum sector tiver "recommendation_action": "irrigate", não cries ponto "Rega urgente" — substitui por "Sem necessidade: todos os sectores".
+- Um sector com "recommendation_action" ausente ou null NÃO é um sector sem necessidade: lista-o em "Sem recomendação: [sectores]" e nunca digas que não precisa de rega.
+- Se nenhum sector tiver "recommendation_action": "irrigate", não cries ponto "Rega urgente" — substitui por "Sem necessidade: todos os sectores" se todos tiverem "skip" ou "defer"; se algum não tiver recomendação, substitui por "Sem necessidade: [sectores skip/defer]" e "Sem recomendação: [os restantes]".
 - Se há previsão de chuva relevante (> 5 mm), diz se vale a pena esperar.
 - Se há alertas activos, menciona-os em ponto próprio.
 - NÃO calcules valores — usa apenas os dados fornecidos.
@@ -99,7 +100,7 @@ FORMAT — mandatory:
 Reply with 4 to 7 bullet points, one per line:
 • [topic]: [the key point]
 
-Example topics: Irrigation needed, No action, Rain forecast, Alerts, Probes, Setup.
+Example topics: Irrigation needed, No action, No recommendation, Rain forecast, Alerts, Probes, Setup.
 Each line: 20 words maximum. No intro. No conclusion. No paragraphs.
 
 CRITICAL RULES — read carefully:
@@ -110,7 +111,8 @@ CRITICAL RULES — read carefully:
 - The "irrigation_depth_mm" field is only the calculated volume; it does NOT indicate irrigation need if "recommendation_action" ≠ "irrigate".
 - For "Irrigation needed": list ONLY sectors where "recommendation_action": "irrigate", with their "irrigation_depth_mm".
 - For "No action": group all sectors with "recommendation_action": "skip" or "defer" into one line.
-- If no sector has "recommendation_action": "irrigate", skip "Irrigation needed" — write "No action: all sectors" instead.
+- A sector whose "recommendation_action" is absent or null does NOT need no irrigation: list it under "No recommendation: [sectors]" and never say it needs no irrigation.
+- If no sector has "recommendation_action": "irrigate", skip "Irrigation needed" — write "No action: all sectors" if every sector is "skip" or "defer"; if any has no recommendation, write "No action: [skip/defer sectors]" and "No recommendation: [the rest]".
 - If relevant rainfall is forecast (> 5 mm), say whether it is worth waiting.
 - If there are active alerts, mention them in a dedicated bullet.
 - Do NOT compute values — use only the provided data.

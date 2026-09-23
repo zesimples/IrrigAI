@@ -18,6 +18,7 @@ from app.models import (
     Sector,
     User,
 )
+from app.services.chat_memory import MESSAGE_ORDER
 from tests.test_api.conftest import delete_farm_subtree
 
 _OWNER_EMAIL = "you@irrigai.dev"  # matches the authenticated `client` fixture
@@ -125,7 +126,7 @@ async def test_chat_resumes_server_side_history(client, chat_farm, db):
                     ChatMessage.conversation_id == ChatConversation.id,
                 )
                 .where(ChatConversation.id == conversation_id)
-                .order_by(ChatMessage.created_at)
+                .order_by(*MESSAGE_ORDER)
             )
         )
         .scalars()
@@ -239,9 +240,7 @@ async def test_chat_feedback_is_one_mutable_vote_per_message(client, chat_farm, 
     rows = (
         (
             await db.execute(
-                select(AIResponseFeedback).where(
-                    AIResponseFeedback.chat_message_id == message_id
-                )
+                select(AIResponseFeedback).where(AIResponseFeedback.chat_message_id == message_id)
             )
         )
         .scalars()
@@ -249,3 +248,33 @@ async def test_chat_feedback_is_one_mutable_vote_per_message(client, chat_farm, 
     )
     assert len(rows) == 1
     assert rows[0].rating == -1
+
+
+@pytest.mark.asyncio
+async def test_a_question_precedes_its_answer_when_timestamps_tie(client, chat_farm, db):
+    """A question and its answer are written in one transaction, and Postgres now() is
+    the transaction start, so they share created_at. Ordering by created_at alone let a
+    reopened transcript — and the history sent to the model — show the answer first.
+    Inserted answer-first here so the heap order is the wrong one."""
+    from datetime import UTC, datetime
+
+    from app.services.chat_memory import conversation_history
+
+    first = await client.post(
+        f"/api/v1/farms/{chat_farm['farm_id']}/chat", json={"message": "primeira pergunta"}
+    )
+    conversation_id = first.json()["conversation_id"]
+    tie = datetime(2099, 1, 1, tzinfo=UTC)
+    db.add(
+        ChatMessage(conversation_id=conversation_id, role="assistant", content="A", created_at=tie)
+    )
+    await db.flush()
+    db.add(ChatMessage(conversation_id=conversation_id, role="user", content="Q", created_at=tie))
+    await db.commit()
+
+    detail = await client.get(
+        f"/api/v1/farms/{chat_farm['farm_id']}/chat/conversations/{conversation_id}"
+    )
+    assert [m["content"] for m in detail.json()["messages"]][-2:] == ["Q", "A"]
+    history = await conversation_history(conversation_id, db, limit=2)
+    assert [turn.content for turn in history] == ["Q", "A"]

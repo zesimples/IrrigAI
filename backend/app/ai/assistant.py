@@ -29,6 +29,7 @@ from app.schemas.ai import (
     AgronomicInterpretationDraft,
     AnswerConfidence,
 )
+from app.utils.format_pt import fmt_pt
 
 logger = logging.getLogger(__name__)
 
@@ -130,14 +131,16 @@ class IrrigationAssistant:
             context_json=context_json
         )
         user_message = f"Faz um resumo do estado da exploração '{ctx.farm_name}' para hoje."
-        return await self._complete_structured(
+        context = json.loads(context_json)
+        interpretation = await self._complete_structured(
             system_prompt=system_prompt,
             user_message=user_message,
-            context=json.loads(context_json),
+            context=context,
             fallback_risk="medium",
             max_tokens=800,
             surface="farm_summary",
         )
+        return self._apply_farm_recommendation_guard(context, interpretation)
 
     async def explain_anomaly(self, alert_id: str, db: AsyncSession) -> str:
         """Explain an active alert in natural language."""
@@ -481,6 +484,46 @@ class IrrigationAssistant:
             max_tokens=800,
             surface="irrigation_effectiveness",
         )
+
+    def _apply_farm_recommendation_guard(
+        self,
+        context: dict,
+        interpretation: AgronomicInterpretation,
+    ) -> AgronomicInterpretation:
+        """Write farm irrigation advice from the engine's per-sector decisions.
+
+        The model's advice over-generalised: with one sector unassessed it still said
+        "não é necessário irrigar" farm-wide (9 of 10 live runs, 2026-09-23). A sector
+        without a recommendation has no decision to report, so it is listed as such —
+        never folded into "no need". Only this decision field is deterministic; the
+        model's summary and actions are kept (and measured by the live evaluation).
+        """
+        sectors = context.get("sectors") or []
+        if not sectors:
+            return interpretation
+        irrigate, resting, undecided = [], [], []
+        for sector in sectors:
+            name = str(sector.get("sector_name") or sector.get("name") or "Setor")
+            action = sector.get("recommendation_action", sector.get("action"))
+            if action == "irrigate":
+                depth = sector.get("irrigation_depth_mm")
+                irrigate.append(
+                    f"{name} ({fmt_pt(float(depth))} mm)" if depth is not None else name
+                )
+            elif action in ("skip", "defer"):
+                resting.append(name)
+            else:
+                undecided.append(name)
+        parts = [
+            f"{label}: {', '.join(names)}"
+            for label, names in (
+                ("Regar", irrigate),
+                ("Sem necessidade", resting),
+                ("Sem recomendação", undecided),
+            )
+            if names
+        ]
+        return interpretation.model_copy(update={"irrigation_advice": ". ".join(parts) + "."})
 
     def _apply_probe_recommendation_guard(
         self,

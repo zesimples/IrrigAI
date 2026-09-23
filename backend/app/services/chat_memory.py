@@ -3,11 +3,19 @@
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChatConversation, ChatMessage
 from app.schemas.ai import ChatTurn, ProposedAction
+
+# A question and its answer are written in one transaction, and Postgres now() is the
+# transaction start, so they share created_at. Within a tie the question comes first;
+# without this a reopened transcript, and the history sent to the model, could show
+# the answer before the question.
+_USER_FIRST = case((ChatMessage.role == "user", 0), else_=1)
+MESSAGE_ORDER = (ChatMessage.created_at, _USER_FIRST)
+MESSAGE_ORDER_DESC = (ChatMessage.created_at.desc(), _USER_FIRST.desc())
 
 
 async def resolve_conversation(
@@ -65,7 +73,7 @@ async def conversation_history(
                     ChatMessage.status == "complete",
                     ChatMessage.id != exclude_message_id if exclude_message_id else True,
                 )
-                .order_by(ChatMessage.created_at.desc())
+                .order_by(*MESSAGE_ORDER_DESC)
                 .limit(limit)
             )
         )

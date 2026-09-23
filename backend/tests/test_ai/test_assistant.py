@@ -554,3 +554,68 @@ def test_farm_summary_prompt_gates_on_real_recommendation_actions(language):
     # The real "Não regar" decisions must be named so the LLM can group them.
     assert RecommendationAction.SKIP.value in template
     assert RecommendationAction.DEFER.value in template
+
+
+# --- Farm recommendation guard (A4 live evaluation, 2026-09-23) -----------------
+# Live, the farm summary's irrigation_advice said "Não é necessário irrigar neste
+# momento" in 9 of 10 runs for a farm where one sector had no recommendation at all:
+# a blanket claim covering a sector the engine never assessed. Farm irrigation advice
+# is an agronomic decision summary, so, like the probe guard, it is written from the
+# engine's per-sector actions rather than trusted from the model.
+
+_FARM_GUARD_CONTEXT = {
+    "sectors": [
+        {"sector_name": "A", "recommendation_action": "irrigate", "irrigation_depth_mm": 14.0},
+        {"sector_name": "B", "recommendation_action": None, "irrigation_depth_mm": None},
+        {"sector_name": "C", "recommendation_action": "skip", "irrigation_depth_mm": None},
+        {"sector_name": "D", "recommendation_action": "defer", "irrigation_depth_mm": 6.0},
+    ]
+}
+
+
+def _farm_interpretation(advice: str) -> AgronomicInterpretation:
+    return AgronomicInterpretation(
+        summary="Resumo do modelo.",
+        risk_level="medium",
+        irrigation_advice=advice,
+        evidence=[],
+        missing_data=[],
+        confidence_score=0.5,
+        confidence_explanation="Explicação.",
+        recommended_actions=["Verificar o sistema."],
+    )
+
+
+def test_farm_guard_writes_the_advice_from_engine_decisions(assistant):
+    result = assistant._apply_farm_recommendation_guard(
+        _FARM_GUARD_CONTEXT, _farm_interpretation("Não é necessário irrigar neste momento.")
+    )
+    advice = result.irrigation_advice
+    assert "Não é necessário" not in advice
+    assert "Regar: A (14,0 mm)" in advice
+    assert "Sem necessidade: C, D" in advice
+    assert "Sem recomendação: B" in advice
+    # Only the decision field is deterministic; the model's prose is kept.
+    assert result.summary == "Resumo do modelo."
+    assert result.recommended_actions == ["Verificar o sistema."]
+
+
+def test_farm_guard_omits_a_dose_the_engine_did_not_give(assistant):
+    context = {"sectors": [{"sector_name": "A", "recommendation_action": "irrigate"}]}
+    result = assistant._apply_farm_recommendation_guard(context, _farm_interpretation("x"))
+    assert result.irrigation_advice == "Regar: A."
+
+
+def test_farm_guard_leaves_a_context_without_sectors_untouched(assistant):
+    original = _farm_interpretation("Conselho do modelo.")
+    assert assistant._apply_farm_recommendation_guard({}, original) is original
+
+
+@pytest.mark.asyncio
+async def test_summarize_farm_structured_applies_the_guard(assistant):
+    async def _blanket_claim(system_prompt, user_message, schema_model, **kwargs):
+        return _farm_interpretation("Não é necessário irrigar neste momento.")
+
+    assistant.client.complete_structured = _blanket_claim
+    result = await assistant.summarize_farm_structured("farm-001", AsyncMock())
+    assert result.irrigation_advice == "Regar: Norte (18,5 mm)."

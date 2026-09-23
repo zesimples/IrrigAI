@@ -60,6 +60,7 @@ from app.services.chat_actions import (
     record_proposal,
 )
 from app.services.chat_memory import (
+    MESSAGE_ORDER,
     add_chat_message,
     conversation_evidence,
     conversation_history,
@@ -351,7 +352,7 @@ async def get_chat_conversation(
             await db.execute(
                 select(ChatMessage)
                 .where(ChatMessage.conversation_id == conversation.id)
-                .order_by(ChatMessage.created_at)
+                .order_by(*MESSAGE_ORDER)
                 .limit(200)
             )
         )
