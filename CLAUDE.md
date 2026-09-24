@@ -2,15 +2,31 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current state — 2026-09-23 (evening): read before running commands
+## Current state — 2026-09-24: read before running commands
 
 **A4 is not passed.** All local verification is done; what remains needs production access
 or people — see [the A4 completion report](docs/a4-completion-report-2026-09-23.md), which is
 the authoritative record and supersedes earlier "28/28" claims.
 
-- **Local commits are NOT pushed.** `origin/main` is at `23ea0c7`; local `main` carries Codex's
-  `50476ff` plus the A4 batch (`80f9716`, `8e6cdec`, `77ef9b8`, `81164fe`, `593853c`, docs).
-  Pushing is awaiting approval.
+**Production deployment is in progress, step by step, and has NOT changed anything yet.**
+On 2026-09-24 the user authorised "everything needed except the pilot", with **no further
+OpenAI API spend**. This machine has no SSH access to the host (no key, no SSH config; the
+host is only in `known_hosts`), so the user runs each step of
+[the deploy plan](docs/deploy-plan-a0-a4-2026-09-23.md) on the host and pastes the output back.
+**Step 1 (read-only checks) was handed over and its output has not come back yet** — resume
+there. Do not skip ahead: every later step depends on step 1's schema head, running-image
+contents, disk, backup state and Caddyfile.
+- Constraints for this deploy: **no live eval runs** (they spend OpenAI credit), so any further
+  code change is verified with the deterministic suites only and must say so. The public
+  **Caddy streaming check normally needs one real chat question (~US$0.001) — not allowed
+  under the current constraint**; verify it statically (Caddyfile `encode` / `reverse_proxy`
+  flushing, response headers through Caddy) and record that the timing proof remains open.
+  The **pilot is out of scope** for now; the **human review** still needs the user to arrange
+  an agronomist and 2+ growers ([review pack](docs/a4-human-review-pack-2026-09-23.md)).
+
+- **All A4 commits are pushed:** `origin/main` = `a6c3ea1` (Codex's `50476ff` plus
+  `80f9716`, `8e6cdec`, `77ef9b8`, `81164fe`, `593853c`, `a6c3ea1`). This is what production
+  will `git pull`.
 - **Development** is at `a0d5b179c368`. **Production** was last verified at `1c13f632d1a6`
   (2026-07-29) and needs exactly `019a556f37dd` → `a0d5b179c368`; nothing has been deployed.
   Use [the deploy plan](docs/deploy-plan-a0-a4-2026-09-23.md) — `docs/runbooks/deploy.md` is stale.
@@ -328,7 +344,7 @@ Detailed tracking in `docs/handoff-codex-2026-06-17.md`.
 - **Confirming a chat calibration clears `is_customized` and overwrites an agronomist's manual CC/PMP**, disclosed to the user as the single fixed sentence "Correr a calibração inteligente do setor."; the card never renders `action_type` or `params`. And a model-authored `depth_mm` is persisted via `float(depth)` with no bounds check — the only model-supplied number that becomes a persisted agronomic value, and the only one not passed through `_bounded_int`.
 Deploy sequence, pre-checks and lock guidance (the `chat_message → recommendation` FK needs `lock_timeout` and a window outside 03:50–05:30 UTC) are in `docs/deploy-plan-a0-a4-2026-09-23.md`. **`docs/runbooks/deploy.md` is stale** — it uses two Compose files and the containerised nginx; this host needs all three including `docker-compose.caddy.yml` or public 502s follow.
 
-**A4 verification cycle (Claude Code, 2026-09-23, `80f9716`..`593853c`, local, NOT pushed; no migration) — gate NOT passed; see `docs/a4-completion-report-2026-09-23.md`.** Local evidence complete; production migration/deploy/Caddy streaming, human review (`docs/a4-human-review-pack-2026-09-23.md`) and the pilot (`docs/a4-pilot-protocol-2026-09-23.md`) remain. Lessons worth keeping:
+**A4 verification cycle (Claude Code, 2026-09-23, `80f9716`..`a6c3ea1`, pushed 2026-09-24; not deployed; no migration) — gate NOT passed; see `docs/a4-completion-report-2026-09-23.md`.** Local evidence complete; production migration/deploy/Caddy streaming, human review (`docs/a4-human-review-pack-2026-09-23.md`) and the pilot (`docs/a4-pilot-protocol-2026-09-23.md`) remain. Lessons worth keeping:
 - **A pass count is not evidence.** Every earlier live "28/28" was blind to the farm summary calling an unassessed sector "sem necessidade", because nothing checked no-need claims. The eval now records per case (`AI_EVAL_REPORT`) repairs, fallbacks, drafts, latency and tokens; judge the report, and replay old bad outputs against a changed check before trusting a clean run.
 - **Prompt edits to fix one case can break others** — the first prompt fix took `farm-no-irrigation` from 0/10 to 9/10 failing. Measure every farm case ×10 after any farm-prompt change, and prefer a deterministic guard for decision fields.
 - **The SSE browser test runs the production standalone build** (`npm run e2e:chat-review`, CI job `frontend-chat-stream`) and fails without `Cache-Control: no-transform` — the Next server buffers otherwise. It does not verify Caddy.
