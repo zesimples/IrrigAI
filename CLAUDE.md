@@ -13,9 +13,34 @@ On 2026-09-24 the user authorised "everything needed except the pilot", with **n
 OpenAI API spend**. This machine has no SSH access to the host (no key, no SSH config; the
 host is only in `known_hosts`), so the user runs each step of
 [the deploy plan](docs/deploy-plan-a0-a4-2026-09-23.md) on the host and pastes the output back.
-**Step 1 (read-only checks) was handed over and its output has not come back yet** — resume
-there. Do not skip ahead: every later step depends on step 1's schema head, running-image
-contents, disk, backup state and Caddyfile.
+
+**Where it stands (end of 2026-09-24 session) — the next session starts with the user
+pasting host output:**
+- **Found on the host (read-only checks):** nothing deployed — schema `1c13f632d1a6`,
+  containers up 4 weeks, `chat_grounding.py` absent from the running image. Backend health
+  `db ok, redis ok`; `/api/v1/farms` through Caddy → 401 (public `/health` goes to the
+  frontend and 404s — don't use it). No leaked `irrigai_verify_*` DBs.
+- **🔴 Backups were failing for lack of disk:** 19 GB free of 145 GB; the 2026-09-24 cycle
+  skipped its dump (10.5 GB free, needs 20 GB) and 2026-09-23 skipped the full restore
+  check. Space: Docker **build cache 27.5 GB (26.8 reclaimable)**, Postgres volume 58.5 GB
+  (the `irrigai` DB grew **34 → 54 GB in a month**; dumps 5.8 → 9 GB), 4 backups = 36 GB,
+  images 29 GB (all in use).
+- **Handed to the user, output pending:** `docker builder prune -f`, `df -h /` (expect
+  ~45 GB free), then `$DC restart db-backup` and `$DC logs -f --since=1m db-backup` until
+  `backup written` (~20–25 min; may continue into the weekly full restore check, ~45 min).
+  **Next session: read that output.** If the backup was written and verified, proceed to
+  deploy plan step 1 (read-only), then step by step. If it errored or went straight to
+  sleep, diagnose before anything else. Do not deploy without a fresh backup and ≥10 GB free.
+- **Fixed and pushed (`132bcb5`):** the production worker ran with `DEBUG=true` (from `.env`;
+  the prod override covered only `backend`) — SQL echo in logs and the startup security guard
+  off for the service that decrypts farm credentials. `docker-compose.prod.yml` now sets it
+  false; takes effect when the deploy recreates the worker.
+- **Pre-existing provider errors seen, not deploy-related:** device 584 → 404 (likely renamed
+  in MyIrrigation, so its `external_id` is stale and that sector stopped ingesting); project
+  1044 forecast → 404; a self-healing 406 on device 587.
+- **Follow-up after the deploy (not today):** disk capacity (TimescaleDB compression of old
+  `probe_reading`, a bigger disk, or off-host backups) and Alertmanager — at the current
+  growth rate the disk fills again within weeks.
 - Constraints for this deploy: **no live eval runs** (they spend OpenAI credit), so any further
   code change is verified with the deterministic suites only and must say so. The public
   **Caddy streaming check normally needs one real chat question (~US$0.001) — not allowed
@@ -24,9 +49,9 @@ contents, disk, backup state and Caddyfile.
   The **pilot is out of scope** for now; the **human review** still needs the user to arrange
   an agronomist and 2+ growers ([review pack](docs/a4-human-review-pack-2026-09-23.md)).
 
-- **All A4 commits are pushed:** `origin/main` = `a6c3ea1` (Codex's `50476ff` plus
-  `80f9716`, `8e6cdec`, `77ef9b8`, `81164fe`, `593853c`, `a6c3ea1`). This is what production
-  will `git pull`.
+- **Everything is pushed:** `origin/main` = `132bcb5` — Codex's `50476ff`, the A4 batch
+  (`80f9716`, `8e6cdec`, `77ef9b8`, `81164fe`, `593853c`, `a6c3ea1`), then the handover docs
+  and the worker-`DEBUG` fix. This is what production will `git pull`.
 - **Development** is at `a0d5b179c368`. **Production** was last verified at `1c13f632d1a6`
   (2026-07-29) and needs exactly `019a556f37dd` → `a0d5b179c368`; nothing has been deployed.
   Use [the deploy plan](docs/deploy-plan-a0-a4-2026-09-23.md) — `docs/runbooks/deploy.md` is stale.
