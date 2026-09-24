@@ -69,6 +69,22 @@ and not while `db-backup` is mid-dump (step 1 checks).
 
 ---
 
+## 0. Found on the host, 2026-09-24 — resolve before step 1
+
+- **Backups were failing for lack of disk.** 19 GB free of 145 GB; the 2026-09-24 cycle
+  skipped its dump (10.5 GB free, needs 20 GB) and 2026-09-23 skipped its full restore check.
+  The Docker **build cache held 27.5 GB (26.8 GB reclaimable)** — reclaim it with
+  `docker builder prune -f` (removes only unused build layers; the next build is slower,
+  nothing running is touched). Do not delete backups or volumes.
+- Then take a **fresh verified backup**: `$DC restart db-backup` starts a cycle; wait for
+  `backup written` in `$DC logs -f db-backup` before continuing.
+- The `irrigai` database grew **34 → 54 GB in a month** (dumps 5.8 → 9 GB). Pruning buys
+  time only; disk capacity needs its own fix, and there is still no alerting.
+- The worker ran with **`DEBUG=true`** (from `.env`; the prod override covered only
+  `backend`). Fixed in `docker-compose.prod.yml`; it takes effect when step 6 recreates
+  the worker.
+- Confirmed: no leaked `irrigai_verify_*` databases; `/api/v1/farms` returns 401 through Caddy.
+
 ## 1. Read-only checks — stop on any unexpected answer
 
 ```bash
@@ -177,7 +193,8 @@ and calibration changes and runs the scheduler.
 $DC ps                                                        # all healthy; monitoring still up
 curl -sf http://127.0.0.1:8000/health                         # db ok, redis ok
 curl -sfo /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/login
-curl -sf https://irrigai.95.111.254.42.nip.io/health          # through Caddy
+curl -so /dev/null -w '%{http_code}\n' https://irrigai.95.111.254.42.nip.io/api/v1/farms   # 401 = Caddy reaches the backend
+# (not /health: Caddy routes /health to the frontend, which answers 404 — observed 2026-09-24)
 $DC logs --tail=200 worker | grep "jobs registered"           # expect 8
 $DC exec -T backend grep -c _NEGATION_BRIDGE_RE app/ai/chat_grounding.py   # 2 ⇒ new code (0 in 05ea921)
 $DC exec -T worker  grep -c _NEGATION_BRIDGE_RE app/ai/chat_grounding.py

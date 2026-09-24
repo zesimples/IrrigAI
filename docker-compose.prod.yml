@@ -37,6 +37,15 @@ services:
     # No direct port exposure — all traffic goes through nginx
     ports: !reset []
 
+  worker:
+    environment:
+      # The worker reads .env too, and without this override it inherited
+      # DEBUG=true in production (found 2026-09-24): every SQL statement was
+      # logged and the startup security guard — which protects the key used to
+      # decrypt farm credentials, which this service does — was switched off.
+      DEBUG: "false"
+      LOG_LEVEL: INFO
+
   frontend:
     environment:
       NODE_ENV: production
