@@ -10,14 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml .
-RUN pip install --upgrade pip && pip install .
+COPY pyproject.toml constraints.txt ./
+RUN pip install --upgrade pip && pip install -c constraints.txt .
 
 # ---
 
 FROM base AS development
 
-RUN pip install ".[dev]"
+RUN pip install -c constraints.txt ".[dev]"
 
 COPY . .
 
