@@ -2,59 +2,51 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current state — 2026-09-24: read before running commands
+## Current state — 2026-09-25: read before running commands
 
-**A4 is not passed.** All local verification is done; what remains needs production access
-or people — see [the A4 completion report](docs/a4-completion-report-2026-09-23.md), which is
-the authoritative record and supersedes earlier "28/28" claims.
+**A0–A4 is DEPLOYED to production (2026-09-25 11:18 UTC) — `1ef69de`, schema `a0d5b179c368`.**
+Record: [deploy record](docs/deploy-record-a0-a4-2026-09-25.md). **The A4 gate is still not
+passed**: what remains is the public Caddy streaming timing proof (one real chat question,
+~US$0.001 — excluded while the user's **no OpenAI API spend** constraint holds), the human review
+(agronomist + 2 growers, [review pack](docs/a4-human-review-pack-2026-09-23.md)) and the pilot
+(out of scope for now). [A4 completion report](docs/a4-completion-report-2026-09-23.md).
 
-**Production deployment is in progress, step by step, and has NOT changed anything yet.**
-On 2026-09-24 the user authorised "everything needed except the pilot", with **no further
-OpenAI API spend**. This machine has no SSH access to the host (no key, no SSH config; the
-host is only in `known_hosts`), so the user runs each step of
-[the deploy plan](docs/deploy-plan-a0-a4-2026-09-23.md) on the host and pastes the output back.
+This machine has **no SSH access to the production host**; the user runs host commands and
+pastes the output back. Give host command blocks as a **script file** (`cat > /root/x.sh <<'SCRIPT'
+… SCRIPT; bash /root/x.sh`), never with `exit` in an interactive paste — a gate's `exit` closed
+the user's SSH session on 2026-09-25.
 
-**Where it stands (end of 2026-09-24 session) — the next session starts with the user
-pasting host output:**
-- **Found on the host (read-only checks):** nothing deployed — schema `1c13f632d1a6`,
-  containers up 4 weeks, `chat_grounding.py` absent from the running image. Backend health
-  `db ok, redis ok`; `/api/v1/farms` through Caddy → 401 (public `/health` goes to the
-  frontend and 404s — don't use it). No leaked `irrigai_verify_*` DBs.
-- **🔴 Backups were failing for lack of disk:** 19 GB free of 145 GB; the 2026-09-24 cycle
-  skipped its dump (10.5 GB free, needs 20 GB) and 2026-09-23 skipped the full restore
-  check. Space: Docker **build cache 27.5 GB (26.8 reclaimable)**, Postgres volume 58.5 GB
-  (the `irrigai` DB grew **34 → 54 GB in a month**; dumps 5.8 → 9 GB), 4 backups = 36 GB,
-  images 29 GB (all in use).
-- **Handed to the user, output pending:** `docker builder prune -f`, `df -h /` (expect
-  ~45 GB free), then `$DC restart db-backup` and `$DC logs -f --since=1m db-backup` until
-  `backup written` (~20–25 min; may continue into the weekly full restore check, ~45 min).
-  **Next session: read that output.** If the backup was written and verified, proceed to
-  deploy plan step 1 (read-only), then step by step. If it errored or went straight to
-  sleep, diagnose before anything else. Do not deploy without a fresh backup and ≥10 GB free.
-- **Fixed and pushed (`132bcb5`):** the production worker ran with `DEBUG=true` (from `.env`;
-  the prod override covered only `backend`) — SQL echo in logs and the startup security guard
-  off for the service that decrypts farm credentials. `docker-compose.prod.yml` now sets it
-  false; takes effect when the deploy recreates the worker.
-- **Pre-existing provider errors seen, not deploy-related:** device 584 → 404 (likely renamed
-  in MyIrrigation, so its `external_id` is stale and that sector stopped ingesting); project
-  1044 forecast → 404; a self-healing 406 on device 587.
-- **Follow-up after the deploy (not today):** disk capacity (TimescaleDB compression of old
-  `probe_reading`, a bigger disk, or off-host backups) and Alertmanager — at the current
-  growth rate the disk fills again within weeks.
-- Constraints for this deploy: **no live eval runs** (they spend OpenAI credit), so any further
-  code change is verified with the deterministic suites only and must say so. The public
-  **Caddy streaming check normally needs one real chat question (~US$0.001) — not allowed
-  under the current constraint**; verify it statically (Caddyfile `encode` / `reverse_proxy`
-  flushing, response headers through Caddy) and record that the timing proof remains open.
-  The **pilot is out of scope** for now; the **human review** still needs the user to arrange
-  an agronomist and 2+ growers ([review pack](docs/a4-human-review-pack-2026-09-23.md)).
+**Open, next session:**
+- **15-minute post-deploy watch** output was handed to the user and not yet read (errors since
+  11:18, scheduler job outcomes, backup cycle, disk).
+- **🔴 Disk on prod:** 22 GB free after the deploy, and the post-migration dump running at 11:19
+  uses ~9 GB → ~13 GB, under the 20 GB a cycle needs. Expect the 2026-09-26 cycle to skip its
+  dump but prune the 09-18 archive; `docker builder prune -f` after the dump reclaims the new
+  build cache. The `irrigai` DB grew 34 → 54 GB in a month; the durable fix (TimescaleDB
+  compression of old `probe_reading`, a bigger disk, or off-host backups) and **Alertmanager**
+  are both still open.
+- Post-deploy indexes: `CREATE INDEX CONCURRENTLY` on `chat_message.recommendation_id` and
+  `chat_action.recommendation_id`, plus the five missing `g7h8i9j0k1l2` indexes.
+- `docs/runbooks/deploy.md` is stale (two Compose files + nginx); the deploy plan and record are
+  the working procedure.
+- Rollback tags `irrigai-rollback/*:pre-a0a4` on the host — remove after a few quiet days.
+- Development scratch DB `irrigai_restore_20260925` (~6.6 GB) — drop only when the user says.
+- Pre-existing provider errors, not deploy-related: device 584 → 404 (likely renamed in
+  MyIrrigation → stale `external_id`, sector not ingesting); project 1044 forecast → 404;
+  a self-healing 406 on device 587.
 
-- **Everything is pushed:** `origin/main` = `132bcb5` — Codex's `50476ff`, the A4 batch
-  (`80f9716`, `8e6cdec`, `77ef9b8`, `81164fe`, `593853c`, `a6c3ea1`), then the handover docs
-  and the worker-`DEBUG` fix. This is what production will `git pull`.
-- **Development** is at `a0d5b179c368`. **Production** was last verified at `1c13f632d1a6`
-  (2026-07-29) and needs exactly `019a556f37dd` → `a0d5b179c368`; nothing has been deployed.
-  Use [the deploy plan](docs/deploy-plan-a0-a4-2026-09-23.md) — `docs/runbooks/deploy.md` is stale.
+**Two things learned on 2026-09-25 that must not recur:**
+- **Backend dependencies are pinned** (`backend/constraints.txt`, production's 2026-07-29 set).
+  Before that, pruning the Docker build cache made the deploy build resolve SQLAlchemy 2.1
+  (psycopg 3 default driver → Alembic died) and openai 3.x. See the Production deploys bullet.
+- **Never run pytest with development's database URLs — not even a test that never touches
+  the database.** `tests/conftest.py`'s autouse `isolate_committed_db_rows` DELETEs
+  recommendations, alerts, irrigation events, forecasts, flowmeter readings and provider logs
+  from `settings.DATABASE_URL` before every test. One `docker compose exec backend pytest …`
+  emptied those tables in development (restored from the 09-24 backup; ~21 h unrecoverable —
+  see the record). Use `run_isolated_review pytest`, or `docker run --network none` with both
+  URLs pointing at an unreachable host.
+
 - **Farm irrigation advice is now written by a deterministic guard**
   (`assistant._apply_farm_recommendation_guard`) from per-sector engine decisions, as the probe
   guard does. The model had been telling growers that a sector with *no* recommendation needed
@@ -362,7 +354,7 @@ Detailed tracking in `docs/handoff-codex-2026-06-17.md`.
 - **Capacity numbers for future reference:** `irrigai` is 34GB live but restores into ~20GB (less bloat); a dump is ~5.8GB and takes ~20 min; a full restore-verification adds ~45 min and ~20GB transient.
 - **The real gap this exposed is not technical:** Prometheus and Grafana ran throughout with **no Alertmanager wired**, so a disk at 100% and a dead database went unnoticed for 11 days until a human tried to log in. See open item 1 below.
 
-**Done in the 2026-09-10 → 09-22 development-recovery + A0–A4 cycle (Codex, `05ea921` + `00b3e86`, pushed to `origin/main`; NOT deployed; TWO migrations `019a556f37dd` → `a0d5b179c368`):** Codex seeded the development database by mistake and recreated Esporão, Conqueiros and Amendoas do Lago; production was never touched. A selective recovery (approved, rehearsed on a clone first) restored the original identities and historical subtrees on 2026-09-21 with ~20 min of application downtime, archiving the replacement farms rather than deleting them — [record](docs/development-recovery-completed-2026-09-21.md). **The permanent consequence is that archived replacement probes keep the same provider `external_id` as the restored active probes**, which is why `active_probes_stmt(farm_id=...)` exists. A0–A4 of the AI action plan then landed: chat grounding + evidence citation, foreign-scope rejection on LLM tools, deterministic confidence (the old `max(…, 0.75)` floor is gone), a durable chat-turn identity, and a proposed-action lifecycle in which **confirmed LLM output can mutate state for the first time** (`chat_action`). Handoff: `docs/claude-a0-a4-review-fixes-2026-09-22.md`.
+**Done in the 2026-09-10 → 09-22 development-recovery + A0–A4 cycle (Codex, `05ea921` + `00b3e86`, pushed to `origin/main`; **DEPLOYED to prod 2026-09-25** with the A4 batch and `1ef69de` — see the [deploy record](docs/deploy-record-a0-a4-2026-09-25.md); TWO migrations `019a556f37dd` → `a0d5b179c368`):** Codex seeded the development database by mistake and recreated Esporão, Conqueiros and Amendoas do Lago; production was never touched. A selective recovery (approved, rehearsed on a clone first) restored the original identities and historical subtrees on 2026-09-21 with ~20 min of application downtime, archiving the replacement farms rather than deleting them — [record](docs/development-recovery-completed-2026-09-21.md). **The permanent consequence is that archived replacement probes keep the same provider `external_id` as the restored active probes**, which is why `active_probes_stmt(farm_id=...)` exists. A0–A4 of the AI action plan then landed: chat grounding + evidence citation, foreign-scope rejection on LLM tools, deterministic confidence (the old `max(…, 0.75)` floor is gone), a durable chat-turn identity, and a proposed-action lifecycle in which **confirmed LLM output can mutate state for the first time** (`chat_action`). Handoff: `docs/claude-a0-a4-review-fixes-2026-09-22.md`.
 
 **Independent review of A0–A4 (Claude Code, 2026-09-23, four parallel reviewers) — `docs/claude-a0-a4-independent-review-2026-09-23.md`. Verdict at review: DO NOT DEPLOY `05ea921` as it stood — six blocking defects. All six were FIXED the same day, test-first, and committed; the live eval then passed 28/28 against the fixed validator. See the review doc's "Fixes applied" section.** The structure is sound and the parts most likely to be wrong came back clean — tenant isolation on the new tool surface (every tool goes through `AccessController`; model-supplied scope mismatching the conversation is rejected before dispatch), confirm/cancel concurrency (a conditional `UPDATE … RETURNING`, genuinely atomic, not a Python check that would race across `uvicorn --workers 4`), and both migrations. The blocking defects concentrate in one regex gate and one counter:
 - **The grounding validator's engine-authority checks are bypassable by ordinary Portuguese.** `chat_grounding._advises` splits clauses only on `.;!?\n` + `mas/porém/contudo`, so a comma-joined sentence is one clause and any earlier `não`/`sem`/`nunca` suppresses the directive match — which gates `engine_conflict`, `engine_dose` **and** `missing_engine`. Reproduced: *"Hoje não choveu, por isso deves regar 12 mm."* against an engine `skip` is marked `validated`, no banner. Separately, `supports()` grounds a dose against the union of all 14 `_MM_KEYS` in the turn, so an invented "dotação de 120 mm" validates off `taw_mm`; and the skip direction is barely detected (`podes saltar a rega`, `não é preciso regar hoje`, `podes esperar` all invisible), so **suppressing** irrigation on an `irrigate` sector is essentially unguarded. **Fixed by attachment, not by more regex:** a negation now inverts a directive only when every word between them is modal/advice vocabulary (`_NEGATION_BRIDGE_RE`), a negated irrigation directive counts as a skip stance (`_advises_skip`), and dose-labelled numbers bind only to the engine dose or an applied amount (`_DOSE_KEYS`). **This is the second swing of a pendulum** — the 2026-09-10 negation scan was itself a fix for negated advice being read as irrigation advice — so if you touch it, keep BOTH test classes green (`TestNegatedDirectives` and `TestEngineAuthorityCannotBeBypassed`) and keep the bridge list to words that cannot introduce their own proposition.
@@ -370,7 +362,7 @@ Detailed tracking in `docs/handoff-codex-2026-06-17.md`.
 - **Confirming a chat calibration clears `is_customized` and overwrites an agronomist's manual CC/PMP**, disclosed to the user as the single fixed sentence "Correr a calibração inteligente do setor."; the card never renders `action_type` or `params`. And a model-authored `depth_mm` is persisted via `float(depth)` with no bounds check — the only model-supplied number that becomes a persisted agronomic value, and the only one not passed through `_bounded_int`.
 Deploy sequence, pre-checks and lock guidance (the `chat_message → recommendation` FK needs `lock_timeout` and a window outside 03:50–05:30 UTC) are in `docs/deploy-plan-a0-a4-2026-09-23.md`. **`docs/runbooks/deploy.md` is stale** — it uses two Compose files and the containerised nginx; this host needs all three including `docker-compose.caddy.yml` or public 502s follow.
 
-**A4 verification cycle (Claude Code, 2026-09-23, `80f9716`..`a6c3ea1`, pushed 2026-09-24; not deployed; no migration) — gate NOT passed; see `docs/a4-completion-report-2026-09-23.md`.** Local evidence complete; production migration/deploy/Caddy streaming, human review (`docs/a4-human-review-pack-2026-09-23.md`) and the pilot (`docs/a4-pilot-protocol-2026-09-23.md`) remain. Lessons worth keeping:
+**A4 verification cycle (Claude Code, 2026-09-23, `80f9716`..`a6c3ea1`, pushed 2026-09-24; **deployed 2026-09-25**; no migration) — gate NOT passed; see `docs/a4-completion-report-2026-09-23.md`.** Local evidence complete; production migration/deploy/Caddy streaming, human review (`docs/a4-human-review-pack-2026-09-23.md`) and the pilot (`docs/a4-pilot-protocol-2026-09-23.md`) remain. Lessons worth keeping:
 - **A pass count is not evidence.** Every earlier live "28/28" was blind to the farm summary calling an unassessed sector "sem necessidade", because nothing checked no-need claims. The eval now records per case (`AI_EVAL_REPORT`) repairs, fallbacks, drafts, latency and tokens; judge the report, and replay old bad outputs against a changed check before trusting a clean run.
 - **Prompt edits to fix one case can break others** — the first prompt fix took `farm-no-irrigation` from 0/10 to 9/10 failing. Measure every farm case ×10 after any farm-prompt change, and prefer a deterministic guard for decision fields.
 - **The SSE browser test runs the production standalone build** (`npm run e2e:chat-review`, CI job `frontend-chat-stream`) and fails without `Cache-Control: no-transform` — the Next server buffers otherwise. It does not verify Caddy.
